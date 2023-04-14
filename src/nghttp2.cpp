@@ -58,7 +58,7 @@ void write_query_parser(std::ostream& os, const openapi::Operation::Parameters& 
 		if (p.in() != "query")
 			continue;
 		write_multiline_comment(os, p.description(), indent);
-		p.Print(os, p.name(), indent);
+		//p.Print(os, p.name(), indent); // TODO
 	}
 	os << indent << "decompose_http_query(req.uri().raw_query, [&](std::string_view k, std::string_view v) {\n";
 	indent.push_back('\t');

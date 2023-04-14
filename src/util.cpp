@@ -37,7 +37,7 @@ void sanitize(std::string& input) {
 		input.begin(),
 		input.end(),
 		[](char c) -> bool {
-			constexpr auto chars = std::array{'/', '-', '.', ':', '+'};
+			constexpr auto chars = std::array{'/', '-', '.', ':', '+', ' ', '(', ')'};
 			return std::any_of(chars.begin(), chars.end(), [c](char d) { return c == d; });
 		},
 		'_');

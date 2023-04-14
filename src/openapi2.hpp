@@ -52,7 +52,11 @@ public:
 			: simdjson::dom::array::iterator() {}
 		Iterator(simdjson::dom::array::iterator&& it)
 			: simdjson::dom::array::iterator(std::move(it)) {}
-		inline T operator*() const { return T(simdjson::dom::array::iterator::operator*()); }
+		//inline T operator*() const { return T(simdjson::dom::array::iterator::operator*()); }
+		inline T operator*() const {
+			auto res = simdjson::dom::array::iterator::operator*();
+			return T(res);
+		}
 	};
 	using iterator_type = Iterator;
 
@@ -76,12 +80,16 @@ class MapAdaptor final : public simdjson::dom::object {
 public:
 	class Iterator final : public simdjson::dom::object::iterator {
 	public:
-		using value_type = std::pair<std::string_view, T>;
+		struct value_type {
+			std::string_view str;
+			T val;
+		};
+
 		Iterator()
 			: simdjson::dom::object::iterator() {}
 		Iterator(simdjson::dom::object::iterator&& it)
 			: simdjson::dom::object::iterator(std::move(it)) {}
-		inline const value_type operator*() const { return value_type{this->key(), T(this->value())}; }
+		inline const value_type operator*() const { return value_type{this->key(), T(this->value().get_object())}; }
 	};
 	using iterator_type = Iterator;
 	MapAdaptor()
@@ -103,48 +111,38 @@ template <typename T>
 class OpenAPIObject {
 public:
 	OpenAPIObject()
-		: _json()
-		, _is_valid(false) {}
-	OpenAPIObject(simdjson::dom::element&& json)
-		: _json(json)
-		, _is_valid(true) {}
+		: _is_valid(false)
+		, _json() {}
+	OpenAPIObject(simdjson::dom::object&& json)
+		: _is_valid(true)
+		, _json(json) {}
 	OpenAPIObject(const OpenAPIObject& other)
-		: _json(other._json)
-		, _is_valid(other._is_valid) {}
+		: _is_valid(other._is_valid)
+		, _json(other._json) {}
 	OpenAPIObject(OpenAPIObject&& other)
-		: _json(std::move(other._json))
-		, _is_valid(std::move(other._is_valid)) {}
-	OpenAPIObject(const simdjson::internal::simdjson_result_base<simdjson::dom::element>& ec) {
-		_is_valid = ec.error() == simdjson::error_code();
-		_json = _is_valid ? ec.value_unsafe() : decltype(_json)();
-	}
-
-	// Prints interpreted C++ code to the stream.
-	virtual void Print(std::ostream&, std::string_view name, std::string& indent) const = 0;
+		: _is_valid(std::move(other._is_valid))
+		, _json(std::move(other._json)) {}
+	OpenAPIObject(const simdjson::internal::simdjson_result_base<simdjson::dom::object>& ec)
+		: _is_valid(ec.error() == simdjson::error_code())
+		, _json(_is_valid ? ec.value_unsafe() : decltype(_json)()) {}
 
 	// True if this object is valid JSON, otherwise false.
 	inline operator bool() const noexcept { return _is_valid; }
 
-	// Dumps raw JSON to the stream.
-	std::ostream& operator<<(std::ostream& out) const {
-		_json.dump_raw_tape(out);
-		return out;
-	}
-
 protected:
 	template <typename U>
 	U _GetObjectIfExist(std::string_view key) const {
-		const auto& v = _json.get_object()[key];
+		const auto& v = _json.at_key(key);
 		return simdjson_noerror(v) ? U(v) : U();
 	}
 	template <typename U>
 	U _GetValueIfExist(std::string_view key) const {
-		const auto& v = _json.get_object()[key];
+		const auto& v = _json.at_key(key);
 		return simdjson_noerror(v) ? v.get<U>().value() : U();
 	}
 
-	simdjson::dom::element _json;
 	bool _is_valid;
+	simdjson::dom::object _json;
 };
 
 } // namespace __detail
@@ -155,8 +153,6 @@ public:
 
 	std::string_view description() const;
 	std::string_view url() const;
-
-	void Print(std::ostream&, std::string_view name, std::string& indent) const override;
 };
 
 class Tag : public __detail::OpenAPIObject<Tag> {
@@ -166,8 +162,6 @@ public:
 	std::string_view name() const;
 	std::string_view description() const;
 	ExternalDocumentation externalDocs() const;
-
-	void Print(std::ostream&, std::string_view name, std::string& indent) const override;
 };
 
 // A limited subset of JSON-Schema's items object. It is used by parameter definitions that are not located in "body".
@@ -197,8 +191,6 @@ public:
 	bool IsReference() const noexcept;
 	// If the key of this item is $ref, then retrieve the name of the referenced object type.
 	std::string_view reference() const;
-
-	virtual void Print(std::ostream&, std::string_view name, std::string& indent) const override;
 };
 
 class Schema : public Item {
@@ -206,6 +198,8 @@ public:
 	using Item::Item;
 	using Enum = __detail::ListAdaptor<std::string_view>;
 	using NestedSchema = __detail::MapAdaptor<Schema>;
+	Schema(Item& item)
+		: Item(item) {}
 
 	std::string_view title() const;
 	std::string_view description() const;
@@ -215,13 +209,13 @@ public:
 	bool required() const;
 	Enum enum_() const;
 	NestedSchema properties() const;
-
-	void Print(std::ostream&, std::string_view name, std::string& indent) const override;
 };
 
 class Parameter : public Item {
 public:
 	using Item::Item;
+	Parameter(Item& item)
+		: Item(item) {}
 
 	std::string_view name() const;
 	std::string_view in() const;
@@ -230,17 +224,15 @@ public:
 
 	// If 'in' is 'body'
 	Schema schema() const;
-
-	void Print(std::ostream&, std::string_view name, std::string& indent) const override;
 };
 
 class Header : public Item {
 public:
 	using Item::Item;
+	Header(Item& item)
+		: Item(item) {}
 
 	std::string_view description() const;
-
-	void Print(std::ostream&, std::string_view name, std::string& indent) const override;
 };
 
 class Response : public __detail::OpenAPIObject<Response> {
@@ -251,8 +243,6 @@ public:
 	std::string_view description() const;
 	Schema schema() const;
 	Headers headers() const;
-
-	void Print(std::ostream&, std::string_view name, std::string& indent) const override;
 };
 
 class Operation : public __detail::OpenAPIObject<Operation> {
@@ -270,8 +260,6 @@ public:
 	Parameters parameters() const;
 	Responses responses() const;
 	bool deprecated() const;
-
-	void Print(std::ostream&, std::string_view name, std::string& indent) const override;
 };
 
 class Path : public __detail::OpenAPIObject<Path> {
@@ -280,8 +268,6 @@ public:
 	using Operations = __detail::MapAdaptor<Operation>;
 
 	Operations operations() const { return Operations(_json); }
-
-	void Print(std::ostream&, std::string_view name, std::string& indent) const override;
 };
 
 class Info : public __detail::OpenAPIObject<Info> {
@@ -292,8 +278,6 @@ public:
 	std::string_view description() const;
 	std::string_view terms_of_service() const;
 	std::string_view version() const;
-
-	void Print(std::ostream&, std::string_view name, std::string& indent) const override;
 };
 
 class OpenAPI2 : private __detail::OpenAPIObject<OpenAPI2> {
@@ -321,15 +305,9 @@ public:
 	// Should return false if JSON parsing fails or if file is not an OpenAPI swagger file.
 	bool Load(const std::string& path);
 
-	void Print(std::ostream& os) const {
-		std::string indent = "";
-		Print(os, "", indent);
-	}
-
 	Schema GetDefinedSchemaByReference(std::string_view);
 
 private:
-	void Print(std::ostream&, std::string_view name, std::string& indent) const override;
 
 	simdjson::dom::parser _parser; // Lifetime of document depends on lifetime of parser, so parser must be kept alive.
 								   // simdjson::dom::element _root;

@@ -99,7 +99,7 @@ ExternalDocumentation OpenAPI2::externalDocs() const { return _GetObjectIfExist<
 
 // Should return false if JSON parsing fails or if file is not an OpenAPI swagger file.
 bool OpenAPI2::Load(const std::string& path) {
-	_json = _parser.load(path);
+	_json = _parser.load(path).get_object();
 	return true;
 }
 
@@ -114,6 +114,7 @@ Schema OpenAPI2::GetDefinedSchemaByReference(std::string_view reference) {
 
 std::string SynthesizeFunctionName(std::string_view pathstr, RequestMethod verb) {
 	auto name = sanitize(pathstr);
+    std::replace_if(name.begin(), name.end(), [](char c) {return c == '{' || c == '}'; }, '_');
 	name = std::string(RequestMethodToString(verb)) + '_' + name;
 	return name;
 }
