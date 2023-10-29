@@ -87,81 +87,92 @@ std::string_view JsonTypeToCppType(std::string_view type, std::string_view forma
 	return "std::any"; // Unknown type (possibly 'object')
 };
 
+void PrintReferenceSchema(std::ostream& os, std::string_view name, const openapi::Schema& schema, std::string& indent);
+void PrintObjectSchema(std::ostream& os, std::string_view name, const openapi::Schema& schema, std::string& indent);
+void PrintArraySchema(std::ostream& os, std::string_view name, const openapi::Schema& schema, std::string& indent);
+
 void PrintSchema(std::ostream& os, std::string_view name, const openapi::Schema& schema, std::string& indent) {
 	write_multiline_comment(os, schema.description(), indent);
 	if (schema.IsReference()) {
-		if (indent.empty()) {
-			// Top-level reference: Use it as a typedef synonym
-			os << "using " << name << " = " << sanitize(schema.reference()) << ";\n";
-		} else {
-			// Not a top-level reference, then it is nested and needs a member declaration.
-			os << indent << schema.reference() << ' ' << name << ";\n";
-		}
+		PrintReferenceSchema(os, name, schema, indent);
 	} else if (schema.type() == "object") {
-		os << indent << "struct " << name << " {\n";
-		indent.push_back('\t');
-		if (const auto properties = schema.properties(); !properties.empty()) {
-			for (const auto& [propname, prop] : properties) {
-				PrintSchema(os, sanitize(propname), prop, indent);
-			}
-		} else {
-			// Object with no properties, save as raw data
-			os << indent << "std::string data;\n";
-		}
-		indent.pop_back();
-		os << indent << "};\n";
-
-		// If this isn't a top-level struct, then it is nested and needs a member declaration.
-		if (!indent.empty()) {
-			os << indent << name << ' ' << name << "_;\n";
-		}
-
-		os << std::endl;
+		PrintObjectSchema(os, name, schema, indent);
 	} else if (schema.type() == "array") {
-		const auto items = schema.items();
-		const auto& subschema = static_cast<const openapi::Schema&>(items);
-		write_multiline_comment(os, subschema.description(), indent);
-		if (const auto properties = subschema.properties(); !properties.empty()) {
-			// Schema declared inline
-			os << indent << "struct " << name << "_entry {\n";
-			indent.push_back('\t');
-			for (const auto& [propname, prop] : subschema.properties()) {
-				PrintSchema(os, sanitize(propname), prop, indent);
-			}
-			indent.pop_back();
-			os << indent << "};\n";
-
-			if (indent.empty()) {
-				// Top-level array declaration: Use it as a typedef
-				os << "using " << name << " = std::vector<" << name << "_entry>;\n";
-			} else {
-				// Not a top-level array, then it nested and needs a member declaration.
-				os << indent << "std::vector<" << name << "_entry> " << name << ";\n";
-			}
-		} else if (subschema.IsReference()) {
-			if (indent.empty()) {
-				// Top-level array of schema
-				os << "using " << name << " = std::vector<" << sanitize(subschema.reference()) << ">;\n";
-			} else {
-				// Nested array of schema
-				os << indent << "std::vector<" << sanitize(subschema.reference()) << "> " << name << ";\n";
-			}
-		} else {
-			os << indent << "std::vector<" << openapi::JsonTypeToCppType(subschema.type()) << "> " << name << ";\n";
-		}
-
-		os << std::endl;
+		PrintArraySchema(os, name, schema, indent);
 	} else if (schema.type().empty()) {
 		if (const auto item = schema.items(); item) {
 			const auto& subschema = static_cast<const openapi::Schema&>(item);
-			write_multiline_comment(os, subschema.description(), indent);
 			PrintSchema(os, name, subschema, indent);
 		} else {
-			os << indent << "std::string " << name << ";\n";
+			PrintObjectSchema(os, name, schema, indent);
 		}
 	} else {
 		os << indent << openapi::JsonTypeToCppType(schema.type()) << ' ' << name << ";\n";
 	}
+}
+
+void PrintReferenceSchema(std::ostream& os, std::string_view name, const openapi::Schema& schema, std::string& indent) {
+	if (indent.empty()) {
+		// Top-level reference: Use it as a typedef synonym
+		os << "using " << name << " = " << sanitize(schema.reference()) << ";\n";
+	} else {
+		// Not a top-level reference, then it is nested and needs a member declaration.
+		os << indent << schema.reference() << ' ' << name << ";\n";
+	}
+}
+
+void PrintObjectSchema(std::ostream& os, std::string_view name, const openapi::Schema& schema, std::string& indent) {
+	os << indent << "struct " << name << " {\n";
+	indent.push_back('\t');
+	if (const auto properties = schema.properties(); !properties.empty()) {
+		for (const auto& [propname, prop] : properties) {
+			PrintSchema(os, sanitize(propname), prop, indent);
+		}
+	} else {
+		// Object with no properties, save as raw data
+		os << indent << "std::string data;\n";
+	}
+	indent.pop_back();
+	os << indent << "};\n";
+	// If this isn't a top-level struct, then it is nested and needs a member declaration.
+	if (!indent.empty()) {
+		os << indent << name << ' ' << name << "_;\n";
+	}
+	os << std::endl;
+}
+
+void PrintArraySchema(std::ostream& os, std::string_view name, const openapi::Schema& schema, std::string& indent) {
+	const auto items = schema.items();
+	const auto& subschema = static_cast<const openapi::Schema&>(items);
+	write_multiline_comment(os, subschema.description(), indent);
+	if (const auto properties = subschema.properties(); !properties.empty()) {
+		// Schema declared inline
+		os << indent << "struct " << name << "_entry {\n";
+		indent.push_back('\t');
+		for (const auto& [propname, prop] : subschema.properties()) {
+			PrintSchema(os, sanitize(propname), prop, indent);
+		}
+		indent.pop_back();
+		os << indent << "};\n";
+		if (indent.empty()) {
+			// Top-level array declaration: Use it as a typedef
+			os << "using " << name << " = std::vector<" << name << "_entry>;\n";
+		} else {
+			// Not a top-level array, then it nested and needs a member declaration.
+			os << indent << "std::vector<" << name << "_entry> " << name << ";\n";
+		}
+	} else if (subschema.IsReference()) {
+		if (indent.empty()) {
+			// Top-level array of schema
+			os << "using " << name << " = std::vector<" << sanitize(subschema.reference()) << ">;\n";
+		} else {
+			// Nested array of schema
+			os << indent << "std::vector<" << sanitize(subschema.reference()) << "> " << name << ";\n";
+		}
+	} else {
+		os << indent << "std::vector<" << openapi::JsonTypeToCppType(subschema.type()) << "> " << name << ";\n";
+	}
+	os << std::endl;
 }
 
 void PrintJSONValueFromTagDeclaration(std::ostream& out, std::string_view name, const openapi::Schema& schema) {
@@ -169,11 +180,12 @@ void PrintJSONValueFromTagDeclaration(std::ostream& out, std::string_view name, 
 		return;
 	}
 	// We only care about objects here
-	if (schema.type() != "object") {
+	if (schema.type() != "object" && schema.type() != "array" && schema.properties().empty()) {
 		return;
 	}
 
-	out << "void tag_invoke(boost::json::value_from_tag, boost::json::value& jv, const " << name << "& v);\n" << std::endl;
+	out << "void tag_invoke(boost::json::value_from_tag, boost::json::value& jv, const " << name << "& v);\n"
+		<< std::endl;
 }
 
 void PrintJSONValueFromTag(std::ostream& out, std::string_view name, const openapi::Schema& schema) {
@@ -181,7 +193,7 @@ void PrintJSONValueFromTag(std::ostream& out, std::string_view name, const opena
 		return;
 	}
 	// We only care about objects here
-	if (schema.type() != "object") {
+	if (schema.type() != "object" && schema.type() != "array" && schema.properties().empty()) {
 		return;
 	}
 
@@ -220,11 +232,12 @@ void PrintJSONValueToTagDeclaration(std::ostream& out, std::string_view name, co
 		return;
 	}
 	// We only care about objects here
-	if (schema.type() != "object") {
+	if (schema.type() != "object" && schema.type() != "array" && schema.properties().empty()) {
 		return;
 	}
 
-	out << name << " tag_invoke(boost::json::value_to_tag<" << name << ">, const boost::json::value& jv);\n" << std::endl;
+	out << name << " tag_invoke(boost::json::value_to_tag<" << name << ">, const boost::json::value& jv);\n"
+		<< std::endl;
 }
 
 void PrintJSONValueToTag(std::ostream& out, std::string_view name, const openapi::Schema& schema) {
@@ -247,26 +260,29 @@ void PrintJSONValueToTag(std::ostream& out, std::string_view name, const openapi
 	for (const auto& [propname, prop] : schema.properties()) {
 		const auto sanitized_propname = sanitize(propname);
 		if (prop.IsReference()) {
-			out << "\tret." << sanitized_propname << " = js::value_to<" << prop.reference() << ">(obj.at(\"" << propname << "\"));\n";
+			out << "\tret." << sanitized_propname << " = js::value_to<" << prop.reference() << ">(obj.at(\"" << propname
+				<< "\"));\n";
 		} else if (prop.type() == "object") {
 			nested_objects.emplace(sanitized_propname, prop);
-			out << "\tret." << sanitized_propname << "_ = js::value_to<decltype(ret." << sanitized_propname << "_)>(obj.at(\"" << propname << "\"));\n";
+			out << "\tret." << sanitized_propname << "_ = js::value_to<decltype(ret." << sanitized_propname
+				<< "_)>(obj.at(\"" << propname << "\"));\n";
 		} else if (prop.type() == "array") {
 			const auto item = prop.items();
 			const auto& subschema = static_cast<const openapi::Schema&>(item);
 			if (subschema.IsReference()) {
-				out << "\tret." << sanitized_propname << " = js::value_to<std::vector<" << sanitize(subschema.reference()) << ">>(obj.at(\"" << propname
-					<< "\"));\n";
+				out << "\tret." << sanitized_propname << " = js::value_to<std::vector<"
+					<< sanitize(subschema.reference()) << ">>(obj.at(\"" << propname << "\"));\n";
 			} else if (subschema.type() == "object" || !subschema.properties().empty()) {
 				nested_objects.emplace(sanitized_propname + "_entry", subschema);
 			} else {
-				out << "\tret." << sanitized_propname << " = js::value_to<std::vector<" << openapi::JsonTypeToCppType(subschema.type()) << ">>(obj.at(\""
-					<< propname << "\"));\n";
+				out << "\tret." << sanitized_propname << " = js::value_to<std::vector<"
+					<< openapi::JsonTypeToCppType(subschema.type()) << ">>(obj.at(\"" << propname << "\"));\n";
 			}
 		} else if (prop.type().empty()) {
 			out << "\tret." << sanitized_propname << " = js::value_to<std::string>(obj.at(\"" << propname << "\"));\n";
 		} else {
-			out << "\tret." << sanitized_propname << " = js::value_to<" << openapi::JsonTypeToCppType(prop.type()) << ">(obj.at(\"" << propname << "\"));\n";
+			out << "\tret." << sanitized_propname << " = js::value_to<" << openapi::JsonTypeToCppType(prop.type())
+				<< ">(obj.at(\"" << propname << "\"));\n";
 		}
 	}
 	// If there were no properties for this object, default to 'data'.

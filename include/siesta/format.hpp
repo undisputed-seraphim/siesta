@@ -13,6 +13,10 @@ inline std::string& string_cast(std::string& str) noexcept {
 	return str;
 }
 
+inline const std::string& string_cast(const std::string& str) noexcept {
+	return str;
+}
+
 inline std::string string_cast(bool b) {
 	return b ? "true" : "false";
 }
