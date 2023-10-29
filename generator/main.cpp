@@ -7,6 +7,7 @@
 
 #include "openapi2.hpp"
 #include "util.hpp"
+#include "beast/beast.hpp"
 
 namespace fs = std::filesystem;
 namespace po = ::boost::program_options;
@@ -58,7 +59,7 @@ int main(int argc, char* argv[]) try {
 		return -1;
 	}
 
-	beast(input_json, output_dir, file);
+	siesta::beast::beast(input_json, output_dir, file);
 
 	openapi::PrintStructDefinitions(file, input_json, output_dir);
 

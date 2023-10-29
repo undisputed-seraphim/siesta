@@ -38,7 +38,9 @@ std::string_view Item::reference() const {
 	if (ref.empty()) {
 		return ref;
 	}
-	ref.remove_prefix(def_refstr.size());
+	if (ref.starts_with(def_refstr)) {
+		ref.remove_prefix(def_refstr.size());
+	}
 	return ref;
 }
 

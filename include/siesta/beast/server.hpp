@@ -1,14 +1,20 @@
 #pragma once
 
 #include <array>
+#include <boost/asio/dispatch.hpp>
+#include <boost/asio/io_context.hpp>
+#include <boost/asio/ip/address.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/system_timer.hpp>
 #include <boost/beast/core.hpp>
+#include <boost/beast/core/tcp_stream.hpp>
 #include <boost/beast/http.hpp>
+#include <boost/beast/http/read.hpp>
 #include <functional>
+#include <memory>
 
-namespace siesta {
+namespace siesta::beast {
 
 class ServerBase {
 public:
@@ -17,43 +23,56 @@ public:
 	using protocol = ::boost::asio::ip::tcp;
 	using ec_t = ::boost::system::error_code;
 
-	ServerBase(boost::asio::io_context& ctx)
-		: _strand(ctx.get_executor())
-		, _acceptor(ctx)
-		, _on_error(&ServerBase::_default_on_error) {}
+	struct Config {};
 
-	void start(boost::asio::io_context& ctx, const protocol::endpoint& endpoint) {
-		auto ec = ec_t{};
-		_acceptor.open(endpoint.protocol(), ec);
-		if (ec) {
-			_on_error(ec, "acceptor::open");
-			return;
-		}
-		_acceptor.set_option(protocol::socket::reuse_address(true), ec);
-		_acceptor.bind(endpoint, ec);
-		if (ec) {
-			_on_error(ec, "acceptor::bind");
-			return;
-		}
-		_acceptor.listen(64, ec);
-		if (ec) {
-			_on_error(ec, "acceptor::listen");
-			return;
-		}
-		_acceptor.async_accept(ctx, std::bind_front(&std::remove_reference_t<decltype(*this)>::_on_accept, this));
-	}
+	class Session : public std::enable_shared_from_this<Session> {
+	public:
+		using Ptr = std::shared_ptr<Session>;
+		Session(ServerBase&, protocol::socket, Config, uint64_t);
+		~Session() noexcept;
+
+		void run();
+		uint64_t id() const { return _id; }
+
+		response& get_response() noexcept { return _response; }
+		void write();
+
+	protected:
+		friend ServerBase;
+
+		ServerBase& _parent;
+		::boost::beast::tcp_stream _stream;
+		::boost::beast::flat_buffer _buffer;
+		request _request;
+		response _response;
+		Config _config;
+		uint64_t _id;
+
+		void do_read();
+		void on_read(ec_t, std::size_t);
+		void on_write(ec_t, std::size_t);
+		void do_close();
+	};
+
+	ServerBase(boost::asio::io_context&, Config = {});
+
+	void start(boost::asio::io_context&, const ::boost::asio::ip::address, uint16_t);
+	void start(boost::asio::io_context&, const protocol::endpoint&);
+
+	virtual void handle_request(const request, Session::Ptr) = 0;
 
 protected:
-	boost::asio::strand<boost::asio::system_timer::executor_type> _strand;
+	Config _conf;
 	protocol::acceptor _acceptor;
-	std::function<void(const ec_t&, std::string_view)> _on_error;
+	std::atomic<uint64_t> _client_id{0};
 
-	void _on_accept(const ec_t& ec, protocol::socket socket) { ::boost::asio::post(_strand, ) }
-
-	inline static void _default_on_error(const ec_t&, std::string_view str) {
-		// no-op
-		fprintf(stderr, "%s\n", str.data());
-	}
+	void on_accept(boost::asio::io_context&, const ec_t&, protocol::socket);
 };
 
-} // namespace siesta
+namespace __detail {
+struct MapHash {
+	std::size_t operator()(const std::pair<std::string_view, boost::beast::http::verb>& v) const;
+};
+} // namespace __detail
+
+} // namespace siesta::beast
