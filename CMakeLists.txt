@@ -41,3 +41,4 @@ target_link_libraries(siesta-generator PUBLIC
 )
 
 add_subdirectory(output)
+add_subdirectory(tests)
