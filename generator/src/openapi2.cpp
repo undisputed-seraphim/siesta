@@ -3,16 +3,35 @@
 
 using namespace std::literals;
 
-namespace openapi {
+namespace openapi::v2 {
 
-// ExternalDocumentation
-std::string_view ExternalDocumentation::description() const { return _GetValueIfExist<std::string_view>("description"); }
-std::string_view ExternalDocumentation::url() const { return _GetValueIfExist<std::string_view>("url"); }
+// String
+uint64_t String::maxLength() const { return _GetValueIfExist<uint64_t>("maxLength"); }
+uint64_t String::minLength() const { return _GetValueIfExist<uint64_t>("minLength"); }
+std::string_view String::pattern() const { return _GetValueIfExist<std::string_view>("pattern"); }
 
-// Tag
-std::string_view Tag::name() const { return _GetValueIfExist<std::string_view>("url"); }
-std::string_view Tag::description() const { return _GetValueIfExist<std::string_view>("description"); }
-ExternalDocumentation Tag::externalDocs() const { return _GetObjectIfExist<ExternalDocumentation>("externalDocs"); }
+// Number
+uint64_t Number::minimum() const { return _GetValueIfExist<uint64_t>("minimum"); }
+bool Number::exclusiveMinimum() const { return _GetValueIfExist<bool>("exclusiveMinimum"); }
+uint64_t Number::maximum() const { return _GetValueIfExist<uint64_t>("maximum"); }
+bool Number::exclusiveMaximum() const { return _GetValueIfExist<bool>("exclusiveMaximum"); }
+int64_t Number::multipleOf() const { return _GetValueIfExist<int64_t>("multipleOf"); }
+
+// Object
+std::string_view Object::title() const { return _GetValueIfExist<std::string_view>("title"); }
+std::string_view Object::description() const { return _GetValueIfExist<std::string_view>("description"); }
+int64_t Object::maxProperties() const { return _GetValueIfExist<int64_t>("maxProperties"); }
+int64_t Object::minProperties() const { return _GetValueIfExist<int64_t>("minProperties"); }
+bool Object::required() const { return _GetValueIfExist<bool>("required"); }
+Object::Enum Object::enum_() const { return _GetObjectIfExist<Object::Enum>("enum"); }
+Schema2 Object::properties() const { return _GetObjectIfExist<Schema2>("properties"); }
+
+// Array
+Schema2 Array::items() const { return _GetObjectIfExist<Schema2>("items"); }
+std::string_view Array::collectionFormat() const { return _GetValueIfExist<std::string_view>("collectionFormat"); }
+int64_t Array::maxItems() const { return _GetValueIfExist<int64_t>("maxItems"); }
+int64_t Array::minItems() const { return _GetValueIfExist<int64_t>("minItems"); }
+bool Array::uniqueItems() const { return _GetValueIfExist<bool>("uniqueItems"); }
 
 // Item
 std::string_view Item::type() const { return _GetValueIfExist<std::string_view>("type"); }
@@ -60,6 +79,28 @@ std::string_view Parameter::description() const { return _GetValueIfExist<std::s
 bool Parameter::required() const { return _GetValueIfExist<bool>("required"); }
 Schema Parameter::schema() const { return _GetObjectIfExist<Schema>("schema"); }
 
+Schema BodyParameter::schema() const { return _GetObjectIfExist<Schema>("schema"); }
+
+Parameter::Location Parameter::In() const noexcept {
+	const auto sv = in();
+	if (sv == "path") {
+		return Location::path;
+	}
+	if (sv == "query") {
+		return Location::query;
+	}
+	if (sv == "header") {
+		return Location::header;
+	}
+	if (sv == "body") {
+		return Location::body;
+	}
+	if (sv == "form") {
+		return Location::form;
+	}
+	return Location::unknown;
+}
+
 // Header
 std::string_view Header::description() const { return _GetValueIfExist<std::string_view>("description"); }
 
@@ -69,43 +110,28 @@ Schema Response::schema() const { return _GetObjectIfExist<Schema>("schema"); }
 Response::Headers Response::headers() const { return _GetObjectIfExist<Response::Headers>("headers"); }
 
 // Operation
-Operation::Tags Operation::tags() const { return _GetObjectIfExist<Operation::Tags>("tags"); }
-std::string_view Operation::summary() const { return _GetValueIfExist<std::string_view>("summary"); }
-std::string_view Operation::description() const { return _GetValueIfExist<std::string_view>("description"); }
-ExternalDocumentation Operation::externalDocs() const { return _GetObjectIfExist<ExternalDocumentation>("externalDocs"); }
-std::string_view Operation::operationId() const { return _GetValueIfExist<std::string_view>("operationId"); }
 Operation::Parameters Operation::parameters() const { return _GetObjectIfExist<Operation::Parameters>("parameters"); }
 Operation::Responses Operation::responses() const { return _GetObjectIfExist<Operation::Responses>("responses"); }
-bool Operation::deprecated() const { return _GetValueIfExist<bool>("deprecated"); }
-
-// Info
-std::string_view Info::title() const { return _GetValueIfExist<std::string_view>("title"); }
-std::string_view Info::description() const { return _GetValueIfExist<std::string_view>("description"); }
-std::string_view Info::terms_of_service() const { return _GetValueIfExist<std::string_view>("terms_of_service"); }
-std::string_view Info::version() const { return _GetValueIfExist<std::string_view>("version"); }
+Operation::Consumes Operation::consumes() const { return _GetObjectIfExist<Operation::Tags>("consumes"); }
+Operation::Produces Operation::produces() const { return _GetObjectIfExist<Operation::Tags>("produces"); }
 
 // Root
-OpenAPI2::OpenAPI2(OpenAPI2&& other) noexcept
-	: OpenAPIObject(std::move(other))
-	, _parser(std::move(other._parser)) {}
 
-std::string_view OpenAPI2::swagger() const { return _GetObjectIfExist<std::string_view>("swagger"); }
-Info OpenAPI2::info() const { return _GetObjectIfExist<Info>("info"); }
-std::string_view OpenAPI2::host() const { return _GetObjectIfExist<std::string_view>("host"); }
-std::string_view OpenAPI2::basePath() const { return _GetObjectIfExist<std::string_view>("basePath"); }
-OpenAPI2::Paths OpenAPI2::paths() const { return _GetObjectIfExist<OpenAPI2::Paths>("paths"); }
-OpenAPI2::Definitions OpenAPI2::definitions() const { return _GetObjectIfExist<OpenAPI2::Definitions>("definitions"); }
-OpenAPI2::Parameters OpenAPI2::parameters() const { return _GetObjectIfExist<OpenAPI2::Parameters>("parameters"); }
-OpenAPI2::Tags OpenAPI2::tags() const { return _GetObjectIfExist<OpenAPI2::Tags>("tags"); }
-ExternalDocumentation OpenAPI2::externalDocs() const { return _GetObjectIfExist<ExternalDocumentation>("externalDocs"); }
-
-// Should return false if JSON parsing fails or if file is not an OpenAPI swagger file.
-bool OpenAPI2::Load(const std::string& path) {
-	_json = _parser.load(path).get_object();
-	return true;
+std::string_view OpenAPIv2::swagger() const { return _GetObjectIfExist<std::string_view>("swagger"); }
+Info OpenAPIv2::info() const { return _GetObjectIfExist<Info>("info"); }
+std::string_view OpenAPIv2::host() const { return _GetObjectIfExist<std::string_view>("host"); }
+std::string_view OpenAPIv2::basePath() const { return _GetObjectIfExist<std::string_view>("basePath"); }
+OpenAPIv2::Paths OpenAPIv2::paths() const { return _GetObjectIfExist<OpenAPIv2::Paths>("paths"); }
+OpenAPIv2::Definitions OpenAPIv2::definitions() const {
+	return _GetObjectIfExist<OpenAPIv2::Definitions>("definitions");
+}
+OpenAPIv2::Parameters OpenAPIv2::parameters() const { return _GetObjectIfExist<OpenAPIv2::Parameters>("parameters"); }
+Tags OpenAPIv2::tags() const { return _GetObjectIfExist<Tags>("tags"); }
+ExternalDocumentation OpenAPIv2::externalDocs() const {
+	return _GetObjectIfExist<ExternalDocumentation>("externalDocs");
 }
 
-Schema OpenAPI2::GetDefinedSchemaByReference(std::string_view reference) {
+Schema OpenAPIv2::GetDefinedSchemaByReference(std::string_view reference) {
 	for (const auto& [schemaname, schema] : definitions()) {
 		if (schemaname == reference) {
 			return schema;
@@ -114,11 +140,4 @@ Schema OpenAPI2::GetDefinedSchemaByReference(std::string_view reference) {
 	return Schema();
 }
 
-std::string SynthesizeFunctionName(std::string_view pathstr, RequestMethod verb) {
-	auto name = sanitize(pathstr);
-    std::replace_if(name.begin(), name.end(), [](char c) {return c == '{' || c == '}'; }, '_');
-	name = std::string(RequestMethodToString(verb)) + '_' + name;
-	return name;
-}
-
-} // namespace openapi
+} // namespace openapi::v2

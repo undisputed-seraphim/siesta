@@ -13,7 +13,7 @@
 #include <functional>
 #include <memory>
 
-#include <siesta/asio/condition_variable.hpp>
+#include <siesta/asio/queue.hpp>
 #include <siesta/beast/error.hpp>
 #include <siesta/format.hpp>
 
@@ -76,9 +76,9 @@ protected:
 	enum { send, recv, done } _state;
 
 	template <::boost::asio::completion_token_for<void(outcome_type)> CompletionToken>
-	auto async_submit_request(CompletionToken&& token) {
+	auto async_submit_request(request_type req, CompletionToken&& token) {
 		return ::boost::asio::async_compose<CompletionToken, void(outcome_type)>(
-			[this, lifetime = shared_from_this()](
+			[this, lifetime = shared_from_this(), req = std::forward<request_type>(req)](
 				auto& self, ::boost::system::error_code error = {}, std::size_t bytes = 0) -> void {
 				namespace http = ::boost::beast::http;
 				if (error) {
@@ -89,7 +89,7 @@ protected:
 				case send: {
 					_state = recv;
 					_stream.expires_after(_conf.write_timeout);
-					http::async_write(_stream, _request, std::move(self));
+					http::async_write(_stream, req, std::move(self));
 					return;
 				}
 				case recv: {

@@ -1,97 +1,20 @@
 #include "openapi2.hpp"
 #include "util.hpp"
-#include <filesystem>
 #include <fstream>
 
 namespace fs = std::filesystem;
 
-namespace openapi {
+namespace openapi::v2 {
 
-RequestMethod RequestMethodFromString(std::string_view key) {
-	if (key == "post" || key == "POST") {
-		return RequestMethod::POST;
-	}
-	if (key == "put" || key == "PUT") {
-		return RequestMethod::PUT;
-	}
-	if (key == "get" || key == "GET") {
-		return RequestMethod::GET;
-	}
-	if (key == "delete" || key == "DELETE") {
-		return RequestMethod::DELETE;
-	}
-	if (key == "patch" || key == "PATCH") {
-		return RequestMethod::PATCH;
-	}
-	if (key == "head" || key == "HEAD") {
-		return RequestMethod::HEAD;
-	}
-	if (key == "connect" || key == "CONNECT") {
-		return RequestMethod::CONNECT;
-	}
-	if (key == "options" || key == "OPTIONS") {
-		return RequestMethod::OPTIONS;
-	}
-	if (key == "trace" || key == "TRACE") {
-		return RequestMethod::TRACE;
-	}
-	return RequestMethod::UNKNOWN;
-}
+void PrintReferenceSchema(
+	std::ostream& os,
+	std::string_view name,
+	const openapi::v2::Schema& schema,
+	std::string& indent);
+void PrintObjectSchema(std::ostream& os, std::string_view name, const openapi::v2::Schema& schema, std::string& indent);
+void PrintArraySchema(std::ostream& os, std::string_view name, const openapi::v2::Schema& schema, std::string& indent);
 
-std::string_view RequestMethodToString(RequestMethod rm) {
-	switch (rm) {
-	case RequestMethod::CONNECT:
-		return "connect";
-	case RequestMethod::DELETE:
-		return "delete";
-	case RequestMethod::GET:
-		return "get";
-	case RequestMethod::HEAD:
-		return "head";
-	case RequestMethod::OPTIONS:
-		return "options";
-	case RequestMethod::PATCH:
-		return "patch";
-	case RequestMethod::POST:
-		return "post";
-	case RequestMethod::PUT:
-		return "put";
-	case RequestMethod::TRACE:
-		return "trace";
-	default:
-		break;
-	}
-	return "unknown";
-}
-
-// Only for simple types.
-std::string_view JsonTypeToCppType(std::string_view type, std::string_view format) {
-	if (type == "string") {
-		return "std::string";
-	}
-	if (type == "number") {
-		if (format == "double") {
-			return "double";
-		}
-		return "float";
-	}
-	if (type == "boolean") {
-		return "bool";
-	}
-	if (type == "integer") {
-		if (format == "int64") {
-			return "int64_t";
-		}
-		return "int32_t";
-	}
-	return "std::any"; // Unknown type (possibly 'object')
-};
-
-void PrintReferenceSchema(std::ostream& os, std::string_view name, const openapi::Schema& schema, std::string& indent);
-void PrintObjectSchema(std::ostream& os, std::string_view name, const openapi::Schema& schema, std::string& indent);
-void PrintArraySchema(std::ostream& os, std::string_view name, const openapi::Schema& schema, std::string& indent);
-
-void PrintSchema(std::ostream& os, std::string_view name, const openapi::Schema& schema, std::string& indent) {
+void PrintSchema(std::ostream& os, std::string_view name, const openapi::v2::Schema& schema, std::string& indent) {
 	write_multiline_comment(os, schema.description(), indent);
 	if (schema.IsReference()) {
 		PrintReferenceSchema(os, name, schema, indent);
@@ -101,7 +24,7 @@ void PrintSchema(std::ostream& os, std::string_view name, const openapi::Schema&
 		PrintArraySchema(os, name, schema, indent);
 	} else if (schema.type().empty()) {
 		if (const auto item = schema.items(); item) {
-			const auto& subschema = static_cast<const openapi::Schema&>(item);
+			const auto& subschema = static_cast<const openapi::v2::Schema&>(item);
 			PrintSchema(os, name, subschema, indent);
 		} else {
 			PrintObjectSchema(os, name, schema, indent);
@@ -111,7 +34,21 @@ void PrintSchema(std::ostream& os, std::string_view name, const openapi::Schema&
 	}
 }
 
-void PrintReferenceSchema(std::ostream& os, std::string_view name, const openapi::Schema& schema, std::string& indent) {
+void PrintSchema(std::ostream& os, std::string_view name, const Schema2& schema, std::string& indent) {
+	struct Visitor {
+		std::ostream& _os;
+		std::string_view _name;
+		std::string& _indent;
+
+		void operator()(const Array& obj) { const auto items = obj.items(); }
+	};
+}
+
+void PrintReferenceSchema(
+	std::ostream& os,
+	std::string_view name,
+	const openapi::v2::Schema& schema,
+	std::string& indent) {
 	if (indent.empty()) {
 		// Top-level reference: Use it as a typedef synonym
 		os << "using " << name << " = " << sanitize(schema.reference()) << ";\n";
@@ -121,7 +58,11 @@ void PrintReferenceSchema(std::ostream& os, std::string_view name, const openapi
 	}
 }
 
-void PrintObjectSchema(std::ostream& os, std::string_view name, const openapi::Schema& schema, std::string& indent) {
+void PrintObjectSchema(
+	std::ostream& os,
+	std::string_view name,
+	const openapi::v2::Schema& schema,
+	std::string& indent) {
 	os << indent << "struct " << name << " {\n";
 	indent.push_back('\t');
 	if (const auto properties = schema.properties(); !properties.empty()) {
@@ -141,9 +82,9 @@ void PrintObjectSchema(std::ostream& os, std::string_view name, const openapi::S
 	os << std::endl;
 }
 
-void PrintArraySchema(std::ostream& os, std::string_view name, const openapi::Schema& schema, std::string& indent) {
+void PrintArraySchema(std::ostream& os, std::string_view name, const openapi::v2::Schema& schema, std::string& indent) {
 	const auto items = schema.items();
-	const auto& subschema = static_cast<const openapi::Schema&>(items);
+	const auto& subschema = static_cast<const openapi::v2::Schema&>(items);
 	write_multiline_comment(os, subschema.description(), indent);
 	if (const auto properties = subschema.properties(); !properties.empty()) {
 		// Schema declared inline
@@ -175,7 +116,7 @@ void PrintArraySchema(std::ostream& os, std::string_view name, const openapi::Sc
 	os << std::endl;
 }
 
-void PrintJSONValueFromTagDeclaration(std::ostream& out, std::string_view name, const openapi::Schema& schema) {
+void PrintJSONValueFromTagDecl(std::ostream& out, std::string_view name, const openapi::v2::Schema& schema) {
 	if (schema.IsReference()) {
 		return;
 	}
@@ -188,7 +129,7 @@ void PrintJSONValueFromTagDeclaration(std::ostream& out, std::string_view name, 
 		<< std::endl;
 }
 
-void PrintJSONValueFromTag(std::ostream& out, std::string_view name, const openapi::Schema& schema) {
+void PrintJSONValueFromTag(std::ostream& out, std::string_view name, const openapi::v2::Schema& schema) {
 	if (schema.IsReference()) {
 		return;
 	}
@@ -198,7 +139,7 @@ void PrintJSONValueFromTag(std::ostream& out, std::string_view name, const opena
 	}
 
 	// Stash nested objects, print their implementations at the end.
-	std::unordered_map<std::string, openapi::Schema> nested_objects;
+	std::unordered_map<std::string, openapi::v2::Schema> nested_objects;
 
 	out << "void tag_invoke(js::value_from_tag, js::value& jv, const " << name << "& v) {\n";
 	out << "\tjv = {\n";
@@ -211,7 +152,7 @@ void PrintJSONValueFromTag(std::ostream& out, std::string_view name, const opena
 			nested_objects.emplace(sanitized_propname, prop);
 		} else if (prop.type() == "array") {
 			const auto item = prop.items();
-			const auto& subschema = static_cast<const openapi::Schema&>(item);
+			const auto& subschema = static_cast<const openapi::v2::Schema&>(item);
 			nested_objects.emplace(sanitized_propname + "_entry", subschema);
 			out << "\t\t{ \"" << propname << "\", js::value_from(v." << sanitized_propname << ", jv.storage()) },\n";
 		} else {
@@ -227,7 +168,7 @@ void PrintJSONValueFromTag(std::ostream& out, std::string_view name, const opena
 	}
 }
 
-void PrintJSONValueToTagDeclaration(std::ostream& out, std::string_view name, const openapi::Schema& schema) {
+void PrintJSONValueToTagDecl(std::ostream& out, std::string_view name, const openapi::v2::Schema& schema) {
 	if (schema.IsReference()) {
 		return;
 	}
@@ -240,7 +181,7 @@ void PrintJSONValueToTagDeclaration(std::ostream& out, std::string_view name, co
 		<< std::endl;
 }
 
-void PrintJSONValueToTag(std::ostream& out, std::string_view name, const openapi::Schema& schema) {
+void PrintJSONValueToTag(std::ostream& out, std::string_view name, const openapi::v2::Schema& schema) {
 	if (schema.IsReference()) {
 		return;
 	}
@@ -250,7 +191,7 @@ void PrintJSONValueToTag(std::ostream& out, std::string_view name, const openapi
 	}
 
 	// Stash nested objects, print their implementations at the end.
-	std::unordered_map<std::string, openapi::Schema> nested_objects;
+	std::unordered_map<std::string, openapi::v2::Schema> nested_objects;
 
 	out << name << " tag_invoke(js::value_to_tag<" << name << ">, const js::value& jv) {\n";
 	out << "\tconst auto& obj = jv.as_object();\n";
@@ -268,7 +209,7 @@ void PrintJSONValueToTag(std::ostream& out, std::string_view name, const openapi
 				<< "_)>(obj.at(\"" << propname << "\"));\n";
 		} else if (prop.type() == "array") {
 			const auto item = prop.items();
-			const auto& subschema = static_cast<const openapi::Schema&>(item);
+			const auto& subschema = static_cast<const openapi::v2::Schema&>(item);
 			if (subschema.IsReference()) {
 				out << "\tret." << sanitized_propname << " = js::value_to<std::vector<"
 					<< sanitize(subschema.reference()) << ">>(obj.at(\"" << propname << "\"));\n";
@@ -299,12 +240,12 @@ void PrintJSONValueToTag(std::ostream& out, std::string_view name, const openapi
 
 	// For arrays
 	if (const auto& item = schema.items(); item) {
-		PrintJSONValueToTag(out, std::string(name) + "_entry", static_cast<const openapi::Schema&>(item));
+		PrintJSONValueToTag(out, std::string(name) + "_entry", static_cast<const openapi::v2::Schema&>(item));
 	}
 }
 
 // Write the struct definitions file.
-void PrintStructDefinitions(const openapi::OpenAPI2& file, const fs::path& input, const fs::path& output) {
+void PrintStructDefinitions(const OpenAPIv2& file, const fs::path& input, const fs::path& output) {
 	fs::path definitions_hpp = output / (input.stem().string() + "_defs.hpp");
 	auto out_hpp = std::ofstream(definitions_hpp);
 	out_hpp << "// Automatically generated from " << input.string() << ". Do not modify this file.\n"
@@ -329,14 +270,14 @@ void PrintStructDefinitions(const openapi::OpenAPI2& file, const fs::path& input
 			<< "namespace swagger {\n"
 			<< std::endl;
 
-	std::string indent, indent2;
+	std::string indent;
 	// Look in definitions first
 	for (const auto& [defname, def] : file.definitions()) {
 		const auto name = sanitize(defname);
 		PrintSchema(out_hpp, name, def, indent);
-		PrintJSONValueFromTagDeclaration(out_hpp, name, def);
+		PrintJSONValueFromTagDecl(out_hpp, name, def);
 		PrintJSONValueFromTag(out_cpp, name, def);
-		PrintJSONValueToTagDeclaration(out_hpp, name, def);
+		PrintJSONValueToTagDecl(out_hpp, name, def);
 		PrintJSONValueToTag(out_cpp, name, def);
 	}
 
@@ -351,7 +292,7 @@ void PrintStructDefinitions(const openapi::OpenAPI2& file, const fs::path& input
 						const auto name = openapi::SynthesizeFunctionName(pathname, verb) + std::string(param.name());
 						sanitize(name);
 						PrintSchema(out_hpp, name, schema, indent);
-						PrintJSONValueFromTagDeclaration(out_hpp, name, schema);
+						PrintJSONValueFromTagDecl(out_hpp, name, schema);
 						PrintJSONValueFromTag(out_cpp, name, schema);
 					}
 				}
@@ -364,7 +305,7 @@ void PrintStructDefinitions(const openapi::OpenAPI2& file, const fs::path& input
 					sanitize(name);
 					write_multiline_comment(out_hpp, resp.description(), "");
 					PrintSchema(out_hpp, name, schema, indent);
-					PrintJSONValueToTagDeclaration(out_hpp, name, schema);
+					PrintJSONValueToTagDecl(out_hpp, name, schema);
 					PrintJSONValueToTag(out_cpp, name, schema);
 				}
 			}
@@ -375,4 +316,4 @@ void PrintStructDefinitions(const openapi::OpenAPI2& file, const fs::path& input
 	out_cpp << "} // namespace swagger\n";
 }
 
-} // namespace openapi
+} // namespace openapi::v2

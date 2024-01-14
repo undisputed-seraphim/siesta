@@ -32,7 +32,7 @@ const std::unordered_map<std::string_view, std::string_view> verbMap = {
 	{"acl", "acl"},
 };
 
-void write_query_details(std::ostream& os, const openapi::Operation& op, std::string& indent) {
+void write_query_details(std::ostream& os, const openapi::v2::Operation& op, std::string& indent) {
 	for (const auto& p : op.parameters()) {
 		if (p.in() == "body") {
 			if (auto schema = p.schema(); schema) {
@@ -48,14 +48,14 @@ void write_query_details(std::ostream& os, const openapi::Operation& op, std::st
 
 void write_server_function_body(
 	std::ostream& os,
-	const openapi::OpenAPI2& file,
+	const openapi::v2::OpenAPIv2& file,
 	std::string_view pathstr,
-	const openapi::Path& path,
+	const openapi::v2::Path& path,
 	std::string_view opstr,
-	const openapi::Operation& op,
+	const openapi::v2::Operation& op,
 	std::string& indent) {}
 
-void write_dispatcher_function(std::ostream& out, std::string_view className, const openapi::OpenAPI2& file) {
+void write_dispatcher_function(std::ostream& out, std::string_view className, const openapi::v2::OpenAPIv2& file) {
 	// TODO: Replace this with a trie
 	out << "const std::unordered_map<std::pair<std::string_view, http::verb>, Server::fnptr_t, "
 		   "::siesta::beast::__detail::MapHash> g_pathmap = {\n";
@@ -81,7 +81,7 @@ void write_dispatcher_function(std::ostream& out, std::string_view className, co
 	out << "}\n" << std::endl;
 }
 
-void beast_server_hpp(const fs::path& input, const fs::path& output, const openapi::OpenAPI2& file) {
+void beast_server_hpp(const fs::path& input, const fs::path& output, const openapi::v2::OpenAPIv2& file) {
 	auto out = std::ofstream(output / (input.stem().string() + "_server.hpp"));
 	out << "#pragma once\n"
 		<< "#include <boost/asio.hpp>\n"
@@ -127,7 +127,7 @@ void beast_server_hpp(const fs::path& input, const fs::path& output, const opena
 	out << "} // namespace swagger\n";
 }
 
-void beast_server_cpp(const fs::path& input, const fs::path& output, const openapi::OpenAPI2& file) {
+void beast_server_cpp(const fs::path& input, const fs::path& output, const openapi::v2::OpenAPIv2& file) {
 	const auto header_path = output / (input.stem().string() + "_server.hpp");
 	auto out = std::ofstream(output / (input.stem().string() + "_server.cpp"));
 	out << "#include <boost/json.hpp>\n"

@@ -5,23 +5,17 @@
 #include <iostream>
 #include <string_view>
 
+#include "beast/beast.hpp"
+#include "openapi.hpp"
 #include "openapi2.hpp"
 #include "util.hpp"
-#include "beast/beast.hpp"
 
 namespace fs = std::filesystem;
 namespace po = ::boost::program_options;
 using namespace std::literals;
 
 // Forward-declared backends
-void beast(const fs::path& input, const fs::path& output, const openapi::OpenAPI2& file);
-void nghttp2(const fs::path& input, const fs::path& output, openapi::OpenAPI2& file);
-
-namespace openapi {
-
-void PrintStructDefinitions(const openapi::OpenAPI2& file, const std::filesystem::path& input, const std::filesystem::path& output);
-
-} // namespace openapi
+void beast(const fs::path& input, const fs::path& output, const openapi::v2::OpenAPIv2& file);
 
 int main(int argc, char* argv[]) try {
 	fs::path input_json;
@@ -53,15 +47,18 @@ int main(int argc, char* argv[]) try {
 		std::cout << "Writing to " << output_dir.string() << std::endl;
 	}
 
-	openapi::OpenAPI2 file;
+	openapi::OpenAPI file;
 	if (!file.Load(input_json.string())) {
 		std::cerr << "Failed to load " << input_json.string() << std::endl;
 		return -1;
 	}
-
-	siesta::beast::beast(input_json, output_dir, file);
-
-	openapi::PrintStructDefinitions(file, input_json, output_dir);
+	if (file.MajorVersion() == 2) {
+		siesta::beast::beast(input_json, output_dir, static_cast<openapi::v2::OpenAPIv2&>(file));
+	} else if (file.MajorVersion() == 3) {
+		siesta::beast::beast(input_json, output_dir, static_cast<openapi::v3::OpenAPIv3&>(file));
+	} else {
+		return -1;
+	}
 
 	return 0;
 } catch (const std::exception& e) {
