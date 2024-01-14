@@ -1,9 +1,8 @@
 #include <boost/asio/connect.hpp>
 #include <boost/beast/http/error.hpp>
 #include <iostream>
-#include <siesta/beast/client.hpp>
 
-namespace asio = ::boost::asio;
+#include <siesta/beast/client.hpp>
 
 namespace siesta::beast {
 
@@ -11,13 +10,13 @@ void fail(std::string_view facility, ::boost::system::error_code ec) {
 	std::cerr << facility << ": " << ec.to_string() << ' ' << ec.message() << std::endl;
 }
 
-ClientBase::ClientBase(asio::io_context& ctx, Config config)
+ClientBase::ClientBase(::boost::asio::io_context& ctx, Config config)
 	: _conf(std::move(config))
-	, _strand(asio::make_strand(ctx))
+	, _strand(::boost::asio::make_strand(ctx))
 	, _resolver(_strand)
 	, _stream(_strand) {}
 
-void ClientBase::start(const asio::ip::address& address, uint16_t port) { start(protocol::endpoint(address, port)); }
+void ClientBase::start(const ::boost::asio::ip::address& address, uint16_t port) { start(protocol::endpoint(address, port)); }
 void ClientBase::start(const protocol::endpoint& endpoint) {
 	_resolver.async_resolve(endpoint, std::bind_front(&ClientBase::on_resolve, shared_from_this()));
 }

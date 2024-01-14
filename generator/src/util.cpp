@@ -26,7 +26,9 @@ void trim(std::string_view& s) {
 
 bool compare_ignore_case(std::string_view l, std::string_view r) noexcept {
 	if (l.size() == r.size()) {
-		return std::equal(l.begin(), l.end(), r.begin(), r.end(), [](char a, char b) -> bool { return std::tolower(a) == std::tolower(b); });
+		return std::equal(l.begin(), l.end(), r.begin(), r.end(), [](char a, char b) -> bool {
+			return std::tolower(a) == std::tolower(b);
+		});
 	}
 	return false;
 }

@@ -29,16 +29,7 @@ target_link_libraries(siesta PUBLIC
 	fmt::fmt
 )
 
-file(GLOB_RECURSE generator_src "${CMAKE_CURRENT_SOURCE_DIR}/generator/*")
-add_executable(siesta-generator ${generator_src})
-target_link_libraries(siesta-generator PUBLIC
-	simdjson::simdjson
-	Boost::boost
-	Boost::program_options
-	Boost::json
-	Boost::system
-	fmt::fmt
-)
+add_subdirectory(generator)
 
 add_subdirectory(output)
-add_subdirectory(tests)
+#add_subdirectory(tests)

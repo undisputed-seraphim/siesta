@@ -38,12 +38,17 @@ std::string clean_path_string(std::string_view original) {
 	return copy;
 }
 
-void beast(const fs::path& input, const fs::path& output, const openapi::OpenAPI2& file) {
+void beast(const fs::path& input, const fs::path& output, const openapi::v2::OpenAPIv2& file) {
+	openapi::v2::PrintStructDefinitions(file, input, output);
 	beast_server_hpp(input, output, file);
 	beast_server_cpp(input, output, file);
 
 	beast_client_hpp(input, output, file);
-	//beast_client_cpp(input, output, file);
+	// beast_client_cpp(input, output, file);
+}
+
+void beast(const fs::path& input, const fs::path& output, const openapi::v3::OpenAPIv3& file) {
+	openapi::v3::PrintStructDefinitions(file, input, output);
 }
 
 } // namespace siesta::beast

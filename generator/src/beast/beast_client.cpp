@@ -1,47 +1,105 @@
 #include "beast.hpp"
+#include <algorithm>
 
 namespace fs = std::filesystem;
 using namespace std::literals;
 
 namespace siesta::beast {
 
-void write_client_multipart_body(std::ostream& out, const openapi::Operation& op, std::string& indent) {
-	const auto& parameters = op.parameters();
-	if (std::none_of(
-			parameters.begin(), parameters.end(), [](const openapi::Parameter& p) { return p.in() == "formData"; })) {
+void write_client_multipart_body(std::ostream& out, const openapi::v2::Operation& op, std::string& indent) {
+	if (op.consumes().empty()) {
 		return;
 	}
-	out << indent << "_request.set(::boost::beast::http::field::content_type, \"multipart/form-data; boundary=multipart\");\n";
-	out << indent << "_request.set(::boost::beast::http::field::body, \"--multipart\");\n";
+	if (*op.consumes().begin() != "multipart/form-data") {
+		return;
+	}
+	const auto& parameters = op.parameters();
+	out << indent
+		<< "req.set(::boost::beast::http::field::content_type, \"multipart/form-data; boundary=multipart\");\n";
+	out << indent << "req.set(::boost::beast::http::field::body, \"--multipart\");\n";
 	for (const auto& param : parameters) {
 		if (param.in() != "formData") {
 			continue;
 		}
-		out << indent << "_request.set(::boost::beast::http::field::content_disposition, \"form-data; name=\\\"" << param.name()
-			<< "\\\"\");\n";
-		out << indent << "_request.body().assign(string_cast(" << param.name() << "));\n";
+		out << indent << "req.set(::boost::beast::http::field::content_disposition, \"form-data; name=\\\""
+			<< param.name() << "\\\"\");\n";
+		out << indent << "req.body().assign(string_cast(" << param.name() << "));\n";
 		// Data goes here...
-		out << indent << "// http::async_write(_stream, _request);\n";
+		out << indent << "// http::async_write(_stream, req);\n";
 	}
-	out << indent << "_request.set(::boost::beast::http::field::body, \"--multipart--\");\n";
-	out << indent << "// http::async_write(_stream, _request);\n";
+	out << indent << "req.set(::boost::beast::http::field::body, \"--multipart--\");\n";
+	out << indent << "// http::async_write(_stream, req);\n";
+}
+
+void write_client_form_body(std::ostream& out, const openapi::v2::Operation& op, std::string& indent) {
+	if (op.consumes().empty()) {
+		return;
+	}
+	if (*op.consumes().begin() != "application/x-www-form-urlencoded") {
+		return;
+	}
+	const auto& parameters = op.parameters();
+	out << indent << "req.set(::boost::beast::http::field::content_type, \"application/x-www-form-urlencoded\");\n";
+	std::string formdata_str = "";
+	std::string form_params = "";
+	for (const auto& param : parameters) {
+		formdata_str += param.name();
+		formdata_str += "={}&";
+		form_params += param.name();
+		form_params += ',';
+	}
+	formdata_str.pop_back();
+	form_params.pop_back();
+	out << indent << "constexpr std::string_view form = \"" << formdata_str << "\";\n";
+	out << indent << "req.body().assign(fmt::format(form," << form_params << "));\n";
+}
+
+void write_client_json_body(std::ostream& out, const openapi::v2::Operation& op, std::string& indent) {
+	if (op.consumes().empty()) {
+		return;
+	}
+	if (*op.consumes().begin() != "application/json") {
+		return;
+	}
+	const auto& parameters = op.parameters();
+	out << indent << "::boost::json::monotonic_resource json_rsc(_json_buffer.data(), _json_buffer.size());\n";
+
+	auto it = std::find_if(
+		parameters.begin(), parameters.end(), [](const openapi::v2::Parameter& p) { return p.in() == "body"; });
+	if (it != parameters.end()) {
+		const std::string_view bodyname = (*it).name().empty() ? "body"sv : (*it).name();
+		out << indent << "req.set(::boost::beast::http::field::content_type, \"application/json\");\n";
+		out << indent << "req.body().assign(::boost::json::serialize(::boost::json::value_from(" << bodyname
+			<< ", &json_rsc)));\n";
+		return;
+	}
+
+	// Ad-hoc JSON object
+	out << indent << "auto q = ::boost::json::object(&json_rsc);\n";
+	for (const auto& p : parameters) {
+		if (p.in() != "query") {
+			continue;
+		}
+		out << indent << "q.emplace(\"" << p.name() << "\", std::move(" << p.name() << "));\n";
+	}
+	out << indent << "req.body().assign(::boost::json::serialize(q));\n";
 }
 
 void write_client_function_body(
 	std::ostream& out,
-	const openapi::OpenAPI2& file,
+	const openapi::v2::OpenAPIv2& file,
 	std::string_view pathstr,
-	const openapi::Path& path,
+	const openapi::v2::Path& path,
 	std::string_view opstr,
-	const openapi::Operation& op,
+	const openapi::v2::Operation& op,
 	std::string& indent) {
 
 	// Compose a path pattern, set as constexpr.
 	const auto params = op.parameters();
 	const bool has_path_param =
-		std::any_of(params.begin(), params.end(), [](const openapi::Parameter& p) { return p.in() == "path"; });
+		std::any_of(params.begin(), params.end(), [](const openapi::v2::Parameter& p) { return p.in() == "path"; });
 	const bool has_query_param =
-		std::any_of(params.begin(), params.end(), [](const openapi::Parameter& p) { return p.in() == "query"; });
+		std::any_of(params.begin(), params.end(), [](const openapi::v2::Parameter& p) { return p.in() == "query"; });
 	std::string full_path = std::string(file.basePath());
 	if (has_path_param) {
 		full_path += clean_path_string(pathstr);
@@ -58,10 +116,9 @@ void write_client_function_body(
 		full_path.pop_back();
 	}
 	out << indent << "constexpr std::string_view path = \"" << full_path << "\";\n";
-	out << indent << "::boost::json::monotonic_resource json_rsc(_json_buffer.data(), _json_buffer.size());\n";
-	out << indent << "_request = {};\n";
+	out << indent << "request_type req;\n";
 	if (has_path_param || has_query_param) {
-		out << indent << "_request.target(fmt::format(path, ";
+		out << indent << "req.target(fmt::format(path, ";
 		for (const auto& p : params) {
 			if (p.in() == "path") {
 				out << p.name() << ", ";
@@ -75,27 +132,19 @@ void write_client_function_body(
 		out.seekp(-2, std::ios::end);
 		out << "));\n";
 	} else {
-		out << indent << "_request.target(path);\n";
+		out << indent << "req.target(path);\n";
 	}
 
 	std::string operation = "::boost::beast::http::verb::"s + std::string(opstr);
 	if (opstr == "delete") {
-		operation.append("_");
+		operation.push_back('_');
 	}
-	out << indent << "_request.method(" << operation << ");\n";
-	for (const auto& p : op.parameters()) {
-		if (p.in() == "body") {
-			const std::string_view bodyname = p.name().empty() ? "body"sv : p.name();
-			out << indent << "_request.set(::boost::beast::http::field::content_type, \"application/json\");\n";
-			out << indent << "_request.body().assign(::boost::json::serialize(::boost::json::value_from(" << bodyname
-				<< ", &json_rsc)));\n";
-		} else if (p.in() == "header") {
-			out << indent << "_request.set(\"" << p.name() << "\", " << sanitize(p.name()) << ");\n";
-		}
-		// p.in() == query is handled by URL formatting
-	}
-	write_client_multipart_body(out, op, indent);
-	out << indent << "return this->async_submit_request(token);\n";
+	out << indent << "req.method(" << operation << ");\n";
+
+	write_client_json_body(out, op, indent);
+	// write_client_multipart_body(out, op, indent);
+	write_client_form_body(out, op, indent);
+	out << indent << "return this->async_submit_request(std::move(req), token);\n";
 
 	for (const auto& [respstr, resp] : op.responses()) {
 		out << indent << "//" << respstr << '\t';
@@ -110,7 +159,7 @@ void write_client_function_body(
 	}
 }
 
-void write_method_bodies(std::ostream& out, const openapi::OpenAPI2& file) {
+void write_method_bodies(std::ostream& out, const openapi::v2::OpenAPIv2& file) {
 	std::string indent;
 	for (const auto& [pathstr, path] : file.paths()) {
 		for (const auto& [opstr, op] : path.operations()) {
@@ -122,9 +171,9 @@ void write_method_bodies(std::ostream& out, const openapi::OpenAPI2& file) {
 void write_query_parameters(
 	std::ostream& out,
 	std::string_view pathstr,
-	const openapi::Path& path,
+	const openapi::v2::Path& path,
 	std::string_view opstr,
-	const openapi::Operation& op) {
+	const openapi::v2::Operation& op) {
 	auto verb = openapi::RequestMethodFromString(opstr);
 	for (const auto& param : op.parameters()) {
 		auto sanitized_paramname = sanitize(param.name());
@@ -147,9 +196,9 @@ void write_query_parameters(
 void write_method_declaration(
 	std::ostream& out,
 	std::string_view pathstr,
-	const openapi::Path& path,
+	const openapi::v2::Path& path,
 	std::string_view opstr,
-	const openapi::Operation& op,
+	const openapi::v2::Operation& op,
 	std::string& indent) {
 	write_multiline_comment(out, op.description(), indent);
 	out << indent << "auto "
@@ -161,7 +210,7 @@ void write_method_declaration(
 	out << std::endl;
 }
 
-void write_method_declarations(std::ostream& out, const openapi::OpenAPI2& file, std::string& indent) {
+void write_method_declarations(std::ostream& out, const openapi::v2::OpenAPIv2& file, std::string& indent) {
 	for (const auto& [pathstr, path] : file.paths()) {
 		for (const auto& [opstr, op] : path.operations()) {
 			write_method_declaration(out, pathstr, path, opstr, op, indent);
@@ -175,7 +224,7 @@ void write_method_declarations(std::ostream& out, const openapi::OpenAPI2& file,
 	}
 }
 
-void beast_client_hpp(const fs::path& input, const fs::path& output, const openapi::OpenAPI2& file) {
+void beast_client_hpp(const fs::path& input, const fs::path& output, const openapi::v2::OpenAPIv2& file) {
 	auto out = std::ofstream(output / (input.stem().string() + "_client.hpp"));
 	out << "#pragma once\n"
 		<< "#include <boost/asio.hpp>\n"
@@ -208,14 +257,14 @@ void beast_client_hpp(const fs::path& input, const fs::path& output, const opena
 
 	indent.pop_back();
 	out << "}; // class\n";
-	//write_method_bodies(out, file);
+	// write_method_bodies(out, file);
 	out << "} // namespace swagger\n";
 }
 
 //
 // NO LONGER IN USE
 //
-void beast_client_cpp(const fs::path& input, const fs::path& output, const openapi::OpenAPI2& file) {
+void beast_client_cpp(const fs::path& input, const fs::path& output, const openapi::v2::OpenAPIv2& file) {
 	const auto header_path = output / (input.stem().string() + "_client.hpp");
 	auto out = std::ofstream(output / (input.stem().string() + "_client.cpp"));
 	out << "#include <boost/json.hpp>\n"

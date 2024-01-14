@@ -30,11 +30,11 @@ public:
 		::boost::asio::completion_token_for<void(outcome_type)> auto&& token) {
 		constexpr std::string_view path = "/v1/echo?message={}";
 		::boost::json::monotonic_resource json_rsc(_json_buffer.data(), _json_buffer.size());
-		_request = {};
-		_request.target(fmt::format(path, message));
-		_request.method(::boost::beast::http::verb::get);
-		_request.set("headerParam", headerParam);
-		return this->async_submit_request(token);
+		request_type req;
+		req.target(fmt::format(path, message));
+		req.method(::boost::beast::http::verb::get);
+		req.set("headerParam", headerParam);
+		return this->async_submit_request(std::move(req), token);
 		// 200	 EchoResponse
 		// default	 Error
 	}
