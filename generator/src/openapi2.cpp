@@ -5,33 +5,13 @@ using namespace std::literals;
 
 namespace openapi::v2 {
 
-// String
-uint64_t String::maxLength() const { return _GetValueIfExist<uint64_t>("maxLength"); }
-uint64_t String::minLength() const { return _GetValueIfExist<uint64_t>("minLength"); }
-std::string_view String::pattern() const { return _GetValueIfExist<std::string_view>("pattern"); }
-
-// Number
-uint64_t Number::minimum() const { return _GetValueIfExist<uint64_t>("minimum"); }
-bool Number::exclusiveMinimum() const { return _GetValueIfExist<bool>("exclusiveMinimum"); }
-uint64_t Number::maximum() const { return _GetValueIfExist<uint64_t>("maximum"); }
-bool Number::exclusiveMaximum() const { return _GetValueIfExist<bool>("exclusiveMaximum"); }
-int64_t Number::multipleOf() const { return _GetValueIfExist<int64_t>("multipleOf"); }
-
 // Object
 std::string_view Object::title() const { return _GetValueIfExist<std::string_view>("title"); }
 std::string_view Object::description() const { return _GetValueIfExist<std::string_view>("description"); }
-int64_t Object::maxProperties() const { return _GetValueIfExist<int64_t>("maxProperties"); }
-int64_t Object::minProperties() const { return _GetValueIfExist<int64_t>("minProperties"); }
-bool Object::required() const { return _GetValueIfExist<bool>("required"); }
 Object::Enum Object::enum_() const { return _GetObjectIfExist<Object::Enum>("enum"); }
-Schema2 Object::properties() const { return _GetObjectIfExist<Schema2>("properties"); }
 
 // Array
-Schema2 Array::items() const { return _GetObjectIfExist<Schema2>("items"); }
 std::string_view Array::collectionFormat() const { return _GetValueIfExist<std::string_view>("collectionFormat"); }
-int64_t Array::maxItems() const { return _GetValueIfExist<int64_t>("maxItems"); }
-int64_t Array::minItems() const { return _GetValueIfExist<int64_t>("minItems"); }
-bool Array::uniqueItems() const { return _GetValueIfExist<bool>("uniqueItems"); }
 
 // Item
 std::string_view Item::type() const { return _GetValueIfExist<std::string_view>("type"); }
@@ -130,6 +110,8 @@ Tags OpenAPIv2::tags() const { return _GetObjectIfExist<Tags>("tags"); }
 ExternalDocumentation OpenAPIv2::externalDocs() const {
 	return _GetObjectIfExist<ExternalDocumentation>("externalDocs");
 }
+
+Schemas OpenAPIv2::def2() const { return _GetObjectIfExist<Schemas>("definitions"); }
 
 Schema OpenAPIv2::GetDefinedSchemaByReference(std::string_view reference) {
 	for (const auto& [schemaname, schema] : definitions()) {

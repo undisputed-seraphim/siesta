@@ -6,6 +6,257 @@ namespace fs = std::filesystem;
 
 namespace openapi::v2 {
 
+using namespace json_schema;
+using Type = JsonSchema::Type;
+
+class StructPrinter {
+public:
+	StructPrinter(const OpenAPIv2& file_, const std::filesystem::path& input_, const std::filesystem::path& output_)
+		: file(file_)
+		, input(input_)
+		, output(output_)
+		, hpp_out(output / (input.stem().string() + "_defs.hpp"))
+		, cpp_out(output / (input.stem().string() + "_defs.cpp")) {}
+
+	bool operator()();
+
+private:
+	const OpenAPIv2& file;
+	fs::path input, output;
+	std::ofstream hpp_out, cpp_out;
+	std::string indent;
+
+	// Top level prints, used in operator()
+	void PrintComponentSchemas();
+	void PrintComponentParameters();
+	void PrintComponentResponses();
+	void PrintPathSchemas();
+
+	void PrintSchema(std::string_view name, const JsonSchema& schema);
+	// void PrintParameter(const Parameter&);
+	// void PrintParameter(std::string_view name, const Parameter&);
+
+	// Detailed print impls
+	Type PrintSchemaDecl(std::string_view name, const JsonSchema& schema);
+	Type PrintJSONValueFromTagDecl(std::string_view name, const JsonSchema& schema);
+	Type PrintJSONValueFromTagImpl(std::string_view name, const JsonSchema& schema);
+	Type PrintJSONValueToTagDecl(std::string_view name, const JsonSchema& schema);
+	// Type PrintJSONValueToTagImpl(std::string_view name, const JsonSchema& schema);
+};
+
+bool StructPrinter::operator()() {
+	hpp_out << "// Automatically generated from " << input.string() << ". Do not modify this file.\n"
+			<< "#pragma once\n"
+			<< '\n'
+			<< "#include <string>\n"
+			<< "#include <vector>\n"
+			<< "#include <boost/json.hpp>\n"
+			<< '\n'
+			<< "namespace openapi {\n"
+			<< std::endl;
+
+	fs::path definitions_hpp = output / (input.stem().string() + "_defs.hpp");
+	cpp_out << "// Automatically generated from " << input.string() << ". Do not modify this file.\n"
+			<< "#include \"" << definitions_hpp.filename().string() << "\"\n"
+			<< "namespace js = ::boost::json;\n"
+			<< '\n'
+			<< "namespace openapi {\n"
+			<< std::endl;
+
+	for (const auto& [defname, def] : file.def2()) {
+		PrintSchema(defname, def);
+	}
+
+	hpp_out << "} // namespace openapi\n";
+	cpp_out << "} // namespace openapi\n";
+	return true;
+}
+
+void StructPrinter::PrintSchema(std::string_view name, const JsonSchema& schema) {
+	PrintSchemaDecl(name, schema);
+	PrintJSONValueFromTagDecl(name, schema);
+	PrintJSONValueFromTagImpl(name, schema);
+	PrintJSONValueToTagDecl(name, schema);
+	// PrintJSONValueToTagImpl(name, schema);
+}
+
+Type StructPrinter::PrintSchemaDecl(std::string_view name, const JsonSchema& schema) {
+	struct Visitor {
+		std::ostream& _os;
+		std::string_view _name;
+		std::string& _indent;
+		bool _should_instantiate = true;
+
+		void print_primitive(const JsonSchema& schema) const {
+			write_multiline_comment(_os, schema.description(), _indent);
+			_os << _indent << JsonTypeToCppType(schema.type(), schema.format()) << ' ' << _name << ";\n";
+		}
+		void operator()(const String& schema) const { print_primitive(schema); }
+		void operator()(const Number& schema) const { print_primitive(schema); }
+		void operator()(const Integer& schema) const { print_primitive(schema); }
+		void operator()(const Boolean& schema) const { print_primitive(schema); }
+		void operator()(const v2::Object& schema) const {
+			write_multiline_comment(_os, schema.description(), _indent);
+			const auto sanitized_name = sanitize(_name);
+			_os << _indent << "struct " << sanitized_name << " {\n";
+			_indent.push_back('\t');
+
+			for (const auto& [propname, prop] : schema.properties()) {
+				const auto sanitized_propname = sanitize(propname);
+				prop.Visit(Visitor{_os, sanitized_propname, _indent});
+			}
+
+			_indent.pop_back();
+
+			if (_indent.empty()) {
+				_os << "};\n";
+			} else {
+				_os << _indent << '}';
+				if (_should_instantiate) {
+					_os << " " << sanitized_name << "_;\n";
+				} else {
+					_os << ";\n";
+				}
+			}
+		}
+		void operator()(const json_schema::Object& schema) const {
+			return (*this)(static_cast<const v2::Object&>(schema));
+		}
+		void operator()(const v2::Array& schema) const {
+			struct ArrayItemVisitor {
+				std::ostream& _os;
+				std::string_view _name;
+				std::string& _indent;
+
+				void print_primitive(const JsonSchema& schema) const {
+					write_multiline_comment(_os, schema.description(), _indent);
+					_os << _indent << "std::vector<" << JsonTypeToCppType(schema.type(), schema.format()) << "> "
+						<< _name << ";\n";
+				}
+				void operator()(const String& schema) const { print_primitive(schema); }
+				void operator()(const Number& schema) const { print_primitive(schema); }
+				void operator()(const Integer& schema) const { print_primitive(schema); }
+				void operator()(const Boolean& schema) const { print_primitive(schema); }
+				void operator()(const v2::Object& schema) const {
+					const auto entry_name = std::string(_name) + "_entry";
+					Type visited = schema.Visit(Visitor{_os, entry_name, _indent, false});
+				}
+				void operator()(const json_schema::Object& schema) const {
+					return (*this)(static_cast<const v2::Object&>(schema));
+				}
+				void operator()(const v2::Array& schema) const {
+					write_multiline_comment(_os, schema.description(), _indent);
+					const auto entry_name = std::string(_name) + "_entry";
+					Type visited = schema.items().Visit(ArrayItemVisitor{_os, entry_name, _indent});
+				}
+				void operator()(const json_schema::Array& schema) const {
+					return (*this)(static_cast<const v2::Array&>(schema));
+				}
+			};
+
+			const auto itemschema = schema.items();
+			Type type = itemschema.Visit(ArrayItemVisitor{_os, _name, _indent});
+			write_multiline_comment(_os, schema.description(), _indent);
+			switch (type) {
+			case Type::object: {
+				const auto entry_name = std::string(_name) + "_entry";
+				if (_indent.empty()) {
+					_os << "using " << _name << " = std::vector<" << entry_name << ">;\n";
+				} else {
+					_os << _indent << "std::vector<" << entry_name << "> " << _name << ";\n";
+				}
+				break;
+			}
+			case Type::array: {
+
+				break;
+			}
+			default:
+				break;
+			}
+		}
+		void operator()(const json_schema::Array& schema) const {
+			return (*this)(static_cast<const v2::Array&>(schema));
+		}
+	};
+	return schema.Visit(Visitor{hpp_out, name, indent});
+}
+
+Type StructPrinter::PrintJSONValueFromTagDecl(std::string_view name, const JsonSchema& schema) {
+	struct Visitor final {
+		std::ostream& _os;
+		std::string_view _name;
+
+		void operator()(const v2::Object& schema) const {
+			_os << "void tag_invoke(boost::json::value_from_tag, boost::json::value& jv, const " << _name << "& v);\n";
+		}
+		void operator()(const json_schema::Object& schema) const {
+			return (*this)(static_cast<const v2::Object&>(schema));
+		}
+	};
+	return schema.Visit(Visitor{hpp_out, sanitize(name)});
+}
+
+Type StructPrinter::PrintJSONValueFromTagImpl(std::string_view name, const JsonSchema& schema) {
+	struct Visitor final {
+		std::ostream& _os;
+		std::string_view _parent_name;
+		std::string_view _name;
+
+		void operator()(const v2::Object& schema) const {
+			const auto full_name =
+				(_parent_name.empty()) ? std::string(_name) : (std::string(_parent_name) + "::" + std::string(_name));
+			for (const auto& [propname, prop] : schema.properties()) {
+				prop.Visit(Visitor{_os, full_name, sanitize(propname)});
+			}
+
+			_os << "void tag_invoke(boost::json::value_from_tag, boost::json::value& jv, const " << full_name
+				<< "& v) {\n";
+			_os << "\tjv = {\n";
+			for (const auto& [propname, prop] : schema.properties()) {
+				const auto sanitized_propname = sanitize(propname);
+				if (prop.Type_() == Type::object) {
+					_os << "\t\t{ \"" << propname << "\", js::value_from(v." << sanitized_propname
+						<< "_, jv.storage()) },\n";
+				} else {
+					_os << "\t\t{ \"" << propname << "\", v." << sanitized_propname << " },\n";
+				}
+			}
+			_os << "\t};\n";
+			_os << "}\n";
+		}
+		void operator()(const json_schema::Object& schema) const {
+			return (*this)(static_cast<const v2::Object&>(schema));
+		}
+		void operator()(const v2::Array& schema) const {
+			const auto& itemschema = schema.items();
+			itemschema.Visit(Visitor{_os, _parent_name, std::string(_name) + "_entry"});
+		}
+		void operator()(const json_schema::Array& schema) const {
+			return (*this)(static_cast<const v2::Array&>(schema));
+		}
+	};
+	return schema.Visit(Visitor{cpp_out, "", sanitize(name)});
+}
+
+Type StructPrinter::PrintJSONValueToTagDecl(std::string_view name, const JsonSchema& schema) {
+	struct Visitor final {
+		std::ostream& _os;
+		std::string_view _name;
+
+		void operator()(const v2::Object& schema) const {
+			_os << _name << " tag_invoke(boost::json::value_to_tag<" << _name << ">, const boost::json::value& jv);\n";
+		}
+		void operator()(const json_schema::Object& schema) const {
+			return (*this)(static_cast<const v2::Object&>(schema));
+		}
+	};
+
+	return schema.Visit(Visitor{hpp_out, sanitize(name)});
+}
+
+/// OLD
+
 void PrintReferenceSchema(
 	std::ostream& os,
 	std::string_view name,
@@ -32,16 +283,6 @@ void PrintSchema(std::ostream& os, std::string_view name, const openapi::v2::Sch
 	} else {
 		os << indent << openapi::JsonTypeToCppType(schema.type()) << ' ' << name << ";\n";
 	}
-}
-
-void PrintSchema(std::ostream& os, std::string_view name, const Schema2& schema, std::string& indent) {
-	struct Visitor {
-		std::ostream& _os;
-		std::string_view _name;
-		std::string& _indent;
-
-		void operator()(const Array& obj) { const auto items = obj.items(); }
-	};
 }
 
 void PrintReferenceSchema(
@@ -116,19 +357,6 @@ void PrintArraySchema(std::ostream& os, std::string_view name, const openapi::v2
 	os << std::endl;
 }
 
-void PrintJSONValueFromTagDecl(std::ostream& out, std::string_view name, const openapi::v2::Schema& schema) {
-	if (schema.IsReference()) {
-		return;
-	}
-	// We only care about objects here
-	if (schema.type() != "object" && schema.type() != "array" && schema.properties().empty()) {
-		return;
-	}
-
-	out << "void tag_invoke(boost::json::value_from_tag, boost::json::value& jv, const " << name << "& v);\n"
-		<< std::endl;
-}
-
 void PrintJSONValueFromTag(std::ostream& out, std::string_view name, const openapi::v2::Schema& schema) {
 	if (schema.IsReference()) {
 		return;
@@ -166,19 +394,6 @@ void PrintJSONValueFromTag(std::ostream& out, std::string_view name, const opena
 	for (const auto& [propname, prop] : nested_objects) {
 		PrintJSONValueFromTag(out, std::string(name) + "::" + propname, prop);
 	}
-}
-
-void PrintJSONValueToTagDecl(std::ostream& out, std::string_view name, const openapi::v2::Schema& schema) {
-	if (schema.IsReference()) {
-		return;
-	}
-	// We only care about objects here
-	if (schema.type() != "object" && schema.type() != "array" && schema.properties().empty()) {
-		return;
-	}
-
-	out << name << " tag_invoke(boost::json::value_to_tag<" << name << ">, const boost::json::value& jv);\n"
-		<< std::endl;
 }
 
 void PrintJSONValueToTag(std::ostream& out, std::string_view name, const openapi::v2::Schema& schema) {
@@ -246,6 +461,9 @@ void PrintJSONValueToTag(std::ostream& out, std::string_view name, const openapi
 
 // Write the struct definitions file.
 void PrintStructDefinitions(const OpenAPIv2& file, const fs::path& input, const fs::path& output) {
+#if 1
+	[[maybe_unused]] bool b = StructPrinter(file, input, output)();
+#else
 	fs::path definitions_hpp = output / (input.stem().string() + "_defs.hpp");
 	auto out_hpp = std::ofstream(definitions_hpp);
 	out_hpp << "// Automatically generated from " << input.string() << ". Do not modify this file.\n"
@@ -275,9 +493,7 @@ void PrintStructDefinitions(const OpenAPIv2& file, const fs::path& input, const 
 	for (const auto& [defname, def] : file.definitions()) {
 		const auto name = sanitize(defname);
 		PrintSchema(out_hpp, name, def, indent);
-		PrintJSONValueFromTagDecl(out_hpp, name, def);
 		PrintJSONValueFromTag(out_cpp, name, def);
-		PrintJSONValueToTagDecl(out_hpp, name, def);
 		PrintJSONValueToTag(out_cpp, name, def);
 	}
 
@@ -292,7 +508,6 @@ void PrintStructDefinitions(const OpenAPIv2& file, const fs::path& input, const 
 						const auto name = openapi::SynthesizeFunctionName(pathname, verb) + std::string(param.name());
 						sanitize(name);
 						PrintSchema(out_hpp, name, schema, indent);
-						PrintJSONValueFromTagDecl(out_hpp, name, schema);
 						PrintJSONValueFromTag(out_cpp, name, schema);
 					}
 				}
@@ -305,8 +520,6 @@ void PrintStructDefinitions(const OpenAPIv2& file, const fs::path& input, const 
 					sanitize(name);
 					write_multiline_comment(out_hpp, resp.description(), "");
 					PrintSchema(out_hpp, name, schema, indent);
-					PrintJSONValueToTagDecl(out_hpp, name, schema);
-					PrintJSONValueToTag(out_cpp, name, schema);
 				}
 			}
 		}
@@ -314,6 +527,7 @@ void PrintStructDefinitions(const OpenAPIv2& file, const fs::path& input, const 
 
 	out_hpp << "} // namespace swagger\n";
 	out_cpp << "} // namespace swagger\n";
+#endif
 }
 
 } // namespace openapi::v2

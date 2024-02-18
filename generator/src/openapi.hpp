@@ -290,12 +290,15 @@ public:
 	std::string_view format() const;
 	std::string_view example() const;
 
+	// Sometimes, but not always, this property exists.
+	std::string_view description() const;
+
 	using SchemaList = __detail::ListAdaptor<JsonSchema>;
 	SchemaList anyOf() const;
 	SchemaList oneOf() const;
 };
 
-class String final : public JsonSchema {
+class String : public JsonSchema {
 protected:
 	using JsonSchema::JsonSchema;
 
@@ -317,7 +320,7 @@ public:
 	int64_t multipleOf() const;
 };
 
-class Integer final : public Number {
+class Integer : public Number {
 protected:
 	using Number::Number;
 
@@ -325,14 +328,14 @@ public:
 	// Same as number
 };
 
-class Boolean final : public JsonSchema {
+class Boolean : public JsonSchema {
 protected:
 	using JsonSchema::JsonSchema;
 
 public:
 };
 
-class Object final : public JsonSchema {
+class Object : public JsonSchema {
 protected:
 	using JsonSchema::JsonSchema;
 
@@ -345,7 +348,7 @@ public:
 	Properties properties() const;
 };
 
-class Array final : public JsonSchema {
+class Array : public JsonSchema {
 protected:
 	using JsonSchema::JsonSchema;
 

@@ -40,56 +40,24 @@ public:
 
 // Protected inheritance because not everything in the base class exists in this subclass.
 // Make public the fields and functions on a case-by-case basis.
-class Schema2 : public json_schema::JsonSchema {
+
+using Schemas = __detail::MapAdaptor<json_schema::JsonSchema>;
+
+class Object final : public json_schema::Object {
 public:
-	using Base = typename json_schema::JsonSchema;
-	using Base::Base;
-	using Base::Type;
-};
-
-class String final : public Schema2 {
-public:
-	using Schema2::Schema2;
-
-	uint64_t minLength() const;
-	uint64_t maxLength() const;
-	std::string_view pattern() const;
-};
-
-class Number final : public Schema2 {
-public:
-	using Schema2::Schema2;
-
-	uint64_t maximum() const;
-	bool exclusiveMaximum() const;
-	uint64_t minimum() const;
-	bool exclusiveMinimum() const;
-	int64_t multipleOf() const;
-};
-
-class Object final : public Schema2 {
-public:
-	using Schema2::Schema2;
+	using json_schema::Object::Object;
 	using Enum = __detail::ListAdaptor<std::string_view>;
 
 	std::string_view title() const;
 	std::string_view description() const;
-	int64_t maxProperties() const;
-	int64_t minProperties() const;
-	bool required() const;
 	Enum enum_() const;
-	Schema2 properties() const;
 };
 
-class Array final : public Schema2 {
+class Array final : public json_schema::Array {
 public:
-	using Schema2::Schema2;
+	using json_schema::Array::Array;
 
 	std::string_view collectionFormat() const;
-	Schema2 items() const;
-	int64_t minItems() const;
-	int64_t maxItems() const;
-	bool uniqueItems() const;
 };
 
 class Schema : public Item {
@@ -148,9 +116,9 @@ public:
 	Schema schema() const;
 };
 
-class Header final : public Schema2 {
+class Header final : public json_schema::JsonSchema {
 public:
-	using Schema2::Schema2;
+	using json_schema::JsonSchema::JsonSchema;
 
 	std::string_view description() const;
 };
@@ -158,7 +126,7 @@ public:
 class Response : public __detail::Object<Response> {
 public:
 	using __detail::Object<Response>::Object;
-	using Headers = __detail::MapAdaptor<Schema2>;
+	using Headers = __detail::MapAdaptor<json_schema::JsonSchema>;
 
 	std::string_view description() const;
 	Schema schema() const;
@@ -202,6 +170,8 @@ public:
 	// responses
 	Tags tags() const;
 	ExternalDocumentation externalDocs() const;
+
+	Schemas def2() const;
 
 	Schema GetDefinedSchemaByReference(std::string_view);
 };

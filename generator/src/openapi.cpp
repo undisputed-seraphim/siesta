@@ -114,6 +114,7 @@ std::string_view JsonSchema::type() const { return _GetValueIfExist<std::string_
 std::string_view JsonSchema::name() const { return _GetValueIfExist<std::string_view>("name"); }
 std::string_view JsonSchema::format() const { return _GetValueIfExist<std::string_view>("format"); }
 std::string_view JsonSchema::example() const { return _GetValueIfExist<std::string_view>("example"); }
+std::string_view JsonSchema::description() const { return _GetValueIfExist<std::string_view>("description"); }
 
 bool JsonSchema::IsPrimitive(Type type) noexcept {
 	switch (type) {
