@@ -163,34 +163,21 @@ Type StructPrinter::PrintSchemaDecl(std::string_view name, const JsonSchema& sch
 		std::string_view _name;
 		std::string& _indent;
 
-		// void operator()(const String& schema) const { _os << _indent << "std::string " << _name << ";\n"; }
-		// void operator()(const Number& schema) const { _os << _indent << "double " << _name << ";\n"; }
-		// void operator()(const Integer& schema) const { _os << _indent << "int64_t " << _name << ";\n"; }
-		// void operator()(const Boolean& schema) const { _os << _indent << "bool " << _name << ";\n"; }
+		void print_primitive(std::string_view type, std::string_view format) const {
+			_os << _indent << JsonTypeToCppType(type, format) << ' ' << _name << ";\n";
+		}
+		void operator()(const String& schema) const { print_primitive(schema.type(), schema.format()); }
+		void operator()(const Number& schema) const { print_primitive(schema.type(), schema.format()); }
+		void operator()(const Integer& schema) const { print_primitive(schema.type(), schema.format()); }
+		void operator()(const Boolean& schema) const { print_primitive(schema.type(), schema.format()); }
 		void operator()(const Object& schema) const {
 			const auto sanitized_name = sanitize(_name);
 			_os << _indent << "struct " << sanitized_name << " {\n";
+
 			_indent.push_back('\t');
 			for (const auto& [propname, prop] : schema.properties()) {
 				const auto sanitized_propname = sanitize(propname);
-				const auto type = prop.Type_();
-				switch (type) {
-				case Type::string:
-				case Type::number:
-				case Type::integer:
-				case Type::boolean: {
-					_os << _indent << JsonTypeToCppType(prop.type(), prop.format()) << ' ' << sanitized_propname
-						<< ";\n";
-					break;
-				}
-				case Type::object:
-				case Type::array: {
-					prop.Visit(SchemaVisitor{_os, sanitized_propname, _indent});
-					break;
-				}
-				default:
-					break;
-				}
+				prop.Visit(SchemaVisitor{_os, sanitized_propname, _indent});
 			}
 			_indent.pop_back();
 
@@ -206,18 +193,14 @@ Type StructPrinter::PrintSchemaDecl(std::string_view name, const JsonSchema& sch
 				std::string_view _name;
 				std::string& _indent;
 
-				void operator()(const String& schema) const {
-					_os << _indent << "std::vector<std::string> " << _name << ";\n";
+				void print_primitive(std::string_view type, std::string_view format) const {
+					_os << _indent << "std::vector<" << JsonTypeToCppType(type, format) << "> " << _name << ";\n";
 				}
-				void operator()(const Number& schema) const {
-					_os << _indent << "std::vector<double> " << _name << ";\n";
-				}
-				void operator()(const Integer& schema) const {
-					_os << _indent << "std::vector<int64_t> " << _name << ";\n";
-				}
-				void operator()(const Boolean& schema) const {
-					_os << _indent << "std::vector<bool> " << _name << ";\n";
-				}
+
+				void operator()(const String& schema) const { print_primitive(schema.type(), schema.format()); }
+				void operator()(const Number& schema) const { print_primitive(schema.type(), schema.format()); }
+				void operator()(const Integer& schema) const { print_primitive(schema.type(), schema.format()); }
+				void operator()(const Boolean& schema) const { print_primitive(schema.type(), schema.format()); }
 				void operator()(const Object& schema) const {
 					if (schema.IsRef()) {
 						_os << _indent << "using " << _name << " = "
@@ -278,29 +261,23 @@ Type StructPrinter::PrintJSONValueFromTagImpl(std::string_view name, const JsonS
 	struct SchemaVisitor final {
 		std::ostream& _os;
 		std::string_view _name;
-		std::string& _indent;
 
 		void operator()(const Object& schema) const {
-			_os << _indent << "void tag_invoke(boost::json::value_from_tag, boost::json::value& jv, const " << _name
-				<< "& v) {\n";
-			_indent.push_back('\t');
-			_os << _indent << "jv = {\n";
-			_indent.push_back('\t');
+			_os << "void tag_invoke(boost::json::value_from_tag, boost::json::value& jv, const " << _name << "& v) {\n";
+			_os << "\tjv = {\n";
 			for (const auto& [propname, prop] : schema.properties()) {
 				if (prop.Type_() == Type::object) {
-					_os << _indent << "{ \"" << propname << "\", v." << propname << "_ },\n";
+					_os << "\t\t{ \"" << propname << "\", js::value_from(v." << propname << "_, jv.storage()) },\n";
 				} else {
-					_os << _indent << "{ \"" << propname << "\", v." << propname << " },\n";
+					_os << "\t\t{ \"" << propname << "\", v." << propname << " },\n";
 				}
 			}
-			_indent.pop_back();
-			_os << _indent << "};\n";
-			_indent.pop_back();
-			_os << _indent << "}\n";
+			_os << "\t};\n";
+			_os << "}\n";
 		}
 	};
 
-	return schema.Visit(SchemaVisitor{cpp_out, name, indent});
+	return schema.Visit(SchemaVisitor{cpp_out, name});
 }
 
 Type StructPrinter::PrintJSONValueToTagDecl(std::string_view name, const JsonSchema& schema) {
@@ -319,30 +296,44 @@ Type StructPrinter::PrintJSONValueToTagDecl(std::string_view name, const JsonSch
 Type StructPrinter::PrintJSONValueToTagImpl(std::string_view name, const JsonSchema& schema) {
 	struct SchemaVisitor final {
 		std::ostream& _os;
+		std::string_view _parent_name;
 		std::string_view _name;
 		std::string& _indent;
 
 		void operator()(const Object& schema) const {
-			_os << _name << " tag_invoke(boost::json::value_to_tag<" << _name << ">, const boost::json::value& jv) {\n";
+			const std::string full_name =
+				(_parent_name.empty()) ? std::string(_name) : (std::string(_parent_name) + "::" + std::string(_name));
+
+			// First recurse to the leaf nodes of the tree to print nested structs
+			for (const auto& [propname, prop] : schema.properties()) {
+				Type nestedtype = prop.Visit(SchemaVisitor{_os, full_name, sanitize(propname), _indent});
+			}
+
+			_os << full_name << " tag_invoke(boost::json::value_to_tag<" << full_name
+				<< ">, const boost::json::value& jv) {\n";
 			_indent.push_back('\t');
+
 			// Write usings first for simplicity of implementation
 			for (const auto& [propname, prop] : schema.properties()) {
 				if (prop.Type_() == Type::object) {
-					_os << _indent << "using " << propname << " = " << _name << "::" << propname << ";\n";
+					const auto sanitized_propname = sanitize(propname);
+					_os << _indent << "using " << sanitized_propname << " = " << full_name << "::" << sanitized_propname
+						<< ";\n";
 				}
 			}
 
 			_os << _indent << "const auto& obj = jv.as_object();\n";
-			_os << _indent << _name << " ret;\n";
+			_os << _indent << full_name << " ret;\n";
 			for (const auto& [propname, prop] : schema.properties()) {
+				const auto sanitized_propname = sanitize(propname);
 				if (prop.Type_() == Type::object) {
-					_os << _indent << "ret." << propname << "_ = js::value_to<" << propname << ">(obj.at(\"" << propname
-						<< "\"));\n";
+					_os << _indent << "ret." << sanitized_propname << "_ = js::value_to<" << sanitized_propname
+						<< ">(obj.at(\"" << propname << "\"));\n";
 				} else if (prop.Type_() == Type::array) {
-					_os << _indent << "ret." << propname << " = js::value_to<decltype(ret." << propname
-						<< ")>(obj.at(\"" << propname << "\"));\n";
+					_os << _indent << "ret." << sanitized_propname << " = js::value_to<decltype(ret."
+						<< sanitized_propname << ")>(obj.at(\"" << propname << "\"));\n";
 				} else {
-					_os << _indent << "ret." << propname << " = js::value_to<"
+					_os << _indent << "ret." << sanitized_propname << " = js::value_to<"
 						<< JsonTypeToCppType(prop.type(), prop.format()) << ">(obj.at(\"" << propname << "\"));\n";
 				}
 			}
@@ -350,9 +341,12 @@ Type StructPrinter::PrintJSONValueToTagImpl(std::string_view name, const JsonSch
 			_indent.pop_back();
 			_os << _indent << "}\n";
 		}
+		void operator()(const Array& schema) const {
+			schema.items().Visit(SchemaVisitor{_os, _parent_name, std::string(_name) + "_entry", _indent});
+		}
 	};
 
-	return schema.Visit(SchemaVisitor{cpp_out, name, indent});
+	return schema.Visit(SchemaVisitor{cpp_out, "", sanitize(name), indent});
 }
 
 // Public interface
