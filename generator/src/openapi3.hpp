@@ -8,13 +8,13 @@ using common::ExternalDocumentation;
 using common::Info;
 using common::Tag;
 using common::Tags;
-using json_schema::JsonSchema;
-using json_schema::String;
-using json_schema::Number;
-using json_schema::Integer;
-using json_schema::Boolean;
-using json_schema::Object;
 using json_schema::Array;
+using json_schema::Boolean;
+using json_schema::Integer;
+using json_schema::JsonSchema;
+using json_schema::Number;
+using json_schema::Object;
+using json_schema::String;
 
 class Example final : public __detail::Object<Example> {
 public:

@@ -102,23 +102,44 @@ void StructPrinter::PrintComponentParameters() {
 
 void StructPrinter::PrintParameter(const Parameter& parameter) {
 	if (parameter.IsRef()) {
-
+		// TODO
 	} else {
 		write_multiline_comment(hpp_out, parameter.description(), indent);
-		PrintSchema(parameter.name(), parameter.schema());
+		// We only need to print schema if the parameter is not a primitive.
+		if (parameter.schema().Type_() == Type::object || parameter.schema().Type_() == Type::array) {
+			PrintSchema(parameter.name(), parameter.schema());
+		}
 	}
 }
 
 void StructPrinter::PrintParameter(std::string_view name, const Parameter& parameter) {
 	using Location = Parameter::Location;
-	write_multiline_comment(hpp_out, parameter.description(), indent);
-	hpp_out << "struct " << name << " {\n";
-	indent.push_back('\t');
 
-	// PrintSchema(os, name, parameter.schema(), indent);
+	struct SchemaVisitor final {
+		std::ostream& _os;
+		std::string_view _name;
 
-	indent.pop_back();
-	hpp_out << "};\n";
+		void print_primitive(std::string_view type, std::string_view format) const {
+			//_os << "using " << _name << " = " << JsonTypeToCppType(type, format) << ";\n";
+			// NOTE: There is no need to supply a using typedef for primitives.
+		}
+		void operator()(const String& schema) const { print_primitive(schema.type(), schema.format()); }
+		void operator()(const Number& schema) const { print_primitive(schema.type(), schema.format()); }
+		void operator()(const Integer& schema) const { print_primitive(schema.type(), schema.format()); }
+		void operator()(const Boolean& schema) const { print_primitive(schema.type(), schema.format()); }
+		void operator()(const Object& schema) const {
+			// TODO left blank because I haven't encountered any examples of this yet.
+			// But this can call PrintSchemaDecl somehow.
+		}
+		void operator()(const Array& schema) const {
+			// TODO left blank because I haven't encountered any examples of this yet.
+			// But this can call PrintSchemaDecl somehow.
+		}
+	};
+
+	// write_multiline_comment(hpp_out, parameter.description(), indent);
+
+	parameter.schema().Visit(SchemaVisitor{hpp_out, name});
 }
 
 void StructPrinter::PrintComponentResponses() {
@@ -162,6 +183,7 @@ Type StructPrinter::PrintSchemaDecl(std::string_view name, const JsonSchema& sch
 		std::ostream& _os;
 		std::string_view _name;
 		std::string& _indent;
+		bool _instantiate = true;
 
 		void print_primitive(std::string_view type, std::string_view format) const {
 			_os << _indent << JsonTypeToCppType(type, format) << ' ' << _name << ";\n";
@@ -184,11 +206,15 @@ Type StructPrinter::PrintSchemaDecl(std::string_view name, const JsonSchema& sch
 			if (_indent.empty()) {
 				_os << _indent << "};\n";
 			} else {
-				_os << _indent << "} " << sanitized_name << "_;\n";
+				if (_instantiate) {
+					_os << _indent << "} " << sanitized_name << "_;\n";
+				} else {
+					_os << _indent << "};\n";
+				}
 			}
 		}
 		void operator()(const Array& schema) const {
-			struct ArrayItemVisitor {
+			struct ArrayItemVisitor final {
 				std::ostream& _os;
 				std::string_view _name;
 				std::string& _indent;
@@ -207,7 +233,7 @@ Type StructPrinter::PrintSchemaDecl(std::string_view name, const JsonSchema& sch
 							<< "std::vector<" << schema.name() << ">;\n";
 					} else {
 						const auto entry_name = std::string(_name) + "_entry";
-						schema.Visit(SchemaVisitor{_os, entry_name, _indent});
+						schema.Visit(SchemaVisitor{_os, entry_name, _indent, false});
 						_os << _indent << "std::vector<" << entry_name << "> " << _name << ";\n";
 					}
 				}

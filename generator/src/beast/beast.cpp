@@ -1,9 +1,37 @@
 #include "beast.hpp"
 
+#include <beast/v2/beastv2.hpp>
+#include <beast/v3/beastv3.hpp>
+
 namespace fs = std::filesystem;
 using namespace std::literals;
 
 namespace siesta::beast {
+
+const std::unordered_map<std::string_view, std::string_view> verbMap = {
+	{"", ""},
+	{"delete", "delete_"},
+	{"get", "get"},
+	{"head", "head"},
+	{"post", "post"},
+	{"put", "put"},
+	{"connect", "connect"},
+	{"options", "options"},
+	{"trace", "trace"},
+	// WebDAV
+	{"copy", "copy"},
+	{"lock", "lock"},
+	{"mkcol", "mkcol"},
+	{"move", "move"},
+	{"propfind", "propfind"},
+	{"proppatch", "proppatch"},
+	{"search", "search"},
+	{"unlock", "unlock"},
+	{"bind", "bind"},
+	{"rebind", "rebind"},
+	{"unbind", "unbind"},
+	{"acl", "acl"},
+};
 
 std::string clean_path_string(std::string_view original) {
 	std::string copy;
@@ -40,15 +68,16 @@ std::string clean_path_string(std::string_view original) {
 
 void beast(const fs::path& input, const fs::path& output, const openapi::v2::OpenAPIv2& file) {
 	openapi::v2::PrintStructDefinitions(file, input, output);
-	beast_server_hpp(input, output, file);
-	beast_server_cpp(input, output, file);
-
-	beast_client_hpp(input, output, file);
-	// beast_client_cpp(input, output, file);
+	v2::V2Printer printer(file, input.stem().string());
+	printer.print_server(output);
+	printer.print_client(output);
 }
 
 void beast(const fs::path& input, const fs::path& output, const openapi::v3::OpenAPIv3& file) {
 	openapi::v3::PrintStructDefinitions(file, input, output);
+	v3::V3Printer printer(file, input.stem().string());
+	printer.print_server(output);
+	printer.print_client(output);
 }
 
 } // namespace siesta::beast

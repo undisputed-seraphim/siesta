@@ -14,9 +14,6 @@ namespace fs = std::filesystem;
 namespace po = ::boost::program_options;
 using namespace std::literals;
 
-// Forward-declared backends
-void beast(const fs::path& input, const fs::path& output, const openapi::v2::OpenAPIv2& file);
-
 int main(int argc, char* argv[]) try {
 	fs::path input_json;
 	fs::path output_dir;
