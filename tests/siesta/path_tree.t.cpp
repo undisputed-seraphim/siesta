@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <catch2/catch.hpp>
 #include <siesta/path_tree.hpp>
 

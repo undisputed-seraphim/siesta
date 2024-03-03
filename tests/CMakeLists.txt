@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 if (NOT BUILD_TESTING)
 	#return()
 endif()

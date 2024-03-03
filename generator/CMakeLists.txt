@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: Apache-2.0
 
 file(GLOB_RECURSE generator_src "${CMAKE_CURRENT_SOURCE_DIR}/src/*")
 add_executable(siesta-generator ${generator_src})
