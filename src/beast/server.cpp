@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <boost/beast/http/write.hpp>
 #include <iostream>
 #include <siesta/beast/server.hpp>

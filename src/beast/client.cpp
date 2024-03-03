@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: Apache-2.0
 #include <boost/asio/connect.hpp>
 #include <boost/beast/http/error.hpp>
 #include <iostream>

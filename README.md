@@ -5,4 +5,3 @@ Siesta itself does not come with a REST backend.
 
 ## Supported backends
 - Boost.Beast
-- nghttp2_asio
