@@ -104,6 +104,17 @@ void V3Printer::print_dispatcher_function(std::string className) {
 		out << "\t}},\n";
 	}
 	out << "};\n\n";
+
+	out << "void " << className << "::handle_request(const request req, Session::Ptr session) {\n";
+	out << "\tif (auto optref = PATHS.const_at(req.target()); optref.has_value()) {\n";
+	out << "\t\tconst auto& match = optref.value().get();\n";
+	out << "\t\tauto it = match.find(req.method());\n";
+	out << "\t\tif (it != match.end()) {\n";
+	out << "\t\t\treturn (this->*(*it).second)(req, std::move(session));\n";
+	out << "\t\t}\n";
+	out << "\t}\n";
+	out << "\t// 404\n";
+	out << "}\n";
 }
 
 } // namespace siesta::beast::v3

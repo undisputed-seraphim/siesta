@@ -40,13 +40,23 @@ void sanitize(std::string& input) {
 		input.begin(),
 		input.end(),
 		[](char c) -> bool {
-			constexpr auto chars = std::array{'/', '-', '.', ':', '+', ' ', '(', ')'};
+			constexpr auto chars = std::array{'/', '-', '.', ':', '+', ' ', '(', ')', '@'};
 			return std::any_of(chars.begin(), chars.end(), [c](char d) { return c == d; });
 		},
 		'_');
 
 	// Reserved keywords in C++.
-	constexpr auto reserved = std::array{"operator"sv, "long"sv, "short"sv};
+	constexpr auto reserved = std::array{
+		"operator"sv,
+		"long"sv,
+		"short"sv,
+		"public"sv,
+		"protected"sv,
+		"private"sv,
+		"default"sv,
+		"delete"sv,
+		"namespace"sv,
+	};
 	if (std::any_of(reserved.begin(), reserved.end(), [&input](const std::string_view& kw) { return input == kw; })) {
 		input.push_back('_');
 	}

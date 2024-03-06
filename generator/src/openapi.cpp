@@ -107,15 +107,33 @@ JsonSchema::Type JsonSchema::Type_() const noexcept {
 	if (sv == "array") {
 		return Type::array;
 	}
+	if (sv == "null") {
+		return Type::null;
+	}
 	return Type::unknown;
 }
 
 // JsonSchema
-std::string_view JsonSchema::type() const { return _GetValueIfExist<std::string_view>("type"); }
 std::string_view JsonSchema::name() const { return _GetValueIfExist<std::string_view>("name"); }
 std::string_view JsonSchema::format() const { return _GetValueIfExist<std::string_view>("format"); }
 std::string_view JsonSchema::example() const { return _GetValueIfExist<std::string_view>("example"); }
 std::string_view JsonSchema::description() const { return _GetValueIfExist<std::string_view>("description"); }
+
+// Sometimes, type can be an array, so handling it is a little more tricky.
+// If it's an array, we only care about the first type for now.
+// TODO: Improve handling
+std::string_view JsonSchema::type() const {
+	static constexpr std::string_view key = "type";
+	if (HasKey(key)) {
+		if (KeyIsType<std::string_view>(key)) {
+			return _json.at_key(key).get_string();
+		}
+		if (KeyIsType<simdjson::dom::array>(key)) {
+			return *_json.at_key(key).get_array().begin();
+		}
+	}
+	return "";
+}
 
 bool JsonSchema::IsPrimitive(Type type) noexcept {
 	switch (type) {
