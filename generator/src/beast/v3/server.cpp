@@ -103,7 +103,7 @@ void V3Printer::print_dispatcher_function(std::string className) {
 		}
 		out << "\t}},\n";
 	}
-	out << "};\n";
+	out << "};\n\n";
 }
 
 } // namespace siesta::beast::v3

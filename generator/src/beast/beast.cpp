@@ -9,31 +9,6 @@ using namespace std::literals;
 
 namespace siesta::beast {
 
-const std::unordered_map<std::string_view, std::string_view> verbMap = {
-	{"", ""},
-	{"delete", "delete_"},
-	{"get", "get"},
-	{"head", "head"},
-	{"post", "post"},
-	{"put", "put"},
-	{"connect", "connect"},
-	{"options", "options"},
-	{"trace", "trace"},
-	// WebDAV
-	{"copy", "copy"},
-	{"lock", "lock"},
-	{"mkcol", "mkcol"},
-	{"move", "move"},
-	{"propfind", "propfind"},
-	{"proppatch", "proppatch"},
-	{"search", "search"},
-	{"unlock", "unlock"},
-	{"bind", "bind"},
-	{"rebind", "rebind"},
-	{"unbind", "unbind"},
-	{"acl", "acl"},
-};
-
 std::string clean_path_string(std::string_view original) {
 	std::string copy;
 	copy.reserve(original.size());

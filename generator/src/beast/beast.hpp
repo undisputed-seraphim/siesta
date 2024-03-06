@@ -12,8 +12,6 @@
 
 namespace siesta::beast {
 
-extern const std::unordered_map<std::string_view, std::string_view> verbMap;
-
 std::string clean_path_string(std::string_view original);
 
 void beast(const std::filesystem::path& input, const std::filesystem::path& output, const openapi::v2::OpenAPIv2& file);

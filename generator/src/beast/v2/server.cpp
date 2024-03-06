@@ -67,6 +67,8 @@ void V2Printer::print_server_cpp() {
 	auto& out = srv_cpp_ofs;
 	out << "#include <boost/json.hpp>\n"
 		<< "#include <fmt/format.h>\n"
+		<< "#include <siesta/path_tree.hpp>\n"
+		<< "#include <unordered_map>\n"
 		<< '\n'
 		<< "#include \"" << srv_hpp.filename().string() << "\"\n"
 		<< '\n'
@@ -102,21 +104,21 @@ void V2Printer::print_query_details(const openapi::v2::Operation& op, std::strin
 }
 
 void V2Printer::print_dispatcher_function(std::string className) {
-	auto& out = srv_hpp_ofs;
-	// TODO: Replace this with a trie
-	out << "const std::unordered_map<std::pair<std::string_view, http::verb>, Server::fnptr_t, "
-		   "::siesta::beast::__detail::MapHash> g_pathmap = {\n";
+	auto& out = srv_cpp_ofs;
+
+	out << "const siesta::node<std::unordered_map<http::verb, Server::fnptr_t>> PATHS = {\n";
 	for (const auto& [pathstr, path] : file.paths()) {
 		// TODO: Need to clean the path string here
-		const auto fullPathStr = std::string(file.basePath()).append(pathstr);
+		out << "\t{ \"" << std::string(file.basePath()).append(pathstr) << "\", {\n";
 		for (const auto& [opstr, op] : path.operations()) {
 			const std::string fnName =
 				(op.operationId().empty()
 					 ? openapi::SynthesizeFunctionName(pathstr, openapi::RequestMethodFromString(opstr))
 					 : std::string(op.operationId()));
-			out << "\t{{\"" << fullPathStr << "\"sv, http::verb::" << verbMap.at(opstr) << "}, &Server::" << fnName
-				<< "},\n";
+			out << "\t\t{ http::verb::" << opstr << (opstr == "delete" ? "_" : "") << ", &" << className
+				<< "::" << fnName << " },\n";
 		}
+		out << "\t}},\n";
 	}
 	out << "};\n\n";
 
