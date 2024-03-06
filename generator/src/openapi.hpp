@@ -42,6 +42,16 @@ inline bool simdjson_noerror(const simdjson::internal::simdjson_result_base<T>& 
 	return ec.error() == simdjson::error_code();
 }
 
+// Concept that accepts all numbers and (view only) strings
+template <typename T>
+concept json_primitive = (std::convertible_to<std::string_view, T> || std::integral<T> || std::floating_point<T>);
+
+// Concept that accepts json_primitives + objects and arrays
+template <typename T>
+concept simdjson_element =
+	(std::convertible_to<simdjson::dom::object, T> || std::convertible_to<simdjson::dom::array, T> ||
+	 json_primitive<T>);
+
 template <typename T>
 class ListAdaptor final : public simdjson::dom::array {
 public:
@@ -136,16 +146,32 @@ public:
 	// True if this object is valid JSON, otherwise false.
 	inline operator bool() const noexcept { return _is_valid; }
 
+	// Test if a json object has a key.
+	bool HasKey(std::string_view key) const noexcept { return simdjson_noerror(_json.at_key(key)); }
+
+	// Test if that key is of type T. Assumes key is present.
+	// Use HasKey to test for presence first if necessary.
+	template <simdjson_element U>
+	bool KeyIsType(std::string_view key) const noexcept {
+		return _json.at_key(key).is<U>();
+	}
+
 protected:
+	// For complex types (objects, arrays)
 	template <typename U>
 	U _GetObjectIfExist(std::string_view key) const noexcept {
 		const auto& v = _json.at_key(key);
 		return simdjson_noerror(v) ? U(v) : U();
 	}
-	template <typename U>
+
+	// For 'primitive types' (strings, numbers)
+	template <json_primitive U>
 	U _GetValueIfExist(std::string_view key) const noexcept {
 		const auto& v = _json.at_key(key);
-		return simdjson_noerror(v) ? v.get<U>().value() : U();
+		if (simdjson_noerror(v) && v.is<U>()) {
+			return v.get<U>().value();
+		}
+		return U();
 	}
 
 	bool _is_valid;
@@ -276,6 +302,7 @@ public:
 		boolean,
 		object,
 		array,
+		null,
 	};
 	// Returns true for strings, numbers, and booleans.
 	static bool IsPrimitive(Type) noexcept;
@@ -371,39 +398,52 @@ JsonSchema::Type JsonSchema::Visit(VisitorType&& v) const {
 	if constexpr (std::is_invocable_v<Visitor, const String&>) {
 		if (type == Type::string) {
 			std::forward<Visitor>(v)(static_cast<const String&>(*this));
+			return Type::string;
 		}
 	}
 	if constexpr (std::is_invocable_v<Visitor, const Number&>) {
 		if (type == Type::number) {
 			std::forward<Visitor>(v)(static_cast<const Number&>(*this));
+			return Type::number;
 		}
 	}
 	if constexpr (std::is_invocable_v<Visitor, const Integer&>) {
 		if (type == Type::integer) {
 			std::forward<Visitor>(v)(static_cast<const Integer&>(*this));
+			return Type::integer;
 		}
 	}
 	if constexpr (std::is_invocable_v<Visitor, const Boolean&>) {
 		if (type == Type::boolean) {
 			std::forward<Visitor>(v)(static_cast<const Boolean&>(*this));
+			return Type::boolean;
 		}
 	}
 	if constexpr (std::is_invocable_v<Visitor, const Array&>) {
 		if (type == Type::array) {
 			std::forward<Visitor>(v)(static_cast<const Array&>(*this));
+			return Type::array;
 		}
 	}
 	if constexpr (std::is_invocable_v<Visitor, const json_schema::Object&>) {
 		if (type == Type::object) {
 			std::forward<Visitor>(v)(static_cast<const json_schema::Object&>(*this));
+			return Type::object;
 		}
 	}
 	if constexpr (std::is_invocable_v<Visitor, std::string_view>) {
 		if (this->IsRef()) {
 			std::forward<Visitor>(v)(this->ref());
+			return Type::unknown;
 		}
 	}
-	return type;
+	if constexpr (std::is_invocable_v<Visitor, const json_schema::JsonSchema&>) {
+		if (type == Type::unknown) {
+			std::forward<Visitor>(v)(*this);
+			return Type::unknown;
+		}
+	}
+	return Type::unknown;
 }
 
 } // namespace json_schema

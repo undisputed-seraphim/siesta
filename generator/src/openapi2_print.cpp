@@ -53,7 +53,7 @@ bool StructPrinter::operator()() {
 			<< "#include <vector>\n"
 			<< "#include <boost/json.hpp>\n"
 			<< '\n'
-			<< "namespace openapi {\n"
+			<< "namespace swagger {\n"
 			<< std::endl;
 
 	fs::path definitions_hpp = output / (input.stem().string() + "_defs.hpp");
@@ -61,15 +61,23 @@ bool StructPrinter::operator()() {
 			<< "#include \"" << definitions_hpp.filename().string() << "\"\n"
 			<< "namespace js = ::boost::json;\n"
 			<< '\n'
-			<< "namespace openapi {\n"
+			<< "namespace swagger {\n"
 			<< std::endl;
 
 	for (const auto& [defname, def] : file.def2()) {
 		PrintSchema(defname, def);
 	}
 
-	hpp_out << "} // namespace openapi\n";
-	cpp_out << "} // namespace openapi\n";
+	for (const auto& [pathstr, path] : file.paths()) {
+		for (const auto& [opstr, opt] : path.operations()) {
+			for (const auto& param : opt.parameters()) {
+				// PrintSchema(param.name(), param.schema());
+			}
+		}
+	}
+
+	hpp_out << "} // namespace swagger\n";
+	cpp_out << "} // namespace swagger\n";
 	return true;
 }
 
@@ -179,6 +187,16 @@ Type StructPrinter::PrintSchemaDecl(std::string_view name, const JsonSchema& sch
 		void operator()(const json_schema::Array& schema) const {
 			return (*this)(static_cast<const v2::Array&>(schema));
 		}
+		void operator()(const json_schema::JsonSchema& schema) const {
+			printf("Warning: No type: %s\n", _name.data());
+			if (schema.HasKey("properties")) {
+				return (*this)(static_cast<const v2::Object&>(schema));
+			} else {
+				write_multiline_comment(_os, schema.description(), _indent);
+				_os << _indent << "// Warning: " << _name << " did not have a type, assuming it's string\n";
+				_os << _indent << "std::string " << _name << ";\n";
+			}
+		}
 	};
 	return schema.Visit(Visitor{hpp_out, name, indent});
 }
@@ -193,6 +211,13 @@ Type StructPrinter::PrintJSONValueFromTagDecl(std::string_view name, const JsonS
 		}
 		void operator()(const json_schema::Object& schema) const {
 			return (*this)(static_cast<const v2::Object&>(schema));
+		}
+		void operator()(const json_schema::Array& schema) const {
+			// No-op
+		}
+		void operator()(const json_schema::JsonSchema& schema) const {
+			_os << "// WARNING: " << _name << ' ' << schema.type() << '\n';
+			// return (*this)(static_cast<const v2::Object&>(schema));
 		}
 	};
 	return schema.Visit(Visitor{hpp_out, sanitize(name)});
@@ -249,6 +274,12 @@ Type StructPrinter::PrintJSONValueToTagDecl(std::string_view name, const JsonSch
 			_os << _name << " tag_invoke(boost::json::value_to_tag<" << _name << ">, const boost::json::value& jv);\n";
 		}
 		void operator()(const json_schema::Object& schema) const {
+			return (*this)(static_cast<const v2::Object&>(schema));
+		}
+		void operator()(const json_schema::Array& schema) const {
+			// No-op
+		}
+		void operator()(const json_schema::JsonSchema& schema) const {
 			return (*this)(static_cast<const v2::Object&>(schema));
 		}
 	};
