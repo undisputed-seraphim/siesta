@@ -2,6 +2,7 @@
 if (NOT BUILD_TESTING)
 	#return()
 endif()
+enable_testing()
 
 find_package(Catch2 2.13 REQUIRED)
 message(STATUS "Catch2 ${Catch2_VERSION}")
