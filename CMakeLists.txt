@@ -15,7 +15,7 @@ set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
 set(Boost_USE_STATIC_LIBS ON)
 find_package(Boost 1.81 REQUIRED COMPONENTS system json program_options)
-find_package(simdjson 3.6 REQUIRED)
+find_package(simdjson 3.10 REQUIRED)
 message(STATUS "simdjson version ${simdjson_VERSION}")
 find_package(fmt 9 REQUIRED)
 message(STATUS "fmt ${fmt_VERSION}")

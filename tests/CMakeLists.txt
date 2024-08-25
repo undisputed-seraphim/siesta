@@ -20,3 +20,5 @@ target_link_libraries(siesta_test
 )
 
 catch_discover_tests(siesta_test)
+
+#add_custom_command(OUTPUT )
