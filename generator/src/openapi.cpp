@@ -5,33 +5,25 @@
 namespace openapi {
 
 RequestMethod RequestMethodFromString(std::string_view key) {
-	if (key == "post" || key == "POST") {
-		return RequestMethod::POST;
-	}
-	if (key == "put" || key == "PUT") {
-		return RequestMethod::PUT;
-	}
-	if (key == "get" || key == "GET") {
-		return RequestMethod::GET;
-	}
-	if (key == "delete" || key == "DELETE") {
-		return RequestMethod::DELETE;
-	}
-	if (key == "patch" || key == "PATCH") {
-		return RequestMethod::PATCH;
-	}
-	if (key == "head" || key == "HEAD") {
-		return RequestMethod::HEAD;
-	}
-	if (key == "connect" || key == "CONNECT") {
-		return RequestMethod::CONNECT;
-	}
-	if (key == "options" || key == "OPTIONS") {
-		return RequestMethod::OPTIONS;
-	}
-	if (key == "trace" || key == "TRACE") {
-		return RequestMethod::TRACE;
-	}
+#ifdef _MSC_VER
+#define strncasecmp _strnicmp
+#endif
+
+#define SIESTA_REQUEST_METHOD_CAST(METHOD)                                                                             \
+	if (0 == strncasecmp(key.data(), #METHOD, key.size()))                                                             \
+		return RequestMethod::METHOD;
+
+	SIESTA_REQUEST_METHOD_CAST(POST)
+	SIESTA_REQUEST_METHOD_CAST(PUT)
+	SIESTA_REQUEST_METHOD_CAST(GET)
+	SIESTA_REQUEST_METHOD_CAST(DELETE)
+	SIESTA_REQUEST_METHOD_CAST(PATCH)
+	SIESTA_REQUEST_METHOD_CAST(HEAD)
+	SIESTA_REQUEST_METHOD_CAST(CONNECT)
+	SIESTA_REQUEST_METHOD_CAST(OPTIONS)
+	SIESTA_REQUEST_METHOD_CAST(TRACE)
+#undef SIESTA_REQUEST_METHOD_CAST
+
 	return RequestMethod::UNKNOWN;
 }
 
@@ -80,8 +72,7 @@ std::string_view JsonTypeToCppType(std::string_view type, std::string_view forma
 
 std::string SynthesizeFunctionName(std::string_view pathstr, RequestMethod verb) {
 	auto name = sanitize(pathstr);
-	std::replace_if(
-		name.begin(), name.end(), [](char c) { return c == '{' || c == '}'; }, '_');
+	std::replace_if(name.begin(), name.end(), [](char c) { return c == '{' || c == '}'; }, '_');
 	return (std::string(RequestMethodToString(verb)) + '_' + name);
 }
 
@@ -89,27 +80,20 @@ namespace json_schema {
 
 JsonSchema::Type JsonSchema::Type_() const noexcept {
 	const auto sv = type();
-	if (sv == "string") {
-		return Type::string;
-	}
-	if (sv == "number") {
-		return Type::number;
-	}
-	if (sv == "integer") {
-		return Type::integer;
-	}
-	if (sv == "boolean") {
-		return Type::boolean;
-	}
-	if (sv == "object") {
-		return Type::object;
-	}
-	if (sv == "array") {
-		return Type::array;
-	}
-	if (sv == "null") {
-		return Type::null;
-	}
+
+#define SIESTA_TYPE_CAST(TYPE)                                                                                         \
+	if (sv == #TYPE)                                                                                                   \
+		return Type::TYPE;
+
+	SIESTA_TYPE_CAST(string)
+	SIESTA_TYPE_CAST(number)
+	SIESTA_TYPE_CAST(integer)
+	SIESTA_TYPE_CAST(boolean)
+	SIESTA_TYPE_CAST(object)
+	SIESTA_TYPE_CAST(array)
+	SIESTA_TYPE_CAST(null)
+#undef SIESTA_TYPE_CAST
+
 	return Type::unknown;
 }
 

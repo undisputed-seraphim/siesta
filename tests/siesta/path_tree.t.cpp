@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <catch2/catch.hpp>
+#include <catch2/catch_all.hpp>
 #include <siesta/path_tree.hpp>
 
 const std::string simple1 = "/api/v3/ping";

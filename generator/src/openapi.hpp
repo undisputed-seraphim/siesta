@@ -161,7 +161,7 @@ protected:
 	template <typename U>
 	U _GetObjectIfExist(std::string_view key) const noexcept {
 		const auto& v = _json.at_key(key);
-		return simdjson_noerror(v) ? U(v) : U();
+		return simdjson_noerror(v) ? U(v.value_unsafe()) : U();
 	}
 
 	// For 'primitive types' (strings, numbers)
@@ -169,7 +169,7 @@ protected:
 	U _GetValueIfExist(std::string_view key) const noexcept {
 		const auto& v = _json.at_key(key);
 		if (simdjson_noerror(v) && v.is<U>()) {
-			return v.get<U>().value();
+			return v.get<U>().value_unsafe();
 		}
 		return U();
 	}
@@ -465,19 +465,12 @@ protected:
 
 } // namespace openapi
 
-#ifndef XSTR
-#ifndef STR
-#define XSTR(a) STR(a)
-#define STR(a) #a
-#endif // STR
-#endif // XSTR
-
-#ifndef VALUE_FIELD
+#ifndef SIESTA_OPENAPI_VALUE_FIELD
 #define SIESTA_OPENAPI_VALUE_FIELD(name, type)                                                                         \
-	type name() const { return _GetValueIfExist<type>(STR(name)); }
-#endif // VALUE_FIELD
+	type name() const { return _GetValueIfExist<type>(#name); }
+#endif // SIESTA_OPENAPI_VALUE_FIELD
 
-#ifndef OBJECT_FIELD
+#ifndef SIESTA_OPENAPI_OBJECT_FIELD
 #define SIESTA_OPENAPI_OBJECT_FIELD(name, type)                                                                        \
-	type name() const { return _GetObjectIfExist<type>(STR(name)); }
-#endif // OBJECT_FIELD
+	type name() const { return _GetObjectIfExist<type>(#name); }
+#endif // SIESTA_OPENAPI_OBJECT_FIELD

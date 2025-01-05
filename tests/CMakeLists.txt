@@ -4,7 +4,7 @@ if (NOT BUILD_TESTING)
 endif()
 enable_testing()
 
-find_package(Catch2 2.13 REQUIRED)
+find_package(Catch2 3.7 REQUIRED)
 message(STATUS "Catch2 ${Catch2_VERSION}")
 
 include(CTest)
@@ -33,6 +33,6 @@ COMMAND
 DEPENDS
 	siesta-generator
 )
-add_library(echo_server SHARED echo/echo_defs.cpp echo/echo_server.cpp)
-target_include_directories(echo_server PUBLIC echo)
-target_link_libraries(echo_server PUBLIC siesta)
+#add_library(echo_server SHARED echo/echo_defs.cpp echo/echo_server.cpp)
+#target_include_directories(echo_server PUBLIC echo)
+#target_link_libraries(echo_server PUBLIC siesta)
