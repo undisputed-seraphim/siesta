@@ -4,7 +4,7 @@ if (NOT BUILD_TESTING)
 endif()
 enable_testing()
 
-find_package(Catch2 3.7 REQUIRED)
+find_package(Catch2 3.8 REQUIRED)
 message(STATUS "Catch2 ${Catch2_VERSION}")
 
 include(CTest)
