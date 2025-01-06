@@ -13,15 +13,16 @@
 
 namespace fs = std::filesystem;
 namespace po = ::boost::program_options;
-using namespace std::literals;
 
 int main(int argc, char* argv[]) try {
 	fs::path input_json;
 	fs::path output_dir;
 	po::options_description desc;
 	auto opts = desc.add_options();
-	opts("input,i", po::value<fs::path>(&input_json), "Path to input JSON file.");
-	opts("output,o", po::value<fs::path>(&output_dir), "Path to output directory.");
+	opts("input,i", po::value<fs::path>(&input_json)->required(), "Path to input JSON file.");
+	opts("output,o", po::value<fs::path>(&output_dir)->required(), "Path to output directory.");
+	opts("coroutine", po::bool_switch()->default_value(false), "Generate coroutines instead of templated callbacks for endpoints.");
+	opts("namespace", po::value<std::string>()->default_value("openapi"), "Set a custom namespace, defaults to 'openapi'.");
 	opts("help,h", "Print this help message.");
 	po::variables_map vm;
 	po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -31,11 +32,15 @@ int main(int argc, char* argv[]) try {
 		return 1;
 	}
 
+	const auto ns = vm["namespace"].as<std::string>();
+
 	if (!fs::exists(input_json) || !fs::is_regular_file(input_json)) {
 		throw std::runtime_error("File at " + input_json.string() + " does not exist.");
 	} else {
+		input_json = fs::absolute(input_json);
 		std::cout << "Reading from " << input_json.string() << std::endl;
 	}
+	output_dir = fs::absolute(output_dir);
 	if (!fs::exists(output_dir)) {
 		fs::create_directory(output_dir);
 	}

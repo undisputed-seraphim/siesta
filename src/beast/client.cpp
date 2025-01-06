@@ -7,7 +7,7 @@
 
 namespace siesta::beast {
 
-void fail(std::string_view facility, ::boost::system::error_code ec) {
+static void fail(std::string_view facility, ::boost::system::error_code ec) {
 	std::cerr << facility << ": " << ec.to_string() << ' ' << ec.message() << std::endl;
 }
 
