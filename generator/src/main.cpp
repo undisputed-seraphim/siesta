@@ -15,6 +15,8 @@ namespace fs = std::filesystem;
 namespace po = ::boost::program_options;
 
 int main(int argc, char* argv[]) try {
+	std::setlocale(LC_ALL, "en_US.UTF-8");
+
 	fs::path input_json;
 	fs::path output_dir;
 	po::options_description desc;
