@@ -33,6 +33,9 @@ COMMAND
 DEPENDS
 	siesta-generator
 )
-#add_library(echo_server SHARED echo/echo_defs.cpp echo/echo_server.cpp)
-#target_include_directories(echo_server PUBLIC echo)
-#target_link_libraries(echo_server PUBLIC siesta)
+
+file(GLOB_RECURSE samplesrc "${CMAKE_CURRENT_SOURCE_DIR}/samples/*")
+if (samplesrc)
+	add_library(samples SHARED ${samplesrc})
+	target_link_libraries(samples PUBLIC siesta)
+endif()
