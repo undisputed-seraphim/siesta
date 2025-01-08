@@ -42,18 +42,26 @@ std::string clean_path_string(std::string_view original) {
 	return copy;
 }
 
-void beast(const fs::path& input, const fs::path& output, const openapi::v2::OpenAPIv2& file) {
-	openapi::v2::PrintStructDefinitions(file, input, output);
-	v2::V2Printer printer(file, input.stem().string());
-	printer.print_server(output);
-	printer.print_client(output);
-}
-
-void beast(const fs::path& input, const fs::path& output, const openapi::v3::OpenAPIv3& file) {
-	openapi::v3::PrintStructDefinitions(file, input, output);
-	v3::V3Printer printer(file, input.stem().string());
-	printer.print_server(output);
-	printer.print_client(output);
+void beast(const fs::path& input, const fs::path& output, const openapi::OpenAPI& file) {
+	switch (file.MajorVersion()) {
+	case 2: {
+		const auto& v2file = static_cast<const openapi::v2::OpenAPIv2&>(file);
+		openapi::v2::PrintStructDefinitions(v2file, input, output);
+		v2::V2Printer printer(v2file, input.stem().string());
+		printer.print_server(output);
+		printer.print_client(output);
+		return;
+	}
+	case 3: {
+		const auto& v3file = static_cast<const openapi::v3::OpenAPIv3&>(file);
+		openapi::v3::PrintStructDefinitions(v3file, input, output);
+		v3::V3Printer printer(v3file, input.stem().string());
+		printer.print_server(output);
+		printer.print_client(output);
+		return;
+	}
+	}
+	throw std::runtime_error("Invalid OpenAPI version.");
 }
 
 } // namespace siesta::beast

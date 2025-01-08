@@ -57,13 +57,7 @@ int main(int argc, char* argv[]) try {
 		std::cerr << "Failed to load " << input_json.string() << std::endl;
 		return -1;
 	}
-	if (file.MajorVersion() == 2) {
-		siesta::beast::beast(input_json, output_dir, static_cast<openapi::v2::OpenAPIv2&>(file));
-	} else if (file.MajorVersion() == 3) {
-		siesta::beast::beast(input_json, output_dir, static_cast<openapi::v3::OpenAPIv3&>(file));
-	} else {
-		return -1;
-	}
+	siesta::beast::beast(input_json, output_dir, file);
 
 	return 0;
 } catch (const std::exception& e) {
