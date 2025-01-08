@@ -13,8 +13,7 @@ namespace siesta::beast {
 
 std::string clean_path_string(std::string_view original);
 
-void beast(const std::filesystem::path& input, const std::filesystem::path& output, const openapi::v2::OpenAPIv2& file);
-void beast(const std::filesystem::path& input, const std::filesystem::path& output, const openapi::v3::OpenAPIv3& file);
+void beast(const std::filesystem::path& input, const std::filesystem::path& output, const openapi::OpenAPI& file);
 
 template <std::derived_from<openapi::OpenAPI> OpenAPIRevision>
 class BasePrinter {
