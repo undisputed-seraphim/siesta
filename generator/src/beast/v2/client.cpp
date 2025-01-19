@@ -165,9 +165,7 @@ void V2Printer::print_function_body(
 	}
 	out << indent << "req.method(" << operation << ");\n";
 
-	print_client_json_body(op, indent);
-	// print_client_multipart_body(op, indent);
-	print_client_form_body(op, indent);
+	print_client_body(op, indent);
 	out << indent << "return this->async_submit_request(std::move(req), token);\n";
 
 	for (const auto& [respstr, resp] : op.responses()) {
@@ -183,86 +181,60 @@ void V2Printer::print_function_body(
 	}
 }
 
-void V2Printer::print_client_json_body(const openapi::v2::Operation& op, std::string& indent) {
-	if (op.consumes().empty()) {
-		return;
-	}
-	if (*op.consumes().begin() != "application/json") {
-		return;
-	}
-	auto& out = cli_hpp_ofs;
+void V2Printer::print_client_body(const openapi::v2::Operation& op, std::string& indent) {
 	const auto& parameters = op.parameters();
-	out << indent << "::boost::json::monotonic_resource json_rsc(_json_buffer.data(), _json_buffer.size());\n";
-
-	auto it = std::find_if(
+	const auto it = std::find_if(
 		parameters.begin(), parameters.end(), [](const openapi::v2::Parameter& p) { return p.in() == "body"; });
-	if (it != parameters.end()) {
-		const std::string_view bodyname = (*it).name().empty() ? "body"sv : (*it).name();
+	if (it == std::end(parameters)) {
+		return;
+	}
+
+	auto& out = cli_hpp_ofs;
+	if (op.consumes().empty() || *op.consumes().begin() == "application/json") {
+		out << indent << "::boost::json::monotonic_resource json_rsc(_json_buffer.data(), _json_buffer.size());\n";
 		out << indent << "req.set(::boost::beast::http::field::content_type, \"application/json\");\n";
+		const std::string_view bodyname = (*it).name().empty() ? "body"sv : (*it).name();
 		out << indent << "req.body().assign(::boost::json::serialize(::boost::json::value_from(" << bodyname
 			<< ", &json_rsc)));\n";
 		return;
 	}
 
-	// Ad-hoc JSON object
-	out << indent << "auto q = ::boost::json::object(&json_rsc);\n";
-	for (const auto& p : parameters) {
-		if (p.in() != "query") {
-			continue;
+	if (*op.consumes().begin() == "application/x-www-form-urlencoded") {
+		out << indent << "req.set(::boost::beast::http::field::content_type, \"application/x-www-form-urlencoded\");\n";
+		std::string formdata_str = "";
+		std::string form_params = "";
+		for (const auto& param : parameters) {
+			formdata_str += param.name();
+			formdata_str += "={}&";
+			form_params += param.name();
+			form_params += ',';
 		}
-		out << indent << "q.emplace(\"" << p.name() << "\", std::move(" << p.name() << "));\n";
+		formdata_str.pop_back();
+		form_params.pop_back();
+		out << indent << "constexpr std::string_view form = \"" << formdata_str << "\";\n";
+		out << indent << "req.body().assign(fmt::format(form," << form_params << "));\n";
+		return;
 	}
-	out << indent << "req.body().assign(::boost::json::serialize(q));\n";
-}
 
-void V2Printer::print_client_form_body(const openapi::v2::Operation& op, std::string& indent) {
-	if (op.consumes().empty()) {
-		return;
-	}
-	if (*op.consumes().begin() != "application/x-www-form-urlencoded") {
-		return;
-	}
-	auto& out = cli_hpp_ofs;
-	const auto& parameters = op.parameters();
-	out << indent << "req.set(::boost::beast::http::field::content_type, \"application/x-www-form-urlencoded\");\n";
-	std::string formdata_str = "";
-	std::string form_params = "";
-	for (const auto& param : parameters) {
-		formdata_str += param.name();
-		formdata_str += "={}&";
-		form_params += param.name();
-		form_params += ',';
-	}
-	formdata_str.pop_back();
-	form_params.pop_back();
-	out << indent << "constexpr std::string_view form = \"" << formdata_str << "\";\n";
-	out << indent << "req.body().assign(fmt::format(form," << form_params << "));\n";
-}
-
-void V2Printer::print_client_multipart_body(const openapi::v2::Operation& op, std::string& indent) {
-	if (op.consumes().empty()) {
-		return;
-	}
-	if (*op.consumes().begin() != "multipart/form-data") {
-		return;
-	}
-	auto& out = cli_hpp_ofs;
-	const auto& parameters = op.parameters();
-	out << indent
-		<< "req.set(::boost::beast::http::field::content_type, \"multipart/form-data; boundary=multipart\");\n";
-	out << indent << "req.set(::boost::beast::http::field::body, \"--multipart\");\n";
-	for (const auto& param : parameters) {
-		if (param.in() != "formData") {
-			continue;
+	if (*op.consumes().begin() == "multipart/form-data") {
+		out << indent
+			<< "req.set(::boost::beast::http::field::content_type, \"multipart/form-data; boundary=multipart\");\n";
+		out << indent << "req.set(::boost::beast::http::field::body, \"--multipart\");\n";
+		for (const auto& param : parameters) {
+			if (param.in() != "formData") {
+				continue;
+			}
+			out << indent << "req.set(::boost::beast::http::field::content_disposition, \"form-data; name=\\\""
+				<< param.name() << "\\\"\");\n";
+			out << indent << "req.body().assign(string_cast(" << param.name() << "));\n";
+			// Data goes here...
+			out << indent << "// http::async_write(_stream, req);\n";
 		}
-		out << indent << "req.set(::boost::beast::http::field::content_disposition, \"form-data; name=\\\""
-			<< param.name() << "\\\"\");\n";
-		out << indent << "req.body().assign(string_cast(" << param.name() << "));\n";
-		// Data goes here...
+		// TODO need to correctly implement form multipart
+		out << indent << "req.set(::boost::beast::http::field::body, \"--multipart--\");\n";
 		out << indent << "// http::async_write(_stream, req);\n";
+		return;
 	}
-	out << indent << "req.set(::boost::beast::http::field::body, \"--multipart--\");\n";
-	out << indent << "// http::async_write(_stream, req);\n";
 }
 
 } // namespace siesta::beast::v2

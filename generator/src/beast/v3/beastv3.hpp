@@ -37,14 +37,17 @@ private:
 		const openapi::v3::Operation& op,
 		std::string& indent);
 
-	void print_client_json_body(const openapi::v3::Operation& op, std::string& indent);
-	void print_client_form_body(const openapi::v3::Operation& op, std::string& indent);
+	void print_client_body(const openapi::v3::Operation& op, std::string& indent);
 
 	// Server only
 	void print_server_hpp();
 	void print_server_cpp();
-
+	void print_query_details(const openapi::v3::Operation& op, std::string& indent);
 	void print_dispatcher_function(std::string className);
+
+	// Convenience fns
+	const openapi::v3::Parameter resolveIfRef(const openapi::v3::Parameter&);
+	const openapi::v3::JsonSchema resolveIfRef(const openapi::v3::JsonSchema&);
 };
 
 } // namespace siesta::beast::v3
