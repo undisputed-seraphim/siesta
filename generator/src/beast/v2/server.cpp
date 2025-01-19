@@ -63,6 +63,21 @@ void V2Printer::print_server_hpp() {
 	out << "} // namespace swagger\n";
 }
 
+void V2Printer::print_query_details(const openapi::v2::Operation& op, std::string& indent) {
+	auto& out = srv_hpp_ofs;
+	for (const auto& p : op.parameters()) {
+		if (p.in() == "body") {
+			if (auto schema = p.schema(); schema) {
+				out << indent << "// \\param[in] " << (schema.IsReference() ? schema.reference() : schema.type())
+					<< " (body) ";
+			}
+		} else {
+			out << indent << "// \\param[in] " << p.name() << " (" << p.in() << ") ";
+		}
+		out << '\n';
+	}
+}
+
 void V2Printer::print_server_cpp() {
 	auto& out = srv_cpp_ofs;
 	out << "#include <boost/json.hpp>\n"
@@ -86,21 +101,6 @@ void V2Printer::print_server_cpp() {
 
 	std::string indent;
 	out << "} // namespace swagger\n";
-}
-
-void V2Printer::print_query_details(const openapi::v2::Operation& op, std::string& indent) {
-	auto& out = srv_hpp_ofs;
-	for (const auto& p : op.parameters()) {
-		if (p.in() == "body") {
-			if (auto schema = p.schema(); schema) {
-				out << indent << "// \\param[in] " << (schema.IsReference() ? schema.reference() : schema.type())
-					<< " (body) ";
-			}
-		} else {
-			out << indent << "// \\param[in] " << p.name() << " (" << p.in() << ") ";
-		}
-		out << '\n';
-	}
 }
 
 void V2Printer::print_dispatcher_function(std::string className) {

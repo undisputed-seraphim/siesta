@@ -50,7 +50,7 @@ void V3Printer::print_server_hpp() {
 	for (const auto& [pathstr, path] : file.paths()) {
 		for (const auto& [opstr, op] : path.operations()) {
 			write_multiline_comment(out, op.description(), indent);
-			// print_query_details(op, indent);
+			print_query_details(op, indent);
 			out << indent << "virtual void "
 				<< (op.operationId().empty()
 						? openapi::SynthesizeFunctionName(pathstr, openapi::RequestMethodFromString(opstr))
@@ -61,6 +61,14 @@ void V3Printer::print_server_hpp() {
 	indent.pop_back();
 	out << "}; // class\n";
 	out << "} // namespace openapi\n";
+}
+
+void V3Printer::print_query_details(const openapi::v3::Operation& op, std::string& indent) {
+	auto& out = srv_hpp_ofs;
+	for (const auto& p : op.parameters()) {
+		out << indent << "// \\param[in] " << (p.IsRef() ? p.ref() : p.schema().type())
+			<< " (" << p.in() << ")\n";
+	}
 }
 
 void V3Printer::print_server_cpp() {

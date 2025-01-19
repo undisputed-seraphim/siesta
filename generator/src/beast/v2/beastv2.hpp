@@ -37,9 +37,7 @@ private:
 		const openapi::v2::Operation& op,
 		std::string& indent);
 
-	void print_client_json_body(const openapi::v2::Operation& op, std::string& indent);
-	void print_client_form_body(const openapi::v2::Operation& op, std::string& indent);
-	void print_client_multipart_body(const openapi::v2::Operation& op, std::string& indent);
+	void print_client_body(const openapi::v2::Operation& op, std::string& indent);
 
 	// Server only
 	void print_server_hpp();

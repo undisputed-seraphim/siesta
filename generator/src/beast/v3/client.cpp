@@ -8,13 +8,14 @@ using namespace std::literals;
 
 namespace siesta::beast::v3 {
 
-std::string_view get_ref_objname(std::string_view reference) noexcept {
+static std::string_view get_ref_objname(std::string_view reference) noexcept {
 	const std::size_t pos = reference.find_last_of('/');
 	return reference.substr(pos + 1);
 }
 
-std::pair<std::string_view, std::optional<openapi::v3::Parameter>>
-getParameterByRef(const openapi::v3::OpenAPIv3& file, std::string_view ref) {
+std::pair<std::string_view, std::optional<openapi::v3::Parameter>> static getParameterByRef(
+	const openapi::v3::OpenAPIv3& file,
+	std::string_view ref) {
 	size_t pos = ref.find_first_of('/');
 	ref.remove_prefix(pos + 1);
 	pos = ref.find_first_of('/');
@@ -33,8 +34,9 @@ getParameterByRef(const openapi::v3::OpenAPIv3& file, std::string_view ref) {
 	return std::pair{ref, std::nullopt};
 }
 
-std::pair<std::string_view, std::optional<openapi::v3::JsonSchema>>
-getSchemaByRef(const openapi::v3::OpenAPIv3& file, std::string_view ref) {
+std::pair<std::string_view, std::optional<openapi::v3::JsonSchema>> static getSchemaByRef(
+	const openapi::v3::OpenAPIv3& file,
+	std::string_view ref) {
 	size_t pos = ref.find_first_of('/');
 	ref.remove_prefix(pos + 1);
 	pos = ref.find_first_of('/');
@@ -51,6 +53,28 @@ getSchemaByRef(const openapi::v3::OpenAPIv3& file, std::string_view ref) {
 		}
 	}
 	return std::pair{ref, std::nullopt};
+}
+
+const openapi::v3::Parameter V3Printer::resolveIfRef(const openapi::v3::Parameter& p) {
+	if (p.IsRef()) {
+		if (auto realparam = getParameterByRef(file, p.ref()); realparam.second.has_value()) {
+			return realparam.second.value();
+		} else {
+			throw std::runtime_error("Malformed reference " + std::string(realparam.first));
+		}
+	}
+	return p;
+}
+
+const openapi::v3::JsonSchema V3Printer::resolveIfRef(const openapi::v3::JsonSchema& p) {
+	if (p.IsRef()) {
+		if (auto realparam = getSchemaByRef(file, p.ref()); realparam.second.has_value()) {
+			return realparam.second.value();
+		} else {
+			throw std::runtime_error("Malformed reference " + std::string(realparam.first));
+		}
+	}
+	return p;
 }
 
 void V3Printer::print_client(const fs::path& output_dir) {
@@ -143,44 +167,27 @@ void V3Printer::print_query_parameters(
 		std::string_view _name;
 
 		void print_primitive(std::string_view type, std::string_view format) const {
-			_os << openapi::JsonTypeToCppType(type, format) << ' ' << _name << ", ";
+			_os << openapi::JsonTypeToCppType(type, format) << ' ' << sanitize(_name) << ", ";
 		}
 		void operator()(const String& schema) const { print_primitive(schema.type(), schema.format()); }
 		void operator()(const Number& schema) const { print_primitive(schema.type(), schema.format()); }
 		void operator()(const Integer& schema) const { print_primitive(schema.type(), schema.format()); }
 		void operator()(const Boolean& schema) const { print_primitive(schema.type(), schema.format()); }
 		void operator()(const Object& schema) const { printf("warning: skipped object %s\n", _name.data()); }
-		void operator()(const Array& schema) const { printf("warning: skipped array %s\n", _name.data()); }
+		void operator()(const Array& schema) const {
+			_os << "const std::vector<" << openapi::JsonTypeToCppType(schema.items().type(), schema.items().format())
+				<< ">& " << sanitize(_name) << ", ";
+		}
 	};
 
 	auto& out = cli_hpp_ofs;
 
 	for (const auto& param : op.parameters()) {
-		auto sanitized_paramname = sanitize(param.name());
-		if (param.IsRef()) {
-			auto realparam = getParameterByRef(file, param.ref());
-			if (realparam.second) {
-				realparam.second.value().schema().Visit(SchemaVisitor{out, realparam.first});
-			} else {
-				printf("warning: object referenced by %s was not found.\n", param.ref().data());
-			}
-		}
-
-		if (auto schema = param.schema(); schema) {
-			if (schema.IsRef()) {
-				std::string_view objname = get_ref_objname(schema.ref());
-				out << sanitize(objname) << ' ' << sanitized_paramname;
-			} else {
-				out << openapi::JsonTypeToCppType(schema.type(), schema.format()) << ' ' << param.name();
-			}
-			out << ", ";
-		}
+		const auto realp = resolveIfRef(param);
+		const auto sanitized_paramname = sanitize(realp.name());
+		realp.schema().Visit(SchemaVisitor{out, sanitized_paramname});
 	}
-	if (!op.parameters().empty()) {
-		out.seekp(-2, std::ios::end);
-	} else {
-		out << "void";
-	}
+	out << "::boost::asio::completion_token_for<void(outcome_type)> auto&& token";
 }
 
 void V3Printer::print_function_body(
@@ -193,30 +200,22 @@ void V3Printer::print_function_body(
 
 	// Compose a path pattern, set as constexpr.
 	const auto params = op.parameters();
-	const bool has_path_param =
-		std::any_of(params.begin(), params.end(), [](const openapi::v3::Parameter& p) { return p.in() == "path"; });
-	const bool has_query_param =
-		std::any_of(params.begin(), params.end(), [](const openapi::v3::Parameter& p) { return p.in() == "query"; });
+	const bool has_path_param = std::any_of(params.begin(), params.end(), [this](const openapi::v3::Parameter& p) {
+		return resolveIfRef(p).in() == "path";
+	});
+	const bool has_query_param = std::any_of(params.begin(), params.end(), [this](const openapi::v3::Parameter& p) {
+		return resolveIfRef(p).in() == "query";
+	});
+	const bool is_post = (opstr == "post");
 
 	std::string full_path;
-	if (has_path_param) {
-		full_path += clean_path_string(pathstr);
-	} else {
-		full_path += std::string(pathstr);
-	}
-	if (has_query_param) {
+	full_path += has_path_param ? clean_path_string(pathstr) : std::string(pathstr);
+
+	if (has_query_param && !is_post) {
 		full_path.push_back('?');
 		for (const auto& p : params) {
-			if (p.IsRef()) {
-				auto realparam = getParameterByRef(file, p.ref());
-				if (realparam.second) {
-					if (realparam.second.value().in() == "query") {
-						full_path += std::string(realparam.first) + "={},";
-					}
-				}
-			}
-			if (p.in() == "query") {
-				full_path += std::string(p.name()) + "={},";
+			if (const auto realparam = resolveIfRef(p); realparam.in() == "query") {
+				full_path += std::string(realparam.name()) + "={}&";
 			}
 		}
 		full_path.pop_back();
@@ -224,22 +223,46 @@ void V3Printer::print_function_body(
 
 	out << indent << "constexpr std::string_view path = \"" << full_path << "\";\n";
 	out << indent << "request_type req;\n";
-	if (has_path_param || has_query_param) {
+	if (has_path_param || (has_query_param && !is_post)) {
 		out << indent << "req.target(fmt::format(path, ";
+	}
+	if (has_path_param) {
 		for (const auto& p : params) {
-			if (p.in() == "path") {
-				out << p.name() << ", ";
+			if (const auto realp = resolveIfRef(p); realp.in() == "path") {
+				out << realp.name() << ", ";
 			}
 		}
+	}
+	if (has_query_param && !is_post) {
 		for (const auto& p : params) {
-			if (p.in() == "query") {
-				out << p.name() << ", ";
+			if (const auto realp = resolveIfRef(p); realp.in() == "query") {
+				out << realp.name() << ", ";
 			}
 		}
+	}
+	if (has_path_param || (has_query_param && !is_post)) {
 		out.seekp(-2, std::ios::end);
 		out << "));\n";
 	} else {
 		out << indent << "req.target(path);\n";
+	}
+
+	if (is_post) {
+		out << indent << "constexpr std::string_view queryfmt = \"";
+		for (const auto& p : params) {
+			if (const auto realparam = resolveIfRef(p); realparam.in() == "query") {
+				out << std::string(realparam.name()) << "={}&";
+			}
+		}
+		out << "\";\n";
+		out << indent << "req.body().append(fmt::format(queryfmt, ";
+		for (const auto& p : params) {
+			if (const auto realp = resolveIfRef(p); realp.in() == "query") {
+				out << realp.name() << ", ";
+			}
+		}
+		out.seekp(-2, std::ios::end);
+		out << "));\n";
 	}
 
 	std::string operation = "::boost::beast::http::verb::"s + std::string(opstr);
@@ -248,14 +271,29 @@ void V3Printer::print_function_body(
 	}
 	out << indent << "req.method(" << operation << ");\n";
 
-	print_client_json_body(op, indent);
-	// print_client_multipart_body(op, indent);
-	print_client_form_body(op, indent);
+	print_client_body(op, indent);
 	out << indent << "return this->async_submit_request(std::move(req), token);\n";
 }
 
-void V3Printer::print_client_json_body(const openapi::v3::Operation& op, std::string& indent) {}
+void V3Printer::print_client_body(const openapi::v3::Operation& op, std::string& indent) {
+	const auto& parameters = op.parameters();
+	const auto it = std::find_if(
+		parameters.begin(), parameters.end(), [](const openapi::v3::Parameter& p) { return p.in() == "body"; });
+	if (it == std::end(parameters)) {
+		return;
+	}
 
-void V3Printer::print_client_form_body(const openapi::v3::Operation& op, std::string& indent) {}
+	auto& out = cli_hpp_ofs;
+	for (const auto& [type, val] : (*it).content()) {
+		if (type == "application/json") {
+			const auto& schema = resolveIfRef(val.schema());
+			out << indent << "::boost::json::monotonic_resource json_rsc(_json_buffer.data(), _json_buffer.size());\n";
+			out << indent << "req.set(::boost::beast::http::field::content_type, \"application/json\");\n";
+			const std::string_view bodyname = schema.name().empty() ? "body"sv : schema.name();
+			out << indent << "req.body().assign(::boost::json::serialize(::boost::json::value_from(" << bodyname
+				<< ", &json_rsc)));\n";
+		}
+	}
+}
 
 } // namespace siesta::beast::v3
