@@ -8,53 +8,6 @@ using namespace std::literals;
 
 namespace siesta::beast::v3 {
 
-static std::string_view get_ref_objname(std::string_view reference) noexcept {
-	const std::size_t pos = reference.find_last_of('/');
-	return reference.substr(pos + 1);
-}
-
-std::pair<std::string_view, std::optional<openapi::v3::Parameter>> static getParameterByRef(
-	const openapi::v3::OpenAPIv3& file,
-	std::string_view ref) {
-	size_t pos = ref.find_first_of('/');
-	ref.remove_prefix(pos + 1);
-	pos = ref.find_first_of('/');
-	if (ref.substr(0, pos) == "components") {
-		ref.remove_prefix(pos + 1);
-		pos = ref.find_first_of('/');
-		if (ref.substr(0, pos) == "parameters") {
-			ref.remove_prefix(pos + 1);
-			for (const auto& [paramname, param] : file.components().parameters()) {
-				if (paramname == ref) {
-					return std::pair{ref, std::optional{param}};
-				}
-			}
-		}
-	}
-	return std::pair{ref, std::nullopt};
-}
-
-std::pair<std::string_view, std::optional<openapi::v3::JsonSchema>> static getSchemaByRef(
-	const openapi::v3::OpenAPIv3& file,
-	std::string_view ref) {
-	size_t pos = ref.find_first_of('/');
-	ref.remove_prefix(pos + 1);
-	pos = ref.find_first_of('/');
-	if (ref.substr(0, pos) == "components") {
-		ref.remove_prefix(pos + 1);
-		pos = ref.find_first_of('/');
-		if (ref.substr(0, pos) == "schemas") {
-			ref.remove_prefix(pos + 1);
-			for (const auto& [schemaname, schema] : file.components().schemas()) {
-				if (schemaname == ref) {
-					return std::pair{ref, std::optional{schema}};
-				}
-			}
-		}
-	}
-	return std::pair{ref, std::nullopt};
-}
-
 const openapi::v3::Parameter V3Printer::resolveIfRef(const openapi::v3::Parameter& p) {
 	if (p.IsRef()) {
 		if (auto realparam = getParameterByRef(file, p.ref()); realparam.second.has_value()) {

@@ -3,13 +3,6 @@
 #include <concepts>
 #include <string>
 
-#include <fmt/format.h>
-template <typename... Args>
-std::string format(std::string_view form, Args&&... args) {
-	return fmt::format(form, std::forward<Args>(args)...);
-}
-
-
 inline std::string& string_cast(std::string& str) noexcept {
 	return str;
 }

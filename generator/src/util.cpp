@@ -35,6 +35,10 @@ bool compare_ignore_case(std::string_view l, std::string_view r) noexcept {
 }
 
 void sanitize(std::string& input) {
+	if (input.empty()) {
+		return;
+	}
+
 	// Replace characters with underscore.
 	std::replace_if(
 		input.begin(),

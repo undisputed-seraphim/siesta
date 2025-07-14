@@ -34,8 +34,8 @@ DEPENDS
 	siesta-generator
 )
 
-file(GLOB_RECURSE samplesrc "${CMAKE_CURRENT_SOURCE_DIR}/samples/*")
-if (samplesrc)
-	#add_library(samples SHARED ${samplesrc})
-	#target_link_libraries(samples PUBLIC siesta Boost::boost)
-endif()
+#file(GLOB_RECURSE samplesrc "${CMAKE_CURRENT_SOURCE_DIR}/binance/*")
+#if (samplesrc)
+#	add_library(samples SHARED ${samplesrc})
+#	target_link_libraries(samples PUBLIC siesta Boost::boost)
+#endif()

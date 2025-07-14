@@ -27,21 +27,27 @@ private:
 	std::string indent;
 
 	// Top level prints, used in operator()
-	void PrintComponentSchemas();
-	void PrintComponentParameters();
-	void PrintComponentResponses();
-	void PrintPathSchemas();
+	void PrintComponents();
+	void PrintPaths();
 
 	void PrintSchema(std::string_view name, const JsonSchema& schema);
 	void PrintParameter(const Parameter&);
 	void PrintParameter(std::string_view name, const Parameter&);
+	void PrintParameterStruct(const Parameter&);
 
 	// Detailed print impls
 	Type PrintSchemaDecl(std::string_view name, const JsonSchema& schema);
+	Type PrintSchemaDecl(std::string_view name, bool instantiate, const JsonSchema& schema);
+	Type PrintResponseDecl(std::string_view name, const JsonSchema& schema);
+
 	Type PrintJSONValueFromTagDecl(std::string_view name, const JsonSchema& schema);
 	Type PrintJSONValueFromTagImpl(std::string_view name, const JsonSchema& schema);
 	Type PrintJSONValueToTagDecl(std::string_view name, const JsonSchema& schema);
 	Type PrintJSONValueToTagImpl(std::string_view name, const JsonSchema& schema);
+
+	// Expects the full, untruncated ref path
+	std::pair<std::string_view, std::optional<openapi::v3::JsonSchema>>
+	getComponentByRef(std::string_view ref) const;
 };
 
 // gets the final component of a def path
@@ -49,6 +55,75 @@ std::string_view component_path(std::string_view path) noexcept {
 	size_t pos = path.find_last_of('/');
 	return path.substr(pos + 1);
 }
+
+struct RecursiveSchemaVisitor final {
+	std::ostream& _os;
+	std::string_view _name;
+	std::string& _indent;
+
+	static void PrintPrimitive(std::ostream& out, std::string_view name, const JsonSchema& schema, const std::string& indent) {
+		const auto sanitized_name = sanitize(name);
+		const auto typestr = JsonTypeToCppType(schema.type(), schema.format());
+		write_multiline_comment(out, schema.description(), indent);
+		out << indent << typestr << ' ' << sanitized_name << ";\n";
+	}
+
+	static void PrintPrimitive(std::ostream& out, const JsonSchema& schema, const std::string& indent) {
+		PrintPrimitive(out, schema.name(), schema, indent);
+	}
+
+	static void PrintStruct(std::ostream& out, std::string_view name, const Object& schema, std::string& indent) {
+		const auto sanitized_name = sanitize(name);
+		write_multiline_comment(out, schema.description(), indent);
+		out << indent << "struct " << sanitized_name << " {\n";
+		indent.push_back('\t');
+		for (const auto& [propname, prop] : schema.properties()) {
+			const auto sanitized_propname = sanitize(propname);
+			if (prop.IsRef()) {
+				out << indent << "using " << sanitized_propname << " = " << prop.
+			} else {
+				prop.Visit(RecursiveSchemaVisitor{out, sanitized_name, indent});
+			}
+		}
+		indent.pop_back();
+		out << indent << "};\n";
+	}
+
+	static void PrintStruct(std::ostream& out, std::string_view name, const JsonSchema& schema, std::string& indent) {
+		PrintStruct(out, schema.name(), schema, indent);
+	}
+
+	static void PrintArray(std::ostream& out, std::string_view name, const Array& schema, std::string& indent) {
+		const auto sanitized_name = sanitize(name);
+		write_multiline_comment(out, schema.description(), indent);
+
+		if (schema.items().IsRef()) {
+			const auto refname = component_path(schema.items().ref());
+			out << indent << "using " << sanitized_name << " = std::vector<" << refname << ">;\n";
+			return;
+		}
+		if (schema.items().IsPrimitive()) {
+
+		}
+	}
+
+	static void PrintRefDecl(std::ostream& out, std::string_view name, const JsonSchema& schema, std::string& indent) {
+		const auto refname = component_path(schema.ref());
+		
+	}
+	static void PrintRefUsing(std::ostream& out, std::string_view name, const JsonSchema& schema, std::string& indent) {
+		const auto refname = component_path(schema.ref());
+		out << indent << "using " << name << " = " << refname << ";\n";
+	}
+
+	void operator()(const String& schema) const { PrintPrimitive(_os, _name, schema, _indent); }
+	void operator()(const Number& schema) const { PrintPrimitive(_os, _name, schema, _indent); }
+	void operator()(const Integer& schema) const { PrintPrimitive(_os, _name, schema, _indent); }
+	void operator()(const Boolean& schema) const { PrintPrimitive(_os, _name, schema, _indent); }
+	void operator()(const Object& schema) const { PrintStruct(_os, _name, schema, _indent); }
+	void operator()(const Array& schema) const { PrintArray(_os, _name, schema, _indent); }
+};
+
 
 bool StructPrinter::operator()() {
 	hpp_out << "// Automatically generated from " << input.string() << ". Do not modify this file.\n"
@@ -69,21 +144,22 @@ bool StructPrinter::operator()() {
 			<< "namespace openapi {\n"
 			<< std::endl;
 
-	PrintComponentSchemas();
-	PrintComponentParameters();
-	PrintComponentResponses();
-	PrintPathSchemas();
+	PrintComponents();
+	PrintPaths();
 
 	hpp_out << "} // namespace openapi\n";
 	cpp_out << "} // namespace openapi\n";
 	return true;
 }
 
-void StructPrinter::PrintComponentSchemas() {
+void StructPrinter::PrintComponents() {
 	for (const auto& [name, schema] : file.components().schemas()) {
 		PrintSchema(name, schema);
 		hpp_out << std::endl;
 		cpp_out << std::endl;
+	}
+	for (const auto& [name, parameter] : file.components().parameters()) {
+		PrintParameter(name, parameter);
 	}
 }
 
@@ -95,75 +171,76 @@ void StructPrinter::PrintSchema(std::string_view name, const JsonSchema& schema)
 	PrintJSONValueToTagImpl(name, schema);
 }
 
-void StructPrinter::PrintComponentParameters() {
-	for (const auto& [name, parameter] : file.components().parameters()) {
-		PrintParameter(name, parameter);
-	}
-}
-
 void StructPrinter::PrintParameter(const Parameter& parameter) {
 	if (parameter.IsRef()) {
 		// TODO
+		write_multiline_comment(hpp_out, parameter.ref(), indent);
 	} else {
 		write_multiline_comment(hpp_out, parameter.description(), indent);
-		// We only need to print schema if the parameter is not a primitive.
-		if (parameter.schema().Type_() == Type::object || parameter.schema().Type_() == Type::array) {
-			PrintSchema(parameter.name(), parameter.schema());
-		}
+		write_multiline_comment(hpp_out, parameter.name(), indent);
+		PrintParameter(parameter.name(), parameter);
 	}
 }
 
 void StructPrinter::PrintParameter(std::string_view name, const Parameter& parameter) {
-	using Location = Parameter::Location;
-
 	struct SchemaVisitor final {
+		StructPrinter& _this;
 		std::ostream& _os;
 		std::string_view _name;
 
 		void print_primitive(std::string_view type, std::string_view format) const {
-			//_os << "using " << _name << " = " << JsonTypeToCppType(type, format) << ";\n";
 			// NOTE: There is no need to supply a using typedef for primitives.
+			// Instead we will embed it directly into the parameter struct.
 		}
 		void operator()(const String& schema) const { print_primitive(schema.type(), schema.format()); }
 		void operator()(const Number& schema) const { print_primitive(schema.type(), schema.format()); }
 		void operator()(const Integer& schema) const { print_primitive(schema.type(), schema.format()); }
 		void operator()(const Boolean& schema) const { print_primitive(schema.type(), schema.format()); }
 		void operator()(const Object& schema) const {
-			// TODO left blank because I haven't encountered any examples of this yet.
-			// But this can call PrintSchemaDecl somehow.
+			write_multiline_comment(_os, schema.description(), "");
+			_this.PrintSchemaDecl(schema.name(), schema);
 		}
 		void operator()(const Array& schema) const {
-			// TODO left blank because I haven't encountered any examples of this yet.
-			// But this can call PrintSchemaDecl somehow.
+			std::cout << "Got array " << _name << std::endl;
 		}
 	};
-
-	// write_multiline_comment(hpp_out, parameter.description(), indent);
-
-	parameter.schema().Visit(SchemaVisitor{hpp_out, name});
+	parameter.schema().Visit(SchemaVisitor{*this, hpp_out, name});
 }
 
-void StructPrinter::PrintComponentResponses() {
-	for (const auto& [name, response] : file.components().responses()) {
-		for (const auto& [mediatypestr, mediatype] : response.content()) {
-			PrintSchema(mediatypestr, mediatype.schema());
+void StructPrinter::PrintParameterStruct(const Parameter& parameter) {
+	if (parameter.IsRef()) {
+		write_multiline_comment(hpp_out, parameter.ref(), indent);
+		if (auto [name, optparam] = getComponentByRef(parameter.ref()); optparam) {
+			PrintSchemaDecl(name, optparam.value());
+		} else {
+			std::cout << "WARN: " << name << " not found at " << parameter.ref() << '\n';
 		}
+	} else {
+		PrintSchemaDecl(parameter.name(), parameter.schema());
 	}
 }
 
-void StructPrinter::PrintPathSchemas() {
+void StructPrinter::PrintPaths() {
 	std::string name; // Buffer to hold names constructed during this function
 	for (const auto& [pathstr, path] : file.paths()) {
 		const std::string pathstr_name = sanitize(pathstr);
 		for (const auto& [opstr, op] : path.operations()) {
+			write_multiline_comment(hpp_out, pathstr, indent);
+			indent.push_back('\t');
+			hpp_out << "struct " << pathstr_name << '_' << opstr << " {\n";
+
+			hpp_out << indent << "struct parameters {\n";
+			indent.push_back('\t');
 			for (const auto& parameter : op.parameters()) {
-				PrintParameter(parameter);
+				PrintParameterStruct(parameter);
 			}
+			indent.pop_back();
+			hpp_out << indent << "}; // parameters\n";
+
 			for (const auto& [responsecode, response] : op.responses()) {
 				write_multiline_comment(hpp_out, response.description(), indent);
 				for (const auto& [mediatypestr, mediatype] : response.content()) {
-					name = pathstr_name + '_' + std::string(opstr) + '_' + std::string(responsecode);
-					PrintSchema(name, mediatype.schema());
+					PrintResponseDecl(std::string("_").append(responsecode), mediatype.schema());
 				}
 			}
 			if (op.requestBody()) {
@@ -171,15 +248,18 @@ void StructPrinter::PrintPathSchemas() {
 					PrintSchema(mediatypestr, mediatype.schema());
 				}
 			}
-		}
-		for (const auto& parameter : path.parameters()) {
-			PrintParameter(parameter);
+			indent.pop_back();
+			hpp_out << "};\n";
 		}
 		hpp_out << std::endl;
 	}
 }
 
 Type StructPrinter::PrintSchemaDecl(std::string_view name, const JsonSchema& schema) {
+	return PrintSchemaDecl(name, false, schema);
+}
+
+Type StructPrinter::PrintSchemaDecl(std::string_view name, bool instantiate, const JsonSchema& schema) {
 	struct SchemaVisitor final {
 		std::ostream& _os;
 		std::string_view _name;
@@ -187,14 +267,7 @@ Type StructPrinter::PrintSchemaDecl(std::string_view name, const JsonSchema& sch
 		bool _instantiate = true;
 
 		void print_primitive(const JsonSchema& schema) const {
-			const auto sanitized_name = sanitize(_name);
-			const auto typestr = JsonTypeToCppType(schema.type(), schema.format());
-			write_multiline_comment(_os, schema.description(), _indent);
-			if (_indent.empty()) {
-				_os << "using " << sanitized_name << " = " << typestr << ";\n";
-			} else {
-				_os << _indent << typestr << ' ' << sanitized_name << ";\n";
-			}
+			RecursiveSchemaVisitor::PrintPrimitive(_os, _name, schema, _indent);
 		}
 		void operator()(const String& schema) const { print_primitive(schema); }
 		void operator()(const Number& schema) const { print_primitive(schema); }
@@ -279,7 +352,11 @@ Type StructPrinter::PrintSchemaDecl(std::string_view name, const JsonSchema& sch
 					}
 				}
 			};
-			schema.items().Visit(ArrayItemVisitor{_os, _name, _indent});
+			if (schema.items().IsRef()) {
+				_os << _indent << "using " << _name << " = std::vector<" << component_path(schema.items().ref()) << ">;\n";
+			} else {
+				schema.items().Visit(ArrayItemVisitor{_os, _name, _indent});
+			}
 		}
 		void operator()(const JsonSchema& schema) const {
 			if (!schema.oneOf().empty()) {
@@ -316,6 +393,7 @@ Type StructPrinter::PrintSchemaDecl(std::string_view name, const JsonSchema& sch
 			const auto sanitized_ref = sanitize(component_path(ref));
 			// If this is a nested ref, need to instantiate it
 			// If not, then make is a typedef ('using').
+			std::cout << "Doing " << _name << '\n';
 			if (_indent.empty()) {
 				_os << "using " << sanitized_name << " = " << sanitized_ref << ";\n";
 			} else {
@@ -323,12 +401,59 @@ Type StructPrinter::PrintSchemaDecl(std::string_view name, const JsonSchema& sch
 			}
 		}
 	};
-	Type visitedType = schema.Visit(SchemaVisitor{hpp_out, name, indent});
+	Type visitedType = schema.Visit(SchemaVisitor{hpp_out, name, indent, instantiate});
 	if (visitedType == Type::unknown) {
 		//printf("UNKNOWN: %s\n", name.data());
 	}
 	return visitedType;
 }
+
+Type StructPrinter::PrintResponseDecl(std::string_view name, const JsonSchema& schema) {
+	if (schema.IsRef()) {
+		if (auto [schemaname, optparam] = getComponentByRef(schema.ref()); optparam) {
+			hpp_out << indent << "using " << name << " = " << schemaname << ";\n";
+		} else {
+			std::cout << "WARN: " << name << " not found at " << schema.ref() << '\n';
+		}
+		return Type::unknown;
+	}
+	if (auto oneofs = schema.oneOf(); !oneofs.empty()) {
+		hpp_out << indent << "using " << name << " = std::variant<";
+		for (const auto& type : oneofs) {
+			if (type.IsRef()) {
+				if (const auto [optschemaname, optschema] = getComponentByRef(type.ref()); optschema) {
+					hpp_out << optschemaname << ',';
+				} else {
+					std::cout << "WARN: " << name << " not found at " << type.ref() << '\n';
+				}
+			} else {
+				hpp_out << type.type() << ',';
+			}
+		}
+		hpp_out.seekp(-1, std::ios::cur);
+		hpp_out << ">;\n";
+		return Type::unknown;
+	}
+	switch (schema.Type_()) {
+	case Type::boolean:
+	case Type::number:
+	case Type::integer:
+	case Type::string: {
+		RecursiveSchemaVisitor::PrintPrimitive(hpp_out, schema, indent);
+		break;
+	}
+	case Type::object:
+	case Type::array: {
+		PrintSchemaDecl(name, false, schema);
+		break;
+	}
+	}
+	return Type::unknown;
+}
+
+
+// JSON value to and from tag printers
+
 
 Type StructPrinter::PrintJSONValueFromTagDecl(std::string_view name, const JsonSchema& schema) {
 	struct SchemaVisitor final {
@@ -348,23 +473,28 @@ Type StructPrinter::PrintJSONValueFromTagImpl(std::string_view name, const JsonS
 	struct SchemaVisitor final {
 		std::ostream& _os;
 		std::string_view _name;
+		std::string& _indent;
 
 		void operator()(const Object& schema) const {
-			_os << "void tag_invoke(boost::json::value_from_tag, boost::json::value& jv, const " << _name << "& v) {\n";
-			_os << "\tjv = {\n";
+			_os << _indent << "void tag_invoke(boost::json::value_from_tag, boost::json::value& jv, const " << _name << "& v) {\n";
+			_indent.push_back('\t');
+			_os << _indent << "jv = {\n";
+			_indent.push_back('\t');
 			for (const auto& [propname, prop] : schema.properties()) {
 				if (prop.Type_() == Type::object) {
-					_os << "\t\t{ \"" << propname << "\", js::value_from(v." << propname << "_, jv.storage()) },\n";
+					_os << _indent << "{ \"" << propname << "\", js::value_from(v." << propname << "_, jv.storage()) },\n";
 				} else {
-					_os << "\t\t{ \"" << propname << "\", v." << propname << " },\n";
+					_os << _indent << "{ \"" << propname << "\", v." << propname << " },\n";
 				}
 			}
-			_os << "\t};\n";
-			_os << "}\n";
+			_indent.pop_back();
+			_os << _indent << "};\n";
+			_indent.pop_back();
+			_os << _indent << "}\n";
 		}
 	};
 
-	return schema.Visit(SchemaVisitor{cpp_out, name});
+	return schema.Visit(SchemaVisitor{cpp_out, name, indent});
 }
 
 Type StructPrinter::PrintJSONValueToTagDecl(std::string_view name, const JsonSchema& schema) {
@@ -386,12 +516,12 @@ Type StructPrinter::PrintJSONValueToTagImpl(std::string_view name, const JsonSch
 	struct SchemaVisitor final {
 		std::ostream& _os;
 		std::string_view _parent_name;
-		std::string_view _name;
+		std::string _name;
 		std::string& _indent;
 
 		void operator()(const Object& schema) const {
 			const std::string full_name =
-				(_parent_name.empty()) ? std::string(_name) : (std::string(_parent_name) + "::" + std::string(_name));
+				(_parent_name.empty()) ? _name : (std::string(_parent_name) + "::" + _name);
 
 			// First recurse to the leaf nodes of the tree to print nested structs
 			for (const auto& [propname, prop] : schema.properties()) {
@@ -431,11 +561,41 @@ Type StructPrinter::PrintJSONValueToTagImpl(std::string_view name, const JsonSch
 			_os << _indent << "}\n";
 		}
 		void operator()(const Array& schema) const {
-			schema.items().Visit(SchemaVisitor{_os, _parent_name, std::string(_name) + "_entry", _indent});
+			schema.items().Visit(SchemaVisitor{_os, _parent_name, _name + "_entry", _indent});
 		}
 	};
 
 	return schema.Visit(SchemaVisitor{cpp_out, "", sanitize(name), indent});
+}
+
+// Helpers for finding things by ref
+
+std::pair<std::string_view, std::optional<openapi::v3::JsonSchema>>
+StructPrinter::getComponentByRef(std::string_view ref) const {
+	size_t pos = ref.find_first_of('/');
+	ref.remove_prefix(pos + 1);
+	pos = ref.find_first_of('/');
+	if (ref.substr(0, pos) == "components") {
+		ref.remove_prefix(pos + 1);
+		pos = ref.find_first_of('/');
+		const auto component = ref.substr(0, pos);
+		if (component == "parameters") {
+			ref.remove_prefix(pos + 1);
+			for (const auto& [paramname, param] : file.components().parameters()) {
+				if (paramname == ref) {
+					return std::pair{ref, std::optional{param.schema()}};
+				}
+			}
+		} else if (component == "schemas") {
+			ref.remove_prefix(pos + 1);
+			for (const auto& [schemaname, schema] : file.components().schemas()) {
+				if (schemaname == ref) {
+					return std::pair{ref, std::optional{schema}};
+				}
+			}
+		} /*else if (component == "responses")*/
+	}
+	return std::pair{ref, std::nullopt};
 }
 
 // Public interface
