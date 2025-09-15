@@ -92,4 +92,28 @@ ExternalDocumentation OpenAPIv3::externalDocs() const {
 	return _GetObjectIfExist<ExternalDocumentation>("externalDocs");
 }
 
+static std::string_view component_path(std::string_view path) noexcept {
+	size_t pos = path.find_last_of('/');
+	return path.substr(pos + 1);
+}
+
+Components::Referenced<JsonSchema> Components::GetSchemaByRef(std::string_view refname) {
+	const auto ref = component_path(refname);
+	for (const auto& [name, entry] : schemas()) {
+		if (name == ref) {
+			return {ref, entry};
+		}
+	}
+	return {ref, std::nullopt};
+}
+Components::Referenced<Parameter> Components::GetParameterByRef(std::string_view refname) {
+	const auto ref = component_path(refname);
+	for (const auto& [name, entry] : parameters()) {
+		if (name == ref) {
+			return {ref, entry};
+		}
+	}
+	return {ref, std::nullopt};
+}
+
 } // namespace openapi::v3

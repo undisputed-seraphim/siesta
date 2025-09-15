@@ -10,10 +10,10 @@ namespace siesta::beast::v3 {
 
 const openapi::v3::Parameter V3Printer::resolveIfRef(const openapi::v3::Parameter& p) {
 	if (p.IsRef()) {
-		if (auto realparam = getParameterByRef(file, p.ref()); realparam.second.has_value()) {
-			return realparam.second.value();
+		if (const auto [name, param] = file.components().GetParameterByRef(p.ref()); param) {
+			return param.value();
 		} else {
-			throw std::runtime_error("Malformed reference " + std::string(realparam.first));
+			throw std::runtime_error("Malformed reference " + std::string(name));
 		}
 	}
 	return p;
@@ -21,10 +21,10 @@ const openapi::v3::Parameter V3Printer::resolveIfRef(const openapi::v3::Paramete
 
 const openapi::v3::JsonSchema V3Printer::resolveIfRef(const openapi::v3::JsonSchema& p) {
 	if (p.IsRef()) {
-		if (auto realparam = getSchemaByRef(file, p.ref()); realparam.second.has_value()) {
-			return realparam.second.value();
+		if (const auto [name, schema] = file.components().GetSchemaByRef(p.ref()); schema) {
+			return schema.value();
 		} else {
-			throw std::runtime_error("Malformed reference " + std::string(realparam.first));
+			throw std::runtime_error("Malformed reference " + std::string(name));
 		}
 	}
 	return p;

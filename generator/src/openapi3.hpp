@@ -196,6 +196,12 @@ public:
 	SIESTA_OPENAPI_OBJECT_FIELD(securitySchemes, SecuritySchemes)
 	SIESTA_OPENAPI_OBJECT_FIELD(links, Links)
 	SIESTA_OPENAPI_OBJECT_FIELD(callbacks, Paths)
+
+	template <typename T>
+	using Referenced = std::pair<std::string_view, std::optional<T>>;
+
+	Referenced<JsonSchema> GetSchemaByRef(std::string_view);
+	Referenced<Parameter> GetParameterByRef(std::string_view);
 };
 
 class OpenAPIv3 final : public OpenAPI {

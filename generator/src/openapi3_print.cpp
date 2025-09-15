@@ -44,14 +44,10 @@ private:
 	Type PrintJSONValueFromTagImpl(std::string_view name, const JsonSchema& schema);
 	Type PrintJSONValueToTagDecl(std::string_view name, const JsonSchema& schema);
 	Type PrintJSONValueToTagImpl(std::string_view name, const JsonSchema& schema);
-
-	// Expects the full, untruncated ref path
-	std::pair<std::string_view, std::optional<openapi::v3::JsonSchema>>
-	getComponentByRef(std::string_view ref) const;
 };
 
 // gets the final component of a def path
-std::string_view component_path(std::string_view path) noexcept {
+static std::string_view component_path(std::string_view path) noexcept {
 	size_t pos = path.find_last_of('/');
 	return path.substr(pos + 1);
 }
@@ -80,7 +76,7 @@ struct RecursiveSchemaVisitor final {
 		for (const auto& [propname, prop] : schema.properties()) {
 			const auto sanitized_propname = sanitize(propname);
 			if (prop.IsRef()) {
-				out << indent << "using " << sanitized_propname << " = " << prop.
+				//out << indent << "using " << sanitized_propname << " = " << prop.
 			} else {
 				prop.Visit(RecursiveSchemaVisitor{out, sanitized_name, indent});
 			}
@@ -209,11 +205,12 @@ void StructPrinter::PrintParameter(std::string_view name, const Parameter& param
 
 void StructPrinter::PrintParameterStruct(const Parameter& parameter) {
 	if (parameter.IsRef()) {
-		write_multiline_comment(hpp_out, parameter.ref(), indent);
-		if (auto [name, optparam] = getComponentByRef(parameter.ref()); optparam) {
-			PrintSchemaDecl(name, optparam.value());
+		const auto ref = parameter.ref();
+		write_multiline_comment(hpp_out, ref, indent);
+		if (const auto [name, param] = file.components().GetParameterByRef(parameter.ref()); param) {
+			PrintSchemaDecl(param.value().name(), param.value().schema());
 		} else {
-			std::cout << "WARN: " << name << " not found at " << parameter.ref() << '\n';
+			std::cout << "WARN: " << ref << " not found\n";
 		}
 	} else {
 		PrintSchemaDecl(parameter.name(), parameter.schema());
@@ -410,7 +407,7 @@ Type StructPrinter::PrintSchemaDecl(std::string_view name, bool instantiate, con
 
 Type StructPrinter::PrintResponseDecl(std::string_view name, const JsonSchema& schema) {
 	if (schema.IsRef()) {
-		if (auto [schemaname, optparam] = getComponentByRef(schema.ref()); optparam) {
+		if (const auto [schemaname, optparam] = file.components().GetSchemaByRef(schema.ref()); optparam) {
 			hpp_out << indent << "using " << name << " = " << schemaname << ";\n";
 		} else {
 			std::cout << "WARN: " << name << " not found at " << schema.ref() << '\n';
@@ -421,7 +418,7 @@ Type StructPrinter::PrintResponseDecl(std::string_view name, const JsonSchema& s
 		hpp_out << indent << "using " << name << " = std::variant<";
 		for (const auto& type : oneofs) {
 			if (type.IsRef()) {
-				if (const auto [optschemaname, optschema] = getComponentByRef(type.ref()); optschema) {
+				if (const auto [optschemaname, optschema] = file.components().GetSchemaByRef(type.ref()); optschema) {
 					hpp_out << optschemaname << ',';
 				} else {
 					std::cout << "WARN: " << name << " not found at " << type.ref() << '\n';
@@ -568,35 +565,6 @@ Type StructPrinter::PrintJSONValueToTagImpl(std::string_view name, const JsonSch
 	return schema.Visit(SchemaVisitor{cpp_out, "", sanitize(name), indent});
 }
 
-// Helpers for finding things by ref
-
-std::pair<std::string_view, std::optional<openapi::v3::JsonSchema>>
-StructPrinter::getComponentByRef(std::string_view ref) const {
-	size_t pos = ref.find_first_of('/');
-	ref.remove_prefix(pos + 1);
-	pos = ref.find_first_of('/');
-	if (ref.substr(0, pos) == "components") {
-		ref.remove_prefix(pos + 1);
-		pos = ref.find_first_of('/');
-		const auto component = ref.substr(0, pos);
-		if (component == "parameters") {
-			ref.remove_prefix(pos + 1);
-			for (const auto& [paramname, param] : file.components().parameters()) {
-				if (paramname == ref) {
-					return std::pair{ref, std::optional{param.schema()}};
-				}
-			}
-		} else if (component == "schemas") {
-			ref.remove_prefix(pos + 1);
-			for (const auto& [schemaname, schema] : file.components().schemas()) {
-				if (schemaname == ref) {
-					return std::pair{ref, std::optional{schema}};
-				}
-			}
-		} /*else if (component == "responses")*/
-	}
-	return std::pair{ref, std::nullopt};
-}
 
 // Public interface
 void PrintStructDefinitions(
