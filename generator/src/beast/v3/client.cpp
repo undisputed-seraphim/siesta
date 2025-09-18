@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <beast/beast.hpp>
 #include <beast/v3/beastv3.hpp>
+#include <util.hpp>
 
 namespace fs = ::std::filesystem;
 using namespace std::literals;
@@ -46,7 +47,7 @@ void V3Printer::print_client_header() {
 		<< "#include <boost/beast/core.hpp>\n"
 		<< "#include <boost/beast/http.hpp>\n"
 		<< "#include <boost/json.hpp>\n"
-		<< "#include <fmt/format.h>\n"
+		<< "#include <format>\n"
 		<< "#include <functional>\n"
 		<< "#include <memory>\n"
 		<< "#include <string>\n"
@@ -177,7 +178,7 @@ void V3Printer::print_function_body(
 	out << indent << "constexpr std::string_view path = \"" << full_path << "\";\n";
 	out << indent << "request_type req;\n";
 	if (has_path_param || (has_query_param && !is_post)) {
-		out << indent << "req.target(fmt::format(path, ";
+		out << indent << "req.target(std::format(path, ";
 	}
 	if (has_path_param) {
 		for (const auto& p : params) {
@@ -208,7 +209,7 @@ void V3Printer::print_function_body(
 			}
 		}
 		out << "\";\n";
-		out << indent << "req.body().append(fmt::format(queryfmt, ";
+		out << indent << "req.body().append(std::format(queryfmt, ";
 		for (const auto& p : params) {
 			if (const auto realp = resolveIfRef(p); realp.in() == "query") {
 				out << realp.name() << ", ";

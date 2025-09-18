@@ -23,8 +23,14 @@ int main(int argc, char* argv[]) try {
 	auto opts = desc.add_options();
 	opts("input,i", po::value<fs::path>(&input_json)->required(), "Path to input JSON file.");
 	opts("output,o", po::value<fs::path>(&output_dir)->required(), "Path to output directory.");
-	opts("coroutine", po::bool_switch()->default_value(false), "Generate coroutines instead of templated callbacks for endpoints.");
-	opts("namespace", po::value<std::string>()->default_value("openapi"), "Set a custom namespace, defaults to 'openapi'.");
+	opts(
+		"coroutine",
+		po::bool_switch()->default_value(false),
+		"Generate coroutines instead of templated callbacks for endpoints.");
+	opts(
+		"namespace",
+		po::value<std::string>()->default_value("openapi"),
+		"Set a custom namespace, defaults to 'openapi'.");
 	opts("help,h", "Print this help message.");
 	po::variables_map vm;
 	po::store(po::parse_command_line(argc, argv, desc), vm);

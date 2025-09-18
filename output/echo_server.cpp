@@ -1,5 +1,4 @@
 #include <boost/json.hpp>
-#include <fmt/format.h>
 
 #include "echo_server.hpp"
 

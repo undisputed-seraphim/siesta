@@ -1,13 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <array>
+#include <concepts>
 #include <filesystem>
 #include <fstream>
 
-#include "../openapi2.hpp"
-#include "../openapi3.hpp"
-#include "../util.hpp"
+#include "../openapi.hpp"
 
 namespace siesta::beast {
 

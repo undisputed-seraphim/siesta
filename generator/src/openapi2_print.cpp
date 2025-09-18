@@ -354,11 +354,11 @@ Type StructPrinter::PrintJSONValueToTagImpl(std::string_view name, const JsonSch
 				const auto sanitized_propname = sanitize(propname);
 				if (prop.IsRef()) {
 					const auto refname = get_reference_name(prop.ref());
-					_os << "\tret." << sanitized_propname << "_ = js::value_to<" << refname << ">(obj.at(\""
-					<< propname << "\"));\n";
+					_os << "\tret." << sanitized_propname << "_ = js::value_to<" << refname << ">(obj.at(\"" << propname
+						<< "\"));\n";
 				} else if (prop.Type_() != Type::object) {
-					_os << "\tret." << sanitized_propname << " = js::value_to<" << JsonTypeToCppType(prop.type()) << ">(obj.at(\""
-					<< propname << "\"));\n";
+					_os << "\tret." << sanitized_propname << " = js::value_to<" << JsonTypeToCppType(prop.type())
+						<< ">(obj.at(\"" << propname << "\"));\n";
 				}
 			}
 			_os << "\treturn ret;\n";

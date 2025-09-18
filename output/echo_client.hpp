@@ -6,7 +6,7 @@
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 #include <boost/json.hpp>
-#include <fmt/format.h>
+#include <format>
 #include <functional>
 #include <memory>
 #include <string>
@@ -31,7 +31,7 @@ public:
 		constexpr std::string_view path = "/v1/echo?message={}";
 		::boost::json::monotonic_resource json_rsc(_json_buffer.data(), _json_buffer.size());
 		request_type req;
-		req.target(fmt::format(path, message));
+		req.target(std::format(path, message));
 		req.method(::boost::beast::http::verb::get);
 		req.set("headerParam", headerParam);
 		return this->async_submit_request(std::move(req), token);

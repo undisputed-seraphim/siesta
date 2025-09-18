@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: Apache-2.0
-cmake_minimum_required(VERSION 3.25)
+cmake_minimum_required(VERSION 3.31)
 project(siesta VERSION 0.1.0)
 
 if (CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
@@ -13,12 +13,12 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
+add_subdirectory(thirdparty)
+
 set(Boost_USE_STATIC_LIBS ON)
 find_package(Boost 1.83 REQUIRED COMPONENTS system json program_options)
 find_package(simdjson 3.13 REQUIRED)
 message(STATUS "simdjson version ${simdjson_VERSION}")
-find_package(fmt 9 REQUIRED)
-message(STATUS "fmt ${fmt_VERSION}")
 
 add_subdirectory(generator)
 
@@ -32,7 +32,6 @@ target_link_libraries(siesta PUBLIC
 	Boost::boost
 	Boost::json
 	Boost::system
-	fmt::fmt
 )
 
 

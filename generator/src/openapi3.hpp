@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <filesystem>
+
 #include "openapi.hpp"
 
 namespace openapi::v3 {

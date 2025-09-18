@@ -1,10 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "openapi3.hpp"
 
-#include <fstream>
-
-namespace fs = ::std::filesystem;
-
 namespace openapi::v3 {
 
 // RequestBody

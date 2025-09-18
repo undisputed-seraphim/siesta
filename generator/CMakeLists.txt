@@ -9,7 +9,6 @@ target_link_libraries(siesta-generator PRIVATE
 	Boost::program_options
 	Boost::json
 	Boost::system
-	fmt::fmt
 )
 
 install(TARGETS siesta-generator COMPONENT generator)

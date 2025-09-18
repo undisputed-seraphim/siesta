@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <beast/beast.hpp>
 #include <beast/v2/beastv2.hpp>
+#include <util.hpp>
 
 namespace fs = ::std::filesystem;
 using namespace std::literals;
@@ -24,7 +25,7 @@ void V2Printer::print_client_header() {
 		<< "#include <boost/beast/core.hpp>\n"
 		<< "#include <boost/beast/http.hpp>\n"
 		<< "#include <boost/json.hpp>\n"
-		<< "#include <fmt/format.h>\n"
+		<< "#include <format>\n"
 		<< "#include <functional>\n"
 		<< "#include <memory>\n"
 		<< "#include <string>\n"
@@ -142,7 +143,7 @@ void V2Printer::print_function_body(
 	out << indent << "constexpr std::string_view path = \"" << full_path << "\";\n";
 	out << indent << "request_type req;\n";
 	if (has_path_param || has_query_param) {
-		out << indent << "req.target(fmt::format(path, ";
+		out << indent << "req.target(std::format(path, ";
 		for (const auto& p : params) {
 			if (p.in() == "path") {
 				out << p.name() << ", ";
@@ -212,7 +213,7 @@ void V2Printer::print_client_body(const openapi::v2::Operation& op, std::string&
 		formdata_str.pop_back();
 		form_params.pop_back();
 		out << indent << "constexpr std::string_view form = \"" << formdata_str << "\";\n";
-		out << indent << "req.body().assign(fmt::format(form," << form_params << "));\n";
+		out << indent << "req.body().assign(std::format(form," << form_params << "));\n";
 		return;
 	}
 

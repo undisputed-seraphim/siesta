@@ -1,8 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <filesystem>
-#include <functional>
 #include <iterator>
 #include <string>
 #include <string_view>
@@ -307,9 +305,7 @@ public:
 	// Returns true for strings, numbers, and booleans.
 	static bool IsPrimitive(Type) noexcept;
 	static bool IsPrimitive(const JsonSchema&) noexcept;
-	bool IsPrimitive() noexcept {
-		return JsonSchema::IsPrimitive(*this);
-	}
+	bool IsPrimitive() noexcept { return JsonSchema::IsPrimitive(*this); }
 
 	template <typename VisitorType>
 	Type Visit(VisitorType&& v) const;

@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "beast.hpp"
 
+#include "../openapi2.hpp"
+#include "../openapi3.hpp"
+
 #include <beast/v2/beastv2.hpp>
 #include <beast/v3/beastv3.hpp>
 

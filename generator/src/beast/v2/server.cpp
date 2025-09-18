@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
-#include <algorithm>
+
 #include <beast/beast.hpp>
 #include <beast/v2/beastv2.hpp>
+#include <util.hpp>
 
-namespace fs = ::std::filesystem;
 using namespace std::literals;
 
 namespace siesta::beast::v2 {
@@ -81,7 +81,7 @@ void V2Printer::print_query_details(const openapi::v2::Operation& op, std::strin
 void V2Printer::print_server_cpp() {
 	auto& out = srv_cpp_ofs;
 	out << "#include <boost/json.hpp>\n"
-		<< "#include <fmt/format.h>\n"
+		<< "#include <format>\n"
 		<< "#include <siesta/path_tree.hpp>\n"
 		<< "#include <unordered_map>\n"
 		<< '\n'
