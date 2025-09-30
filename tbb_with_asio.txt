@@ -1,0 +1,345 @@
+begin tbb_asio_server.cpp ----------------
+
+
+// tbb_asio_server.cpp : Defines the entry point for the console application.
+//
+
+#include "stdafx.h"
+#include <iostream>
+#include <boost/asio.hpp>
+#include <string>
+#include <vector>
+#include <boost/noncopyable.hpp>
+#include <boost/shared_ptr.hpp>
+#include "asio_server.h"
+
+#include "..\..\..\..\program files\Intel\tbb\2.0\include\tbb\task.h"
+#include "..\..\..\..\program
+files\Intel\tbb\2.0\include\tbb\task_scheduler_init.h"
+#include "..\..\..\..\program
+files\Intel\tbb\2.0\include\tbb\scalable_allocator.h"
+
+//#pragma comment(lib, "..\..\..\..\program
+files\Intel\tbb\2.0\lib\tbb.lib tbbmalloc.lib)
+#ifdef _DEBUG
+	#pragma comment(lib, "c:\\Program
+Files\\Intel\\TBB\\2.0\\ia32\\vc8\\lib\\tbb_debug.lib")
+	#pragma comment(lib, "c:\\Program
+Files\\Intel\\TBB\\2.0\\ia32\\vc8\\lib\\tbbmalloc_debug.lib")
+#else
+	#pragma comment(lib, "tbb.lib")
+	#pragma comment(lib, "tbbmalloc.lib")
+#endif
+//static unsigned _stdcall StaticThreadRoutine(void *pParams);
+
+class RunIOServer : public tbb::task {
+public:
+	tbb_asio::asio_server * pServer;
+	RunIOServer( tbb_asio::asio_server * server ) : pServer(server)
+	{
+		
+	}
+	tbb::task* execute(){
+		pServer->run();
+		return NULL;
+	}
+};
+
+tbb::empty_task* StartServer(tbb_asio::asio_server * pServer) {
+	tbb::empty_task* parent = new (tbb::task::allocate_root()) tbb::empty_task;
+	parent->set_ref_count(2);
+	RunIOServer * s = new (parent->allocate_child()) RunIOServer(pServer);
+	parent->spawn(*s);
+	return parent;
+}
+
+void WaitForServer( tbb::empty_task* parent )
+{
+	parent->wait_for_all();
+	parent->destroy(*parent);
+}
+int _tmain(int argc, _TCHAR* argv[])
+{
+	printf_s("-=-=-=-= \tKT's Thread Building Block / Asynchronous IO
+Server\t=-=-=-=- \r\n");
+	/**
+		I'm using this application to rationalize the use of the thread
+building technology from Intel AND the
+		use of boost:asio. Both are fairly recent technologies, but at a stable build.
+
+		Expectations of this project:
+		- Prove that this can work
+		- Allow multiple clients to connect and be serviced
+		- Start protocol abstraction
+	*/
+	// Start up scheduler
+	// For production, no argument should be provided to the constructor, so that
+	// the application gets the number of threads that are physically available.
+	tbb::task_scheduler_init init(tbb::task_scheduler_init::automatic);
+
+
+	tbb_asio::asio_server server(std::string("0::0"), std::string("4444") );
+	//SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_TIME_CRITICAL);
+	//unsigned threadId;
+
+	//HANDLE hThread = (HANDLE)_beginthreadex(NULL, 0, StaticThreadRoutine,
+	//	(void*)&server, CREATE_SUSPENDED, &threadId );
+	//SetThreadPriority( hThread, THREAD_PRIORITY_NORMAL );
+	//ResumeThread(hThread);
+	tbb::empty_task * e = StartServer(&server);
+
+
+	//HANDLE hThread2 = (HANDLE)_beginthreadex(NULL, 0, StaticThreadRoutine,
+	//	(void*)&server, CREATE_SUSPENDED, &threadId );
+	//SetThreadPriority( hThread2, THREAD_PRIORITY_NORMAL );
+	//ResumeThread(hThread2);
+	//WaitForServer(e);
+	while(true)
+	{
+		//server.run();
+		Sleep(500);
+	}
+	std::cin.get();
+	return 0;
+}
+
+//static unsigned int _stdcall StaticThreadRoutine(void *pParams)
+//{
+//	while(true)
+//	{
+//		((tbb_asio::asio_server*)pParams)->run();
+//	}
+//	return 0;
+//}
+
+
+end tbb_asio_server.cpp ----------
+
+begin asio_server.h ------------
+
+
+#if !defined(ASIO_SERVER_H__INCLUDED_)
+#define ASIO_SERVER_H__INCLUDED_
+#include <boost/asio.hpp> // The only include required for asio operations
+#include <boost/noncopyable.hpp>
+#include <string>
+#include <boost/shared_ptr.hpp>
+#include "request_handler.h"
+#include "connection.h"
+
+namespace tbb_asio
+{
+	class asio_server : private boost::noncopyable // Non-copyable,
+defeats copy constructor
+	{
+	public:
+		// Construct the server to listen on the specified TCP address and port
+		explicit asio_server( const std::string& address, const std::string& port );
+
+		/** Run the io_server loop */
+		void run();
+
+		/** Stop the io_server loop */
+		void stop();
+	protected:
+	private:
+		/** Handle completion of an asynchronous accept operation */
+		void handle_accept(const asio::error_code& e);
+
+		/** The io_service to perform asynchronous operations */
+		asio::io_service io_service_;
+
+		/** Acceptor used to listen for incoming connections */
+		asio::ip::tcp::acceptor acceptor_;
+
+		/** The next connection to be accepted */
+		connection_ptr new_connection_;
+
+		/** The handler for all incoming requests */
+		request_handler request_handler_;
+	};
+}
+#endif
+
+end asio_server.h ------------------
+
+
+begin asio_server.cpp -------------------
+
+
+#include "stdafx.h"
+#include "asio_server.h"
+#include <boost/bind.hpp>
+#include <boost/shared_ptr.hpp>
+
+namespace tbb_asio
+{
+	asio_server::asio_server( const std::string& address, const
+std::string& port )
+		: acceptor_(io_service_), new_connection_(new
+connection(io_service_, request_handler_))
+	{
+		// Open the acceptor with the option to reuse the address
+		asio::ip::tcp::resolver resolver(io_service_);
+		asio::ip::tcp::resolver::query query(address,port);
+		asio::ip::tcp::endpoint endpoint = *resolver.resolve(query);
+		//asio::ip::tcp::endpoint endpoint( asio::ip::tcp::v4(), 4444 );
+		//endpoint./*.address(ADDR_ANY)*/;
+		acceptor_.open(endpoint.protocol());
+		acceptor_.set_option(asio::ip::tcp::acceptor::reuse_address(true));
+		acceptor_.bind(endpoint);
+		acceptor_.listen();
+		acceptor_.async_accept(new_connection_->socket(),
+boost::bind(&asio_server::handle_accept, this,
+asio::placeholders::error));
+
+	}
+
+	void asio_server::stop()
+	{
+		io_service_.stop();
+
+	}
+
+	void asio_server::run()
+	{
+		io_service_.run();
+	}
+
+	void asio_server::handle_accept( const asio::error_code& e )
+	{
+		if(!e)
+		{
+			printf("Accepting new socket connection.\r\n");
+			new_connection_->start();
+			new_connection_.reset(new connection(io_service_, request_handler_));
+			acceptor_.async_accept(new_connection_->socket(),
+				boost::bind(&asio_server::handle_accept, this,
+				asio::placeholders::error ));
+		}
+	}
+}
+
+end asio_server.h ----------------------------
+
+
+begin connection.h --------------------
+
+#if !defined(CONNECTION_H__INCLUDED_)
+#define CONNECTION_H__INCLUDED
+#include <boost/asio.hpp>
+#include <boost/array.hpp>
+#include <boost/noncopyable.hpp>
+#include <boost/shared_ptr.hpp>
+#include <boost/enable_shared_from_this.hpp>
+#include "request_handler.h"
+#include <string>
+
+
+namespace tbb_asio
+{
+	class connection : public boost::enable_shared_from_this<connection>,
+		private boost::noncopyable
+	{
+	public:
+		explicit connection(asio::io_service& io_service,
+			request_handler& handler);
+
+		asio::ip::tcp::socket& socket();
+
+		// Start the first asynchronous operation for the connection
+		void start();
+
+		// Stop all asynchronous operations associated with the connection
+		void stop();
+
+	protected:
+	private:
+		void handle_read(const asio::error_code& e,
+			std::size_t bytes_transferred);
+		// handle completion of write event
+		void handle_write(const asio::error_code& e);
+
+		// stand to ensure the connection's handlers are not called concurrently
+		asio::io_service::strand strand_; // This may need to be rethought
+because of TBB
+
+		// Socket for the connection
+		asio::ip::tcp::socket socket_;
+
+		// The handler used to process the incoming request
+		request_handler& request_handler_;
+
+		// Buffer for the incoming data
+		boost::array<char, 512> buffer_;//, buffer2_, buffer3_, buffer4_,
+buffer5_; // This really should be a properly aligned buffer
+		//boost::aligned_storage< 8192 > buffer_;
+		//char buffer_[512];
+
+
+
+		request request_; // incoming request
+
+		// The reply to be sent back to the client
+		reply reply_;
+
+		std::string reply_string;
+	};
+	typedef boost::shared_ptr<connection> connection_ptr;
+}
+#endif
+
+end connection.h ------------------------------
+
+begin new/delete replacements --- (I put them in my stdafx.cpp)
+
+#ifndef TBB_ALLOC_DEF_
+#define TBB_ALLOC_DEF_
+#include "..\..\..\..\program
+files\Intel\tbb\2.0\include\tbb\scalable_allocator.h"
+void * operator new (size_t size) throw (std::bad_alloc)
+{
+	if( size == 0 ) size = 1;
+	if( void * ptr = scalable_malloc(size))
+		return ptr;
+	throw std::bad_alloc();
+}
+void * operator new[] (size_t size) throw (std::bad_alloc)
+{
+	return operator new(size);
+}
+void * operator new(size_t size, const std::nothrow_t& ) throw()
+{
+	if( size == 0 ) size = 1;
+	if( void * ptr = scalable_malloc(size))
+		return ptr;
+	return NULL;
+}
+
+void * operator new[] (size_t size, const std::nothrow_t&) throw()
+{
+	return operator new(size, std::nothrow );
+}
+
+void operator delete( void * ptr ) throw()
+{
+	if( ptr != 0 ) scalable_free(ptr);
+}
+
+void operator delete[] (void * ptr) throw()
+{
+	operator delete(ptr);
+}
+
+void operator delete(void * ptr, const std::nothrow_t&) throw()
+{
+	if( ptr != 0 ) scalable_free(ptr);
+}
+
+void operator delete[] (void * ptr, const std::nothrow_t&) throw()
+{
+	operator delete(ptr, std::nothrow);
+}
+#endif
+
+end new/delete replacement ------------------------
