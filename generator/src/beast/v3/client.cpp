@@ -48,7 +48,6 @@ void V3Printer::print_client_header() {
 		<< "#include <boost/beast/http.hpp>\n"
 		<< "#include <boost/json.hpp>\n"
 		<< "#include <format>\n"
-		<< "#include <functional>\n"
 		<< "#include <memory>\n"
 		<< "#include <string>\n"
 		<< "#include <string_view>\n"
