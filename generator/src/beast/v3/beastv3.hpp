@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include "beast/beast.hpp"
+#include "openapi3.hpp"
 #include <filesystem>
-#include <fstream>
-#include <openapi3.hpp>
 
 namespace siesta::beast::v3 {
 
@@ -12,8 +12,8 @@ public:
 	V3Printer(const openapi::v3::OpenAPIv3& file_, const std::string& name_)
 		: BasePrinter(file_, name_) {}
 
-	void print_client(const std::filesystem::path& output_dir);
-	void print_server(const std::filesystem::path& output_dir);
+	void print_client(const std::filesystem::path& output_dir) override;
+	void print_server(const std::filesystem::path& output_dir) override;
 
 private:
 	// Client only
