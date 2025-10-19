@@ -11,7 +11,7 @@ using Type = JsonSchema::Type;
 
 class StructPrinter {
 public:
-	StructPrinter(const OpenAPIv3& file_, const std::filesystem::path& input_, const std::filesystem::path& output_)
+	StructPrinter(const OpenAPIv3& file_, const fs::path& input_, const fs::path& output_)
 		: file(file_)
 		, input(input_)
 		, output(output_)
@@ -31,19 +31,17 @@ private:
 	void PrintPaths();
 
 	void PrintSchema(std::string_view name, const JsonSchema& schema);
-	void PrintParameter(const Parameter&);
 	void PrintParameter(std::string_view name, const Parameter&);
 	void PrintParameterStruct(const Parameter&);
 
 	// Detailed print impls
-	Type PrintSchemaDecl(std::string_view name, const JsonSchema& schema);
-	Type PrintSchemaDecl(std::string_view name, bool instantiate, const JsonSchema& schema);
-	Type PrintResponseDecl(std::string_view name, const JsonSchema& schema);
+	void PrintSchemaDecl(std::string_view name, const JsonSchema& schema);
+	void PrintResponseDecl(std::string_view name, const JsonSchema& schema);
 
-	Type PrintJSONValueFromTagDecl(std::string_view name, const JsonSchema& schema);
-	Type PrintJSONValueFromTagImpl(std::string_view name, const JsonSchema& schema);
-	Type PrintJSONValueToTagDecl(std::string_view name, const JsonSchema& schema);
-	Type PrintJSONValueToTagImpl(std::string_view name, const JsonSchema& schema);
+	void PrintJSONValueFromTagDecl(std::string_view name, const JsonSchema& schema);
+	void PrintJSONValueFromTagImpl(std::string_view name, const JsonSchema& schema);
+	void PrintJSONValueToTagDecl(std::string_view name, const JsonSchema& schema);
+	void PrintJSONValueToTagImpl(std::string_view name, const JsonSchema& schema);
 };
 
 // gets the final component of a def path
@@ -147,11 +145,13 @@ bool StructPrinter::operator()() {
 }
 
 void StructPrinter::PrintComponents() {
+	hpp_out << "// Schemas\n";
 	for (const auto& [name, schema] : file.components().schemas()) {
 		PrintSchema(name, schema);
 		hpp_out << std::endl;
 		cpp_out << std::endl;
 	}
+	hpp_out << "// Parameters\n";
 	for (const auto& [name, parameter] : file.components().parameters()) {
 		PrintParameter(name, parameter);
 	}
@@ -163,17 +163,6 @@ void StructPrinter::PrintSchema(std::string_view name, const JsonSchema& schema)
 	PrintJSONValueFromTagImpl(name, schema);
 	PrintJSONValueToTagDecl(name, schema);
 	PrintJSONValueToTagImpl(name, schema);
-}
-
-void StructPrinter::PrintParameter(const Parameter& parameter) {
-	if (parameter.IsRef()) {
-		// TODO
-		write_multiline_comment(hpp_out, parameter.ref(), indent);
-	} else {
-		write_multiline_comment(hpp_out, parameter.description(), indent);
-		write_multiline_comment(hpp_out, parameter.name(), indent);
-		PrintParameter(parameter.name(), parameter);
-	}
 }
 
 void StructPrinter::PrintParameter(std::string_view name, const Parameter& parameter) {
@@ -214,6 +203,7 @@ void StructPrinter::PrintParameterStruct(const Parameter& parameter) {
 }
 
 void StructPrinter::PrintPaths() {
+	hpp_out << "// Paths\n";
 	std::string name; // Buffer to hold names constructed during this function
 	for (const auto& [pathstr, path] : file.paths()) {
 		const std::string pathstr_name = sanitize(pathstr);
@@ -248,11 +238,7 @@ void StructPrinter::PrintPaths() {
 	}
 }
 
-Type StructPrinter::PrintSchemaDecl(std::string_view name, const JsonSchema& schema) {
-	return PrintSchemaDecl(name, false, schema);
-}
-
-Type StructPrinter::PrintSchemaDecl(std::string_view name, bool instantiate, const JsonSchema& schema) {
+void StructPrinter::PrintSchemaDecl(std::string_view name, const JsonSchema& schema) {
 	struct SchemaVisitor final {
 		std::ostream& _os;
 		std::string_view _name;
@@ -278,14 +264,9 @@ Type StructPrinter::PrintSchemaDecl(std::string_view name, bool instantiate, con
 			}
 			_indent.pop_back();
 
-			if (_indent.empty()) {
-				_os << _indent << "};\n";
-			} else {
-				if (_instantiate) {
-					_os << _indent << "} " << sanitized_name << "_;\n";
-				} else {
-					_os << _indent << "};\n";
-				}
+			_os << _indent << "};\n";
+			if (!_indent.empty() && _instantiate) {
+				_os << _indent << sanitized_name << ' ' << sanitized_name << "_;\n";
 			}
 		}
 		void operator()(const Array& schema) const {
@@ -393,21 +374,17 @@ Type StructPrinter::PrintSchemaDecl(std::string_view name, bool instantiate, con
 			}
 		}
 	};
-	Type visitedType = schema.Visit(SchemaVisitor{hpp_out, name, indent, instantiate});
-	if (visitedType == Type::unknown) {
-		// printf("UNKNOWN: %s\n", name.data());
-	}
-	return visitedType;
+	schema.Visit(SchemaVisitor{hpp_out, name, indent});
 }
 
-Type StructPrinter::PrintResponseDecl(std::string_view name, const JsonSchema& schema) {
+void StructPrinter::PrintResponseDecl(std::string_view name, const JsonSchema& schema) {
 	if (schema.IsRef()) {
 		if (const auto [schemaname, optparam] = file.components().GetSchemaByRef(schema.ref()); optparam) {
 			hpp_out << indent << "using " << name << " = " << schemaname << ";\n";
 		} else {
 			std::cout << "WARN: " << name << " not found at " << schema.ref() << '\n';
 		}
-		return Type::unknown;
+		return;
 	}
 	if (auto oneofs = schema.oneOf(); !oneofs.empty()) {
 		hpp_out << indent << "using " << name << " = std::variant<";
@@ -424,7 +401,7 @@ Type StructPrinter::PrintResponseDecl(std::string_view name, const JsonSchema& s
 		}
 		hpp_out.seekp(-1, std::ios::cur);
 		hpp_out << ">;\n";
-		return Type::unknown;
+		return;
 	}
 	switch (schema.Type_()) {
 	case Type::boolean:
@@ -436,16 +413,16 @@ Type StructPrinter::PrintResponseDecl(std::string_view name, const JsonSchema& s
 	}
 	case Type::object:
 	case Type::array: {
-		PrintSchemaDecl(name, false, schema);
+		PrintSchemaDecl(name, schema);
 		break;
 	}
 	}
-	return Type::unknown;
+	return;
 }
 
 // JSON value to and from tag printers
 
-Type StructPrinter::PrintJSONValueFromTagDecl(std::string_view name, const JsonSchema& schema) {
+void StructPrinter::PrintJSONValueFromTagDecl(std::string_view name, const JsonSchema& schema) {
 	struct SchemaVisitor final {
 		std::ostream& _os;
 		std::string_view _name;
@@ -456,10 +433,10 @@ Type StructPrinter::PrintJSONValueFromTagDecl(std::string_view name, const JsonS
 				<< "& v);\n";
 		}
 	};
-	return schema.Visit(SchemaVisitor{hpp_out, name});
+	schema.Visit(SchemaVisitor{hpp_out, name});
 }
 
-Type StructPrinter::PrintJSONValueFromTagImpl(std::string_view name, const JsonSchema& schema) {
+void StructPrinter::PrintJSONValueFromTagImpl(std::string_view name, const JsonSchema& schema) {
 	struct SchemaVisitor final {
 		std::ostream& _os;
 		std::string_view _name;
@@ -485,11 +462,10 @@ Type StructPrinter::PrintJSONValueFromTagImpl(std::string_view name, const JsonS
 			_os << _indent << "}\n";
 		}
 	};
-
-	return schema.Visit(SchemaVisitor{cpp_out, name, indent});
+	schema.Visit(SchemaVisitor{cpp_out, name, indent});
 }
 
-Type StructPrinter::PrintJSONValueToTagDecl(std::string_view name, const JsonSchema& schema) {
+void StructPrinter::PrintJSONValueToTagDecl(std::string_view name, const JsonSchema& schema) {
 	struct SchemaVisitor final {
 		std::ostream& _os;
 		std::string_view _name;
@@ -501,10 +477,10 @@ Type StructPrinter::PrintJSONValueToTagDecl(std::string_view name, const JsonSch
 		}
 	};
 
-	return schema.Visit(SchemaVisitor{hpp_out, name});
+	schema.Visit(SchemaVisitor{hpp_out, name});
 }
 
-Type StructPrinter::PrintJSONValueToTagImpl(std::string_view name, const JsonSchema& schema) {
+void StructPrinter::PrintJSONValueToTagImpl(std::string_view name, const JsonSchema& schema) {
 	struct SchemaVisitor final {
 		std::ostream& _os;
 		std::string_view _parent_name;
@@ -555,8 +531,7 @@ Type StructPrinter::PrintJSONValueToTagImpl(std::string_view name, const JsonSch
 			schema.items().Visit(SchemaVisitor{_os, _parent_name, _name + "_entry", _indent});
 		}
 	};
-
-	return schema.Visit(SchemaVisitor{cpp_out, "", sanitize(name), indent});
+	schema.Visit(SchemaVisitor{cpp_out, "", sanitize(name), indent});
 }
 
 // Public interface

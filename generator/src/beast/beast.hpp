@@ -5,7 +5,7 @@
 #include <filesystem>
 #include <fstream>
 
-#include "../openapi.hpp"
+#include "openapi.hpp"
 
 namespace siesta::beast {
 
@@ -19,6 +19,9 @@ public:
 	BasePrinter(const OpenAPIRevision& file_, const std::string& name_)
 		: file(file_)
 		, name(name_) {}
+
+	virtual void print_client(const std::filesystem::path& output_dir) = 0;
+	virtual void print_server(const std::filesystem::path& output_dir) = 0;
 
 protected:
 	const OpenAPIRevision& file;

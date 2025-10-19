@@ -2,6 +2,7 @@
 #pragma once
 
 #include <functional>
+#include <ostream>
 #include <string_view>
 
 void ltrim(std::string_view& s);
