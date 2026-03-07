@@ -119,7 +119,7 @@ void V3Printer::print_dispatcher_function(std::string className) {
 	out << "\t\t\treturn (this->*(*it).second)(req, std::move(session));\n";
 	out << "\t\t}\n";
 	out << "\t}\n";
-	out << "\t// 404\n";
+	out << "\tsession->get_response().result(http::status::not_found);\n";
 	out << "}\n";
 }
 
