@@ -17,9 +17,10 @@ add_subdirectory(thirdparty)
 
 set(Boost_USE_STATIC_LIBS ON)
 find_package(Boost 1.83 REQUIRED COMPONENTS system json program_options)
-find_package(simdjson 3.13 REQUIRED)
+find_package(simdjson 4.3 REQUIRED)
 message(STATUS "simdjson version ${simdjson_VERSION}")
 
+#add_subdirectory(jsonschema)
 add_subdirectory(generator)
 
 file(GLOB_RECURSE lib_src "${CMAKE_CURRENT_SOURCE_DIR}/src/*")
@@ -33,9 +34,6 @@ target_link_libraries(siesta PUBLIC
 	Boost::json
 	Boost::system
 )
-
-
-#add_subdirectory(output)
 
 add_subdirectory(tests)
 
