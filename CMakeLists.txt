@@ -20,7 +20,7 @@ find_package(Boost 1.83 REQUIRED COMPONENTS system json program_options)
 find_package(simdjson 4.3 REQUIRED)
 message(STATUS "simdjson version ${simdjson_VERSION}")
 
-#add_subdirectory(jsonschema)
+add_subdirectory(jsonschema)
 add_subdirectory(generator)
 
 file(GLOB_RECURSE lib_src "${CMAKE_CURRENT_SOURCE_DIR}/src/*")
