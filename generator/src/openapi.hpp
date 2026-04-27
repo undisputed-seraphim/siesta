@@ -323,6 +323,9 @@ public:
 	using SchemaList = __detail::ListAdaptor<JsonSchema>;
 	SchemaList anyOf() const;
 	SchemaList oneOf() const;
+	SchemaList allOf() const;
+	using EnumValueList = __detail::ListAdaptor<simdjson::dom::element>;
+	EnumValueList enum_() const;
 };
 
 class String : public JsonSchema {
