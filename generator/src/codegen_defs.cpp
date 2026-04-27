@@ -1,0 +1,592 @@
+// SPDX-License-Identifier: Apache-2.0
+#include "codegen_defs.hpp"
+#include "util.hpp"
+#include <algorithm>
+#include <sstream>
+#include <unordered_set>
+
+namespace codegen {
+
+// Helper to resolve a type name to its actual C++ type (follows typedef chains recursively)
+static std::string resolveTypeName(
+	const schema::NormalizedAST& ast,
+	const std::unordered_map<std::string, std::string>& typedef_chain,
+	const std::string& name) {
+	// Follow typedef chain recursively
+	std::string current = name;
+	std::unordered_set<std::string> visited;
+	while (true) {
+		auto chain_it = typedef_chain.find(current);
+		if (chain_it == typedef_chain.end()) {
+			break;
+		}
+		if (visited.count(current)) {
+			// Circular chain - stop
+			break;
+		}
+		visited.insert(current);
+		std::string next = chain_it->second;
+		if (next == current) {
+			break;
+		}
+		current = next;
+	}
+
+	const auto* type = ast.getType(current);
+	if (!type)
+		return current;
+
+	return std::visit(
+		[&](const auto& t) -> std::string {
+			using T = std::decay_t<decltype(t)>;
+
+			if constexpr (std::is_same_v<T, schema::PrimitiveType>) {
+				// If it has enum_values, it's an enum class - return name as-is
+				if (!t.enum_values.empty()) {
+					return current;
+				}
+				return "std::string"; // default fallback
+			} else if constexpr (std::is_same_v<T, schema::VariantType>) {
+				// If variant has exactly one alternative and is not nullable, resolve to that type
+				if (t.alternatives.size() == 1 && !t.is_nullable) {
+					const auto& alt = t.alternatives[0];
+					if (!alt.is_inline) {
+						return resolveTypeName(ast, typedef_chain, alt.name);
+					}
+					return alt.name;
+				}
+				// Otherwise return name as-is
+				return current;
+			} else {
+				// Struct, Enum, Array, Map - return name as-is
+				return current;
+			}
+		},
+		*type);
+}
+
+// Get a canonical signature for variant alternatives (for deduplication)
+static std::string getVariantSignature(
+	const schema::NormalizedAST& ast,
+	const std::unordered_map<std::string, std::string>& typedef_chain,
+	const std::vector<schema::TypeRef>& alternatives) {
+	std::ostringstream sig;
+	sig << "variant<";
+	for (size_t i = 0; i < alternatives.size(); ++i) {
+		if (i > 0)
+			sig << ",";
+		const auto& alt = alternatives[i];
+		if (alt.is_inline) {
+			sig << alt.name;
+		} else {
+			sig << resolveTypeName(ast, typedef_chain, alt.name);
+		}
+	}
+	sig << ">";
+	return sig.str();
+}
+
+// Process variant alternatives: deduplicate and check for single-alternative collapse
+static std::pair<std::vector<schema::TypeRef>, bool> processVariantAlternatives(
+	const schema::NormalizedAST& ast,
+	const std::unordered_map<std::string, std::string>& typedef_chain,
+	const schema::VariantType& v) {
+	std::vector<schema::TypeRef> processed;
+
+	// Resolve and deduplicate alternatives
+	std::unordered_map<std::string, schema::TypeRef> seen; // resolved type -> first occurrence
+	for (const auto& alt : v.alternatives) {
+		std::string resolved;
+		if (alt.is_inline) {
+			resolved = alt.name;
+		} else {
+			resolved = resolveTypeName(ast, typedef_chain, alt.name);
+		}
+
+		auto [it, inserted] = seen.emplace(resolved, alt);
+	}
+
+	// Collect unique alternatives - create inline TypeRefs with resolved names
+	for (const auto& [resolved_type, original_alt] : seen) {
+		schema::TypeRef ref;
+		ref.name = resolved_type;
+		ref.is_inline = true;
+		processed.push_back(ref);
+	}
+
+	// Check if should collapse to typedef (single alternative, not nullable)
+	bool collapse = (processed.size() == 1 && !v.is_nullable);
+	return {processed, collapse};
+}
+
+void DefsGenerator::generateDefsHpp(std::ostream& out) {
+	// Header guard
+	out << "#pragma once\n\n";
+
+	// Includes
+	out << "#include <string>\n";
+	out << "#include <vector>\n";
+	out << "#include <map>\n";
+	out << "#include <variant>\n";
+	out << "#include <optional>\n";
+	out << "#include <cstdint>\n";
+	out << "#include <boost/json.hpp>\n\n";
+
+	// Namespace
+	out << "namespace api {\n\n";
+
+	// Forward declarations for all types
+	out << "// Forward declarations\n";
+	for (const auto& name : order_.ordered_types) {
+		const auto* type = ast_.getType(name);
+		if (type) {
+			std::visit(
+				[&](const auto& t) {
+					using T = std::decay_t<decltype(t)>;
+
+					if constexpr (std::is_same_v<T, schema::StructType>) {
+						out << "struct " << name << ";\n";
+					} else if constexpr (std::is_same_v<T, schema::EnumType>) {
+						out << "enum class " << name << " : int;\n";
+					}
+					// Skip variant forward declarations - emit full typedef in definitions section
+					// to ensure proper ordering with primitive typedefs
+				},
+				*type);
+		}
+	}
+	out << "\n";
+
+	// Full definitions in topological order
+	for (const auto& name : order_.ordered_types) {
+		const auto* type = ast_.getType(name);
+		if (!type)
+			continue;
+
+		std::visit(
+			[&](const auto& t) {
+				using T = std::decay_t<decltype(t)>;
+
+				if constexpr (std::is_same_v<T, schema::StructType>) {
+					emitStruct(out, t);
+				} else if constexpr (std::is_same_v<T, schema::VariantType>) {
+					emitVariant(out, t);
+				} else if constexpr (std::is_same_v<T, schema::EnumType>) {
+					emitEnum(out, t);
+				} else if constexpr (std::is_same_v<T, schema::PrimitiveType>) {
+					// Named primitive with enum values - emit as enum class for type safety
+					if (!t.enum_values.empty()) {
+						emitEnumFromPrimitive(out, name, t);
+					} else {
+						// Plain named primitive - emit as typedef
+						emitPrimitiveTypedef(out, name, t);
+					}
+				} else if constexpr (std::is_same_v<T, schema::ArrayType>) {
+					// Top-level array schemas - emit as type alias
+					emitArrayAlias(out, name, t);
+				} else if constexpr (std::is_same_v<T, schema::MapType>) {
+					// Top-level map schemas - emit as type alias
+					emitMapAlias(out, name, t);
+				}
+			},
+			*type);
+		out << "\n";
+	}
+
+	// Serialization declarations
+	out << "// JSON serialization\n";
+	for (const auto& name : order_.ordered_types) {
+		const auto* type = ast_.getType(name);
+		if (!type)
+			continue;
+
+		std::visit(
+			[&](const auto& t) {
+				using T = std::decay_t<decltype(t)>;
+
+				if constexpr (std::is_same_v<T, schema::StructType>) {
+					out << "void tag_invoke(boost::json::value_from_tag, boost::json::value& jv, const " << name
+						<< "& v);\n";
+					out << name << " tag_invoke(boost::json::value_to_tag<" << name
+						<< ">, const boost::json::value& jv);\n";
+				} else if constexpr (std::is_same_v<T, schema::VariantType>) {
+					out << "void tag_invoke(boost::json::value_from_tag, boost::json::value& jv, const " << name
+						<< "& v);\n";
+					out << name << " tag_invoke(boost::json::value_to_tag<" << name
+						<< ">, const boost::json::value& jv);\n";
+				} else if constexpr (std::is_same_v<T, schema::EnumType>) {
+					out << "void tag_invoke(boost::json::value_from_tag, boost::json::value& jv, " << name << " v);\n";
+					out << name << " tag_invoke(boost::json::value_to_tag<" << name
+						<< ">, const boost::json::value& jv);\n";
+				} else if constexpr (std::is_same_v<T, schema::PrimitiveType>) {
+					// Primitives with enum values are now enum classes - emit serialization
+					if (!t.enum_values.empty()) {
+						out << "void tag_invoke(boost::json::value_from_tag, boost::json::value& jv, " << name
+							<< " v);\n";
+						out << name << " tag_invoke(boost::json::value_to_tag<" << name
+							<< ">, const boost::json::value& jv);\n";
+					}
+				} else if constexpr (std::is_same_v<T, schema::ArrayType>) {
+					// Array aliases - no serialization needed (std::vector has built-in support)
+				} else if constexpr (std::is_same_v<T, schema::MapType>) {
+					// Map aliases - no serialization needed (std::map has built-in support)
+				}
+			},
+			*type);
+	}
+
+	out << "\n} // namespace api\n";
+}
+
+void DefsGenerator::generateDefsCpp(std::ostream& out) {
+	out << "#include \"defs.hpp\"\n";
+	out << "namespace api {\n\n";
+
+	for (const auto& name : order_.ordered_types) {
+		const auto* type = ast_.getType(name);
+		if (!type)
+			continue;
+
+		std::visit(
+			[&](const auto& t) {
+				using T = std::decay_t<decltype(t)>;
+
+				if constexpr (std::is_same_v<T, schema::StructType>) {
+					emitStructSerialization(out, t);
+				} else if constexpr (std::is_same_v<T, schema::VariantType>) {
+					emitVariantSerialization(out, t);
+				} else if constexpr (std::is_same_v<T, schema::EnumType>) {
+					emitEnumSerialization(out, t);
+				} else if constexpr (std::is_same_v<T, schema::PrimitiveType>) {
+					// Primitives with enum values are now enum classes - emit serialization
+					if (!t.enum_values.empty()) {
+						emitEnumFromPrimitiveSerialization(out, name, t);
+					}
+				}
+			},
+			*type);
+		out << "\n";
+	}
+
+	out << "} // namespace api\n";
+}
+
+void DefsGenerator::emitStruct(std::ostream& out, const schema::StructType& s) {
+	// Documentation
+	if (!s.description.empty()) {
+		out << "/**\n * " << escapeCppString(s.description) << "\n */\n";
+	}
+
+	// Struct definition with inheritance
+	out << "struct " << s.name;
+	if (!s.allOf_bases.empty()) {
+		out << " : ";
+		for (size_t i = 0; i < s.allOf_bases.size(); ++i) {
+			if (i > 0)
+				out << ", ";
+			out << cppTypeName(s.allOf_bases[i]);
+		}
+	}
+	out << " {\n";
+
+	// Fields
+	for (const auto& field : s.fields) {
+		// Documentation
+		if (!field.description.empty()) {
+			out << "    /** " << escapeCppString(field.description) << " */\n";
+		}
+
+		std::string type_name = cppTypeName(field.type);
+		out << "    " << type_name << " " << field.name;
+
+		// Default value
+		if (field.default_value) {
+			out << " = " << *field.default_value;
+		}
+		out << ";\n";
+	}
+
+	out << "};\n";
+}
+
+void DefsGenerator::emitVariant(std::ostream& out, const schema::VariantType& v) {
+	// Documentation
+	if (!v.description.empty()) {
+		out << "/**\n * " << escapeCppString(v.description) << "\n */\n";
+	}
+
+	// Handle empty variant (fallback to std::monostate)
+	if (v.alternatives.empty() && !v.is_nullable) {
+		out << "using " << v.name << " = std::monostate;\n";
+		return;
+	}
+
+	// Process alternatives: deduplicate and check for collapse
+	auto [processed_alternatives, should_collapse] = processVariantAlternatives(ast_, typedef_chain_, v);
+
+	// Check if this is a duplicate variant
+	std::string sig = getVariantSignature(ast_, typedef_chain_, processed_alternatives);
+	auto [it, inserted] = emitted_variant_signatures_.emplace(sig, v.name);
+	if (!inserted) {
+		// Duplicate! Emit as alias and track typedef chain
+		std::string target = it->second;
+		out << "using " << v.name << " = " << target << ";\n";
+		typedef_chain_[v.name] = target;
+		return;
+	}
+
+	// If collapsed to single alternative, emit as typedef and track chain
+	if (should_collapse) {
+		std::string target = cppTypeName(processed_alternatives[0]);
+		out << "using " << v.name << " = " << target << ";\n";
+		typedef_chain_[v.name] = target;
+		return;
+	}
+
+	// Normal variant typedef
+	out << "using " << v.name << " = std::variant<";
+	for (size_t i = 0; i < processed_alternatives.size(); ++i) {
+		if (i > 0)
+			out << ", ";
+		out << cppTypeName(processed_alternatives[i]);
+	}
+	if (v.is_nullable) {
+		if (!processed_alternatives.empty())
+			out << ", ";
+		out << "std::nullptr_t";
+	}
+	out << ">;\n";
+}
+
+void DefsGenerator::emitEnum(std::ostream& out, const schema::EnumType& e) {
+	// Documentation
+	if (!e.description.empty()) {
+		out << "/**\n * " << escapeCppString(e.description) << "\n */\n";
+	}
+
+	out << "enum class " << e.name << " : int {\n";
+	for (size_t i = 0; i < e.values.size(); ++i) {
+		const auto& val = e.values[i];
+		out << "    " << val.name;
+		if (i + 1 < e.values.size())
+			out << ",";
+		out << "\n";
+	}
+	out << "};\n";
+}
+
+void DefsGenerator::emitPrimitiveTypedef(std::ostream& out, const std::string& name, const schema::PrimitiveType& p) {
+	// Documentation with enum values
+	if (!p.description.empty()) {
+		out << "/**\n * " << escapeCppString(p.description) << "\n";
+		if (!p.enum_values.empty()) {
+			out << " * Allowed values: ";
+			for (size_t i = 0; i < p.enum_values.size(); ++i) {
+				if (i > 0)
+					out << ", ";
+				out << "`" << escapeCppString(p.enum_values[i]) << "`";
+			}
+			out << "\n";
+		}
+		out << " */\n";
+	}
+
+	out << "using " << name << " = " << cppTypeName(p) << ";\n";
+}
+
+void DefsGenerator::emitEnumFromPrimitive(std::ostream& out, const std::string& name, const schema::PrimitiveType& p) {
+	// Determine base type for enum (string or int)
+	std::string base_type = "int"; // Default to int for enums
+
+	// Documentation with enum values
+	if (!p.description.empty()) {
+		out << "/**\n * " << escapeCppString(p.description) << "\n";
+		if (!p.enum_values.empty()) {
+			out << " * Allowed values: ";
+			for (size_t i = 0; i < p.enum_values.size(); ++i) {
+				if (i > 0)
+					out << ", ";
+				out << "`" << escapeCppString(p.enum_values[i]) << "`";
+			}
+			out << "\n";
+		}
+		out << " */\n";
+	}
+
+	// Emit enum class
+	out << "enum class " << name << " : " << base_type << " {\n";
+	for (size_t i = 0; i < p.enum_values.size(); ++i) {
+		const auto& enum_val = p.enum_values[i];
+		// Use sanitize_enum_identifier() to convert enum value to valid C++ identifier
+		std::string enum_name = sanitize_enum_identifier(enum_val);
+		out << "    " << enum_name;
+		if (i + 1 < p.enum_values.size())
+			out << ",";
+		out << "\n";
+	}
+	out << "};\n";
+}
+
+void DefsGenerator::emitEnumFromPrimitiveSerialization(
+	std::ostream& out,
+	const std::string& name,
+	const schema::PrimitiveType& p) {
+	// to_json (value_from) - convert enum to string
+	out << "void tag_invoke(boost::json::value_from_tag, boost::json::value& jv, " << name << " val) {\n";
+	out << "    switch (val) {\n";
+	for (size_t i = 0; i < p.enum_values.size(); ++i) {
+		const auto& enum_val = p.enum_values[i];
+		// Use sanitize_enum_identifier() to convert enum value to valid C++ identifier
+		std::string enum_name = sanitize_enum_identifier(enum_val);
+		out << "        case " << name << "::" << enum_name << ": jv = \"" << escapeCppString(enum_val)
+			<< "\"; break;\n";
+	}
+	out << "        default: jv = \"\"; break;\n";
+	out << "    }\n";
+	out << "}\n\n";
+
+	// from_json (value_to) - convert string to enum
+	out << name << " tag_invoke(boost::json::value_to_tag<" << name << ">, const boost::json::value& jv) {\n";
+	out << "    auto str = jv.as_string();\n";
+	std::string default_enum = (!p.enum_values.empty()) ? sanitize_enum_identifier(p.enum_values[0]) : "0";
+	out << "    if (str.empty()) return " << name << "::" << default_enum << ";\n";
+	out << "\n";
+	for (const auto& enum_val : p.enum_values) {
+		out << "    if (str == \"" << escapeCppString(enum_val) << "\") {\n";
+		// Use sanitize_enum_identifier() to convert enum value to valid C++ identifier
+		std::string enum_name = sanitize_enum_identifier(enum_val);
+		out << "        return " << name << "::" << enum_name << ";\n";
+		out << "    }\n";
+	}
+	out << "    return " << name << "::" << default_enum << ";\n";
+	out << "}\n\n";
+}
+
+void codegen::DefsGenerator::emitArrayAlias(std::ostream& out, const std::string& name, const schema::ArrayType& arr) {
+	// Emit as: using Name = std::vector<Element>;
+	std::string elem_type = cppTypeName(arr.element_type);
+	out << "using " << name << " = std::vector<" << elem_type << ">;\n";
+}
+
+void codegen::DefsGenerator::emitMapAlias(std::ostream& out, const std::string& name, const schema::MapType& m) {
+	// Emit as: using Name = std::map<std::string, Value>;
+	std::string value_type = cppTypeName(m.value_type);
+	out << "using " << name << " = std::map<std::string, " << value_type << ">;\n";
+}
+
+void DefsGenerator::emitStructSerialization(std::ostream& out, const schema::StructType& s) {
+	// to_json (value_from)
+	out << "void tag_invoke(boost::json::value_from_tag, boost::json::value& jv, const " << s.name << "& v) {\n";
+	out << "    boost::json::object obj;\n";
+
+	// Serialize base classes first
+	if (!s.allOf_bases.empty()) {
+		for (const auto& base : s.allOf_bases) {
+			out << "    { \n        auto base_jv = boost::json::value_from(static_cast<const " << cppTypeName(base)
+				<< "&>(v));\n";
+			out << "        auto base_obj = base_jv.get_object();\n";
+			out << "        for (auto& [key, val] : base_obj) {\n";
+			out << "            obj[key] = val;\n";
+			out << "        }\n";
+			out << "    }\n";
+		}
+	}
+
+	// Serialize fields
+	for (const auto& field : s.fields) {
+		out << "    obj[\"" << field.name << "\"] = boost::json::value_from(v." << field.name << ");\n";
+	}
+
+	out << "    jv = std::move(obj);\n";
+	out << "}\n\n";
+
+	// from_json (value_to)
+	out << s.name << " tag_invoke(boost::json::value_to_tag<" << s.name << ">, const boost::json::value& jv) {\n";
+	out << "    " << s.name << " obj;\n";
+
+	// Deserialize base classes first
+	if (!s.allOf_bases.empty()) {
+		for (const auto& base : s.allOf_bases) {
+			out << "    static_cast<" << cppTypeName(base) << "&>(obj) = \n        boost::json::value_to<"
+				<< cppTypeName(base) << ">(jv);\n";
+		}
+	}
+
+	// Deserialize fields
+	for (const auto& field : s.fields) {
+		out << "    if (jv.if_object()->contains(\"" << field.name << "\")) {\n";
+		out << "        obj." << field.name << " = boost::json::value_to<" << cppTypeName(field.type)
+			<< ">(jv.as_object().at(\"" << field.name << "\"));\n";
+		out << "    }\n";
+	}
+
+	out << "    return obj;\n";
+	out << "}\n\n";
+}
+
+void DefsGenerator::emitVariantSerialization(std::ostream& out, const schema::VariantType& v) {
+	// Process alternatives to check if this is a duplicate or collapsed variant
+	auto [processed_alternatives, should_collapse] = processVariantAlternatives(ast_, typedef_chain_, v);
+	std::string sig = getVariantSignature(ast_, typedef_chain_, processed_alternatives);
+
+	// Check if duplicate (already emitted signature exists)
+	auto it = emitted_variant_signatures_.find(sig);
+	if (it != emitted_variant_signatures_.end() && it->second != v.name) {
+		// Duplicate variant - skip serialization (it's just an alias)
+		return;
+	}
+
+	// Skip serialization for collapsed variants (they're typedefs)
+	if (should_collapse) {
+		return;
+	}
+
+	// to_json
+	out << "void tag_invoke(boost::json::value_from_tag, boost::json::value& jv, const " << v.name << "& val) {\n";
+	out << "    std::visit([&](const auto& inner) {\n";
+	out << "        jv = boost::json::value_from(inner);\n";
+	out << "    }, val);\n";
+	out << "}\n\n";
+
+	// from_json - simplified, just try each type
+	out << v.name << " tag_invoke(boost::json::value_to_tag<" << v.name << ">, const boost::json::value& jv) {\n";
+	for (size_t i = 0; i < processed_alternatives.size(); ++i) {
+		const auto& alt = processed_alternatives[i];
+		out << "    if constexpr (" << i << " < " << processed_alternatives.size() << ") {\n";
+		out << "        try {\n";
+		out << "            return " << v.name << "(boost::json::value_to<" << cppTypeName(alt) << ">(jv));\n";
+		out << "        } catch (...) {\n";
+		out << "            // Try next alternative\n";
+		out << "        }\n";
+		out << "    }\n";
+	}
+	out << "    throw std::runtime_error(\"No matching variant alternative\");\n";
+	out << "}\n\n";
+}
+
+void DefsGenerator::emitEnumSerialization(std::ostream& out, const schema::EnumType& e) {
+	// to_json
+	out << "void tag_invoke(boost::json::value_from_tag, boost::json::value& jv, " << e.name << " val) {\n";
+	out << "    switch (val) {\n";
+	for (const auto& enum_val : e.values) {
+		out << "        case " << e.name << "::" << enum_val.name << ": "
+			<< "jv = \"" << escapeCppString(enum_val.value) << "\"; break;\n";
+	}
+	out << "    }\n";
+	out << "}\n\n";
+
+	// from_json
+	out << e.name << " tag_invoke(boost::json::value_to_tag<" << e.name << ">, const boost::json::value& jv) {\n";
+	out << "    auto str = jv.as_string();\n";
+	out << "    if (str == \"\") return " << e.name << "::" << (e.values.empty() ? "0" : e.values[0].name) << ";\n";
+	out << "    \n";
+	for (const auto& enum_val : e.values) {
+		out << "    if (str == \"" << escapeCppString(enum_val.value) << "\") {\n";
+		out << "        return " << e.name << "::" << enum_val.name << ";\n";
+		out << "    }\n";
+	}
+	out << "    return " << e.name << "::" << (e.values.empty() ? "0" : e.values[0].name) << ";\n";
+	out << "}\n\n";
+}
+
+} // namespace codegen

@@ -67,7 +67,7 @@ std::string_view JsonTypeToCppType(std::string_view type, std::string_view forma
 	if (type == "integer") {
 		return (format == "int64") ? "int64_t" : "int32_t";
 	}
-	return "std::any"; // Unknown type (possibly 'object')
+	return "boost::json::value";
 };
 
 std::string SynthesizeFunctionName(std::string_view pathstr, RequestMethod verb) {
@@ -134,6 +134,8 @@ bool JsonSchema::IsPrimitive(Type type) noexcept {
 bool JsonSchema::IsPrimitive(const JsonSchema& schema) noexcept { return IsPrimitive(schema.Type_()); }
 JsonSchema::SchemaList JsonSchema::anyOf() const { return _GetObjectIfExist<JsonSchema::SchemaList>("anyOf"); }
 JsonSchema::SchemaList JsonSchema::oneOf() const { return _GetObjectIfExist<JsonSchema::SchemaList>("oneOf"); }
+JsonSchema::SchemaList JsonSchema::allOf() const { return _GetObjectIfExist<JsonSchema::SchemaList>("allOf"); }
+JsonSchema::EnumValueList JsonSchema::enum_() const { return _GetObjectIfExist<JsonSchema::EnumValueList>("enum"); }
 
 // String
 uint64_t String::minLength() const { return _GetValueIfExist<uint64_t>("minLength"); }

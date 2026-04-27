@@ -1,14 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #include <boost/program_options.hpp>
-#include <charconv>
 #include <filesystem>
-#include <fstream>
 #include <iostream>
-#include <string_view>
 
-#include "beast/beast.hpp"
-#include "openapi.hpp"
-#include "openapi2.hpp"
+#include "openapi3_codegen.hpp"
 #include "util.hpp"
 
 namespace fs = std::filesystem;
@@ -19,10 +14,13 @@ int main(int argc, char* argv[]) try {
 
 	fs::path input_json;
 	fs::path output_dir;
+	bool new_generator = false;
+
 	po::options_description desc;
 	auto opts = desc.add_options();
 	opts("input,i", po::value<fs::path>(&input_json)->required(), "Path to input JSON file.");
 	opts("output,o", po::value<fs::path>(&output_dir)->required(), "Path to output directory.");
+	opts("new-gen", po::bool_switch(&new_generator), "Use new code generator (experimental).");
 	opts(
 		"coroutine",
 		po::bool_switch()->default_value(false),
@@ -58,12 +56,9 @@ int main(int argc, char* argv[]) try {
 		std::cout << "Writing to " << output_dir.string() << std::endl;
 	}
 
-	openapi::OpenAPI file;
-	if (!file.Load(input_json.string())) {
-		std::cerr << "Failed to load " << input_json.string() << std::endl;
+	if (!openapi::v3::codegen::generateFromOpenAPI(input_json, output_dir)) {
 		return -1;
 	}
-	siesta::beast::beast(input_json, output_dir, file);
 
 	return 0;
 } catch (const std::exception& e) {
