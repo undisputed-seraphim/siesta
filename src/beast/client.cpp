@@ -12,12 +12,15 @@ static void fail(std::string_view facility, ::boost::system::error_code ec) {
 }
 
 ClientBase::ClientBase(::boost::asio::io_context& ctx, Config config)
-	: _conf(std::move(config))
+	: _ctx(ctx)
+	, _conf(std::move(config))
 	, _strand(::boost::asio::make_strand(ctx))
 	, _resolver(_strand)
 	, _stream(_strand) {}
 
-void ClientBase::start(const ::boost::asio::ip::address& address, uint16_t port) { start(protocol::endpoint(address, port)); }
+void ClientBase::start(const ::boost::asio::ip::address& address, uint16_t port) {
+	start(protocol::endpoint(address, port));
+}
 void ClientBase::start(const protocol::endpoint& endpoint) {
 	_resolver.async_resolve(endpoint, std::bind_front(&ClientBase::on_resolve, shared_from_this()));
 }

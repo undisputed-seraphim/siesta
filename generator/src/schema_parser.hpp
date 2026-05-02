@@ -235,8 +235,11 @@ static VariantType buildVariant(
 						added_types.insert(sanitized_name);
 					}
 				} else if constexpr (std::is_same_v<T, VariantType>) {
-					// Nested variant - use the name directly
-					alt_type_name = t.name;
+					// Nested variant - flatten its alternatives into the parent
+					for (const auto& nested_alt : t.alternatives) {
+						variant.alternatives.push_back(nested_alt);
+					}
+					alt_type_name.clear(); // Don't add a duplicate
 				} else {
 					alt_type_name = "std::string";
 				}
