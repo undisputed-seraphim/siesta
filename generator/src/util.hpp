@@ -2,8 +2,23 @@
 #pragma once
 
 #include <functional>
+#include <optional>
 #include <ostream>
+#include <string>
 #include <string_view>
+
+namespace schema {
+enum class PrimitiveKind;
+enum class IntegerFormat;
+enum class NumberFormat;
+} // namespace schema
+
+namespace codegen {
+std::string primitiveToCpp(
+	schema::PrimitiveKind kind,
+	const std::optional<schema::IntegerFormat>& fmt = std::nullopt,
+	const std::optional<schema::NumberFormat>& num_fmt = std::nullopt);
+} // namespace codegen
 
 void ltrim(std::string_view& s);
 

@@ -5,6 +5,39 @@
 
 using namespace std::literals;
 
+#include "schema_ast.hpp"
+
+namespace codegen {
+
+std::string primitiveToCpp(
+	schema::PrimitiveKind kind,
+	const std::optional<schema::IntegerFormat>& fmt,
+	const std::optional<schema::NumberFormat>& num_fmt) {
+	switch (kind) {
+	case schema::PrimitiveKind::String:
+		return "std::string";
+	case schema::PrimitiveKind::Integer:
+		if (fmt && *fmt == schema::IntegerFormat::Int64)
+			return "int64_t";
+		if (fmt && *fmt == schema::IntegerFormat::UInt64)
+			return "uint64_t";
+		if (fmt && *fmt == schema::IntegerFormat::UInt32)
+			return "uint32_t";
+		return "int32_t";
+	case schema::PrimitiveKind::Number:
+		if (num_fmt && *num_fmt == schema::NumberFormat::Double)
+			return "double";
+		return "float";
+	case schema::PrimitiveKind::Boolean:
+		return "bool";
+	case schema::PrimitiveKind::Null:
+		return "std::nullptr_t";
+	}
+	return "std::string";
+}
+
+} // namespace codegen
+
 void ltrim(std::string_view& s) {
 	while (std::isspace(s.front())) {
 		s.remove_prefix(1);

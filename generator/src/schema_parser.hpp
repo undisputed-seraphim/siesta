@@ -42,15 +42,6 @@ private:
 	static std::optional<IntegerFormat> parseIntegerFormat(std::string_view format);
 	static std::optional<NumberFormat> parseNumberFormat(std::string_view format);
 	static std::optional<StringFormat> parseStringFormat(std::string_view format);
-
-public:
-	/**
-	 * Get C++ type for a primitive
-	 */
-	static std::string primitiveToCpp(
-		PrimitiveKind kind,
-		const std::optional<IntegerFormat>& fmt = std::nullopt,
-		const std::optional<NumberFormat>& num_fmt = std::nullopt);
 };
 
 // Implementation
@@ -61,16 +52,7 @@ inline TypeRef SchemaParser::extractTypeRef(const openapi::v3::JsonSchema& schem
 		if (pos != std::string_view::npos) {
 			// Sanitize the extracted type name
 			std::string raw_name(ref.substr(pos + 1));
-			std::string safe_name;
-			safe_name.reserve(raw_name.size());
-			for (char c : raw_name) {
-				if (std::isalnum(c) || c == '_') {
-					safe_name += c;
-				} else {
-					safe_name += '_';
-				}
-			}
-			return TypeRef{safe_name, false};
+			return TypeRef{sanitize(std::string_view(raw_name)), false};
 		}
 	}
 	return TypeRef{};
@@ -110,33 +92,6 @@ inline std::optional<StringFormat> SchemaParser::parseStringFormat(std::string_v
 	if (format == "byte" || format == "base64")
 		return StringFormat::Base64;
 	return std::nullopt;
-}
-
-inline std::string SchemaParser::primitiveToCpp(
-	PrimitiveKind kind,
-	const std::optional<IntegerFormat>& fmt,
-	const std::optional<NumberFormat>& num_fmt) {
-	switch (kind) {
-	case PrimitiveKind::String:
-		return "std::string";
-	case PrimitiveKind::Integer:
-		if (fmt && *fmt == IntegerFormat::Int64)
-			return "int64_t";
-		if (fmt && *fmt == IntegerFormat::UInt64)
-			return "uint64_t";
-		if (fmt && *fmt == IntegerFormat::UInt32)
-			return "uint32_t";
-		return "int32_t";
-	case PrimitiveKind::Number:
-		if (num_fmt && *num_fmt == NumberFormat::Double)
-			return "double";
-		return "float";
-	case PrimitiveKind::Boolean:
-		return "bool";
-	case PrimitiveKind::Null:
-		return "std::nullptr_t";
-	}
-	return "std::string";
 }
 
 inline std::string SchemaParser::cppTypeFromTypeRef(const TypeRef& ref) {
@@ -204,15 +159,7 @@ static SchemaType parseImplicitObject(
 			if (struct_ptr) {
 				// Inline struct within a parent struct - keep local
 				std::string raw_name = std::string(name) + "_" + std::string(prop_name);
-				std::string mangled_name;
-				mangled_name.reserve(raw_name.size());
-				for (char c : raw_name) {
-					if (std::isalnum(c) || c == '_') {
-						mangled_name += c;
-					} else {
-						mangled_name += '_';
-					}
-				}
+				std::string mangled_name = sanitize(std::string_view(raw_name));
 
 				cpp_type = mangled_name;
 
@@ -223,7 +170,7 @@ static SchemaType parseImplicitObject(
 					added_types.insert(mangled_name);
 				}
 			} else if (const auto* prim_ptr = std::get_if<PrimitiveType>(&inline_schema_type)) {
-				cpp_type = SchemaParser::primitiveToCpp(prim_ptr->kind, prim_ptr->int_format, prim_ptr->num_format);
+				cpp_type = codegen::primitiveToCpp(prim_ptr->kind, prim_ptr->int_format, prim_ptr->num_format);
 			} else if (const auto* arr_ptr = std::get_if<ArrayType>(&inline_schema_type)) {
 				cpp_type = "std::vector<" + SchemaParser::cppTypeFromTypeRef(arr_ptr->element_type) + ">";
 			} else if (const auto* map_ptr = std::get_if<MapType>(&inline_schema_type)) {
@@ -241,6 +188,62 @@ static SchemaType parseImplicitObject(
 	}
 
 	return struct_type;
+}
+
+/**
+ * Build a variant type from a list of alternatives (used for oneOf/anyOf)
+ */
+static VariantType buildVariant(
+	const openapi::v3::JsonSchema::SchemaList& alternatives,
+	std::string_view name,
+	std::string_view desc,
+	NormalizedAST& ast,
+	std::unordered_set<std::string>& added_types) {
+	VariantType variant;
+	variant.name = std::string(name);
+	variant.description = std::string(desc);
+
+	for (const auto& alt : alternatives) {
+		auto alt_ref = SchemaParser::extractTypeRef(alt);
+		if (!alt_ref.name.empty()) {
+			variant.alternatives.push_back(alt_ref);
+			continue;
+		}
+
+		std::string alt_type_name;
+		auto alt_type = SchemaParser::parseSchema(alt, std::string(name) + "_inline", ast, added_types);
+		std::visit(
+			[&](const auto& t) {
+				using T = std::decay_t<decltype(t)>;
+
+				if constexpr (std::is_same_v<T, PrimitiveType>) {
+					alt_type_name = codegen::primitiveToCpp(t.kind, t.int_format, t.num_format);
+				} else if constexpr (std::is_same_v<T, ArrayType>) {
+					alt_type_name = "std::vector<" + SchemaParser::cppTypeFromTypeRef(t.element_type) + ">";
+				} else if constexpr (std::is_same_v<T, StructType>) {
+					std::string raw_name = std::string(name) + "_alt_" + std::to_string(variant.alternatives.size());
+					std::string sanitized_name = sanitize(std::string_view(raw_name));
+
+					auto mutable_t = t;
+					mutable_t.name = sanitized_name;
+					alt_type_name = sanitized_name;
+
+					if (added_types.find(sanitized_name) == added_types.end()) {
+						ast.addType(sanitized_name, std::move(mutable_t));
+						added_types.insert(sanitized_name);
+					}
+				} else {
+					alt_type_name = "std::string";
+				}
+			},
+			alt_type);
+
+		if (!alt_type_name.empty()) {
+			variant.alternatives.push_back(TypeRef{alt_type_name, true});
+		}
+	}
+
+	return variant;
 }
 
 inline SchemaType SchemaParser::parseSchema(
@@ -291,7 +294,7 @@ inline SchemaType SchemaParser::parseSchema(
 						using T = std::decay_t<decltype(t)>;
 
 						if constexpr (std::is_same_v<T, PrimitiveType>) {
-							cpp_type = primitiveToCpp(t.kind, t.int_format, t.num_format);
+							cpp_type = codegen::primitiveToCpp(t.kind, t.int_format, t.num_format);
 						} else if constexpr (std::is_same_v<T, ArrayType>) {
 							cpp_type = "std::vector<" + cppTypeFromTypeRef(t.element_type) + ">";
 						} else if constexpr (std::is_same_v<T, MapType>) {
@@ -299,16 +302,7 @@ inline SchemaType SchemaParser::parseSchema(
 						} else if constexpr (std::is_same_v<T, StructType>) {
 							// Inline struct within a parent struct - keep local
 							std::string raw_name = std::string(name) + "_" + std::string(prop_name);
-							// Sanitize name: replace invalid characters with underscores
-							std::string mangled_name;
-							mangled_name.reserve(raw_name.size());
-							for (char c : raw_name) {
-								if (std::isalnum(c) || c == '_') {
-									mangled_name += c;
-								} else {
-									mangled_name += '_';
-								}
-							}
+							std::string mangled_name = sanitize(std::string_view(raw_name));
 
 							// Set the struct's name before adding to AST
 							auto mutable_t = t;
@@ -360,18 +354,10 @@ inline SchemaType SchemaParser::parseSchema(
 					using T = std::decay_t<decltype(t)>;
 
 					if constexpr (std::is_same_v<T, PrimitiveType>) {
-						elem_cpp_type = primitiveToCpp(t.kind, t.int_format, t.num_format);
+						elem_cpp_type = codegen::primitiveToCpp(t.kind, t.int_format, t.num_format);
 					} else if constexpr (std::is_same_v<T, StructType>) {
 						// Sanitize name: replace invalid characters with underscores
-						std::string sanitized_name;
-						sanitized_name.reserve(elem_name.size());
-						for (char c : elem_name) {
-							if (std::isalnum(c) || c == '_') {
-								sanitized_name += c;
-							} else {
-								sanitized_name += '_';
-							}
-						}
+						std::string sanitized_name = sanitize(std::string_view(elem_name));
 
 						// Set the struct's name before adding to AST
 						auto mutable_t = t;
@@ -457,136 +443,18 @@ inline SchemaType SchemaParser::parseSchema(
 		// Check for oneOf first (variant type)
 		auto oneOf = schema.oneOf();
 		if (!oneOf.empty()) {
-			VariantType variant;
-			variant.name = std::string(name);
-			variant.description = desc;
-
 			// TODO: Extract discriminator information for runtime polymorphic dispatch
 			// OpenAPI spec supports discriminator.propertyName to identify which alternative matches
 			// Currently we generate std::variant but don't store discriminator metadata
 			// Future work: Parse schema.discriminator() and populate variant.discriminator_property
 			// See: https://swagger.io/docs/specification/data-models/oneof-anyof-allof/
-
-			for (const auto& alt : oneOf) {
-				// Try to extract $ref first
-				auto alt_ref = extractTypeRef(alt);
-				if (!alt_ref.name.empty()) {
-					variant.alternatives.push_back(alt_ref);
-					continue;
-				}
-
-				// If no $ref, parse inline schema and create a type reference
-				std::string alt_type_name;
-				// Pass the parent variant name to ensure proper naming of inline types
-				auto alt_type = parseSchema(alt, std::string(name) + "_inline", ast, added_types);
-				std::visit(
-					[&](const auto& t) {
-						using T = std::decay_t<decltype(t)>;
-
-						if constexpr (std::is_same_v<T, PrimitiveType>) {
-							// For primitives in oneOf, use the C++ type string directly
-							alt_type_name = primitiveToCpp(t.kind, t.int_format, t.num_format);
-						} else if constexpr (std::is_same_v<T, ArrayType>) {
-							// For arrays in oneOf, use "std::vector<Element>" as the alternative name
-							alt_type_name = "std::vector<" + cppTypeFromTypeRef(t.element_type) + ">";
-						} else if constexpr (std::is_same_v<T, StructType>) {
-							// Inline struct in oneOf - sanitize and add to AST
-							std::string raw_name =
-								std::string(name) + "_alt_" + std::to_string(variant.alternatives.size());
-							std::string sanitized_name;
-							sanitized_name.reserve(raw_name.size());
-							for (char c : raw_name) {
-								if (std::isalnum(c) || c == '_') {
-									sanitized_name += c;
-								} else {
-									sanitized_name += '_';
-								}
-							}
-
-							auto mutable_t = t;
-							mutable_t.name = sanitized_name;
-							alt_type_name = sanitized_name;
-
-							if (added_types.find(sanitized_name) == added_types.end()) {
-								ast.addType(sanitized_name, std::move(mutable_t));
-								added_types.insert(sanitized_name);
-							}
-						} else {
-							alt_type_name = "std::string";
-						}
-					},
-					alt_type);
-
-				if (!alt_type_name.empty()) {
-					variant.alternatives.push_back(TypeRef{alt_type_name, true});
-				}
-			}
-
-			return variant;
+			return buildVariant(oneOf, name, desc, ast, added_types);
 		}
 
 		// Check for anyOf (similar to oneOf but allows multiple matches)
 		auto anyOf = schema.anyOf();
 		if (!anyOf.empty()) {
-			VariantType variant;
-			variant.name = std::string(name);
-			variant.description = desc;
-
-			for (const auto& alt : anyOf) {
-				// Try to extract $ref first
-				auto alt_ref = extractTypeRef(alt);
-				if (!alt_ref.name.empty()) {
-					variant.alternatives.push_back(alt_ref);
-					continue;
-				}
-
-				// If no $ref, parse inline schema and create a type reference
-				std::string alt_type_name;
-				// Pass the parent variant name to ensure proper naming of inline types
-				auto alt_type = parseSchema(alt, std::string(name) + "_inline", ast, added_types);
-				std::visit(
-					[&](const auto& t) {
-						using T = std::decay_t<decltype(t)>;
-
-						if constexpr (std::is_same_v<T, PrimitiveType>) {
-							// For primitives in anyOf, use the C++ type string directly
-							alt_type_name = primitiveToCpp(t.kind, t.int_format, t.num_format);
-						} else if constexpr (std::is_same_v<T, ArrayType>) {
-							alt_type_name = "std::vector<" + cppTypeFromTypeRef(t.element_type) + ">";
-						} else if constexpr (std::is_same_v<T, StructType>) {
-							// Inline struct in anyOf - sanitize and add to AST
-							std::string raw_name =
-								std::string(name) + "_alt_" + std::to_string(variant.alternatives.size());
-							std::string sanitized_name;
-							sanitized_name.reserve(raw_name.size());
-							for (char c : raw_name) {
-								if (std::isalnum(c) || c == '_') {
-									sanitized_name += c;
-								} else {
-									sanitized_name += '_';
-								}
-							}
-
-							auto mutable_t = t;
-							mutable_t.name = sanitized_name;
-							alt_type_name = sanitized_name;
-
-							if (added_types.find(sanitized_name) == added_types.end()) {
-								ast.addType(sanitized_name, std::move(mutable_t));
-								added_types.insert(sanitized_name);
-							}
-						} else {
-							alt_type_name = "std::string";
-						}
-					},
-					alt_type);
-
-				if (!alt_type_name.empty()) {
-					variant.alternatives.push_back(TypeRef{alt_type_name, true});
-				}
-			}
-
-			return variant;
+			return buildVariant(anyOf, name, desc, ast, added_types);
 		}
 
 		// Check for implicit object (has properties, allOf, or additionalProperties but no explicit type)

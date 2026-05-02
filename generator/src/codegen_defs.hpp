@@ -3,6 +3,7 @@
 
 #include "dependency_graph.hpp"
 #include "schema_ast.hpp"
+#include "util.hpp"
 #include <ostream>
 #include <string>
 
@@ -96,14 +97,6 @@ private:
 	std::string cppTypeName(const schema::SchemaType& type) const;
 
 	/**
-	 * Convert primitive kind to C++ type
-	 */
-	static std::string primitiveToCpp(
-		schema::PrimitiveKind kind,
-		const std::optional<schema::IntegerFormat>& fmt = std::nullopt,
-		const std::optional<schema::NumberFormat>& num_fmt = std::nullopt);
-
-	/**
 	 * Escape string for C++
 	 */
 	static std::string escapeCppString(const std::string& s);
@@ -119,32 +112,6 @@ private:
 };
 
 // Implementation
-inline std::string DefsGenerator::primitiveToCpp(
-	schema::PrimitiveKind kind,
-	const std::optional<schema::IntegerFormat>& fmt,
-	const std::optional<schema::NumberFormat>& num_fmt) {
-	switch (kind) {
-	case schema::PrimitiveKind::String:
-		return "std::string";
-	case schema::PrimitiveKind::Integer:
-		if (fmt && *fmt == schema::IntegerFormat::Int64)
-			return "int64_t";
-		if (fmt && *fmt == schema::IntegerFormat::UInt64)
-			return "uint64_t";
-		if (fmt && *fmt == schema::IntegerFormat::UInt32)
-			return "uint32_t";
-		return "int32_t";
-	case schema::PrimitiveKind::Number:
-		if (num_fmt && *num_fmt == schema::NumberFormat::Double)
-			return "double";
-		return "float";
-	case schema::PrimitiveKind::Boolean:
-		return "bool";
-	case schema::PrimitiveKind::Null:
-		return "std::nullptr_t";
-	}
-	return "std::string";
-}
 
 inline std::string DefsGenerator::cppTypeName(const schema::TypeRef& ref) const {
 	// For inline types, the name contains the full C++ type (e.g., "std::string", "int64_t")
@@ -169,7 +136,7 @@ inline std::string DefsGenerator::cppTypeName(const schema::SchemaType& type) co
 			} else if constexpr (std::is_same_v<T, schema::EnumType>) {
 				result = t.name;
 			} else if constexpr (std::is_same_v<T, schema::PrimitiveType>) {
-				result = primitiveToCpp(t.kind, t.int_format, t.num_format);
+				result = codegen::primitiveToCpp(t.kind, t.int_format, t.num_format);
 			}
 		},
 		type);
