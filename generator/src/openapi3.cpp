@@ -8,6 +8,13 @@ namespace openapi::v3 {
 std::string_view RequestBody::description() const { return _GetValueIfExist<std::string_view>("description"); }
 RequestBody::Content RequestBody::content() const { return _GetObjectIfExist<RequestBody::Content>("content"); }
 bool RequestBody::required() const { return _GetValueIfExist<bool>("required"); }
+std::optional<std::string_view> RequestBody::TryGetRef() const {
+	auto res = _GetValueIfExist<std::string_view>("$ref");
+	if (!res.empty()) {
+		return res;
+	}
+	return std::nullopt;
+}
 
 // Response
 std::string_view Response::description() const { return _GetValueIfExist<std::string_view>("description"); }

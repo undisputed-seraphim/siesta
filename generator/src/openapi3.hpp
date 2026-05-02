@@ -119,6 +119,9 @@ public:
 	std::string_view description() const;
 	Content content() const;
 	bool required() const;
+
+	// Check if this is a $ref and return the reference string
+	std::optional<std::string_view> TryGetRef() const;
 };
 
 class Server final : public __detail::Object<Server> {
