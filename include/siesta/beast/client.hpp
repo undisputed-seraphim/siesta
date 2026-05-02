@@ -47,6 +47,9 @@ public:
 	void start(const ::boost::asio::ip::address&, uint16_t);
 	void start(const protocol::endpoint&);
 
+	// Get the io_context reference for running async operations synchronously
+	::boost::asio::io_context& context() { return _ctx; }
+
 	void stop() {
 		_resolver.cancel();
 		_stream.close();
@@ -54,6 +57,7 @@ public:
 
 protected:
 	Config _conf;
+	::boost::asio::io_context& _ctx;
 	::boost::asio::strand<::boost::asio::io_context::executor_type> _strand;
 	protocol::resolver _resolver;
 	::boost::beast::flat_buffer _buffer;

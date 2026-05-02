@@ -6,6 +6,13 @@
 
 namespace codegen {
 
+static constexpr const char* QUERY_VALUE_HELPER = R"(
+	template<typename T>
+	inline std::string query_value(const T& val) {
+		return boost::json::value_to<std::string>(boost::json::value_from(val));
+	}
+)";
+
 ClientGenerator::ClientGenerator(const schema::NormalizedAST& ast, const openapi::v3::OpenAPIv3& spec)
 	: ast_(ast)
 	, spec_(spec) {
@@ -15,9 +22,23 @@ ClientGenerator::ClientGenerator(const schema::NormalizedAST& ast, const openapi
 static std::string resolveRefName(std::string_view ref) {
 	size_t pos = ref.rfind('/');
 	if (pos != std::string_view::npos) {
-		return std::string(ref.substr(pos + 1));
+		return "api::" + std::string(ref.substr(pos + 1));
 	}
-	return std::string(ref);
+	return "api::" + std::string(ref);
+}
+
+static std::string sanitizeParamName(std::string name) {
+	if (name == "token" || name == "result" || name == "error" || name == "next" || name == "type" ||
+		name == "metadata" || name == "include" || name == "order" || name == "event_types") {
+		name = "param_" + name;
+	}
+	// Replace brackets and other special chars that break C++ identifiers
+	for (char& c : name) {
+		if (c == '[' || c == ']' || c == '(' || c == ')' || c == '{' || c == '}' || c == '.' || c == ',') {
+			c = '_';
+		}
+	}
+	return name;
 }
 
 ClientParam ClientGenerator::resolveAndMapParameter(const openapi::v3::Parameter& raw_param) {
@@ -179,6 +200,10 @@ std::vector<ClientEndpoint> ClientGenerator::parseEndpoints() {
 				}
 			}
 
+			// Sanitize parameter names to avoid conflicts
+			for (auto& p : ordered_params) {
+				p.name = sanitizeParamName(p.name);
+			}
 			ep.params = std::move(ordered_params);
 
 			// Extract request body info
@@ -285,6 +310,8 @@ std::string ClientGenerator::generateFunctionName(std::string_view method, std::
 			// Skip
 		} else if (c == ':') {
 			result += '_';
+		} else if (c == '-') {
+			result += '_';
 		} else {
 			result += c;
 			first_char = false;
@@ -359,19 +386,82 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep
 	bool has_format_args = !path_params.empty() || !query_params.empty();
 
 	if (has_format_args) {
-		out << "\t\treq.target(std::format(path";
+		// Use string concatenation instead of std::format for compatibility with std::optional and std::vector
+		out << "\t\tstd::string target_path(static_cast<std::string_view>(path));\n";
 		for (const auto* p : path_params) {
-			out << ", " << p->name;
+			bool is_string = p->cpp_type.find("string") != std::string::npos;
+			if (p->required) {
+				if (is_string) {
+					out << "\t\ttarget_path = std::regex_replace(target_path, std::regex(\"{}\"), " << p->name
+						<< ");\n";
+				} else {
+					out << "\t\ttarget_path = std::regex_replace(target_path, std::regex(\"{}\"), std::to_string("
+						<< p->name << "));\n";
+				}
+			} else {
+				out << "\t\tif (" << p->name << ".has_value()) {\n";
+				if (is_string) {
+					out << "\t\t\ttarget_path = std::regex_replace(target_path, std::regex(\"{}\"), *(*" << p->name
+						<< "));\n";
+				} else {
+					out << "\t\t\ttarget_path = std::regex_replace(target_path, std::regex(\"{}\"), std::to_string(*("
+						<< p->name << ")));\n";
+				}
+				out << "\t\t}\n";
+			}
 		}
+		out << "\t\tstd::string query_params;\n";
 		for (const auto* p : query_params) {
-			out << ", " << p->name;
+			bool is_vector = p->cpp_type.find("vector") != std::string::npos;
+			bool is_string = p->cpp_type.find("string") != std::string::npos;
+			bool is_vector_string = is_vector && is_string;
+			if (p->required) {
+				if (is_vector_string) {
+					out << "\t\tfor (size_t _i = 0; _i < (" << p->name << ").size(); ++_i) {\n";
+					out << "\t\t\tif (_i > 0) query_params += \"&\";\n";
+					out << "\t\t\tquery_params += \"" << p->name << "=\" + (" << p->name << ")[_i];\n";
+					out << "\t\t}\n";
+				} else if (is_vector) {
+					out << "\t\tfor (size_t _i = 0; _i < (" << p->name << ").size(); ++_i) {\n";
+					out << "\t\t\tif (_i > 0) query_params += \"&\";\n";
+					out << "\t\t\tquery_params += \"" << p->name << "=\" + query_value((" << p->name << ")[_i]);\n";
+					out << "\t\t}\n";
+				} else if (is_string) {
+					out << "\t\tif (!query_params.empty()) query_params += \"&\";\n";
+					out << "\t\tquery_params += \"" << p->name << "=\" + (" << p->name << ");\n";
+				} else {
+					out << "\t\tif (!query_params.empty()) query_params += \"&\";\n";
+					out << "\t\tquery_params += \"" << p->name << "=\" + query_value(" << p->name << ");\n";
+				}
+			} else {
+				out << "\t\tif (" << p->name << ".has_value()) {\n";
+				if (is_vector_string) {
+					out << "\t\t\tfor (size_t _i = 0; _i < (*(" << p->name << ")).size(); ++_i) {\n";
+					out << "\t\t\t\tif (_i > 0) query_params += \"&\";\n";
+					out << "\t\t\t\tquery_params += \"" << p->name << "=\" + (*(" << p->name << "))[_i];\n";
+					out << "\t\t\t}\n";
+				} else if (is_vector) {
+					out << "\t\t\tfor (size_t _i = 0; _i < (*(" << p->name << ")).size(); ++_i) {\n";
+					out << "\t\t\t\tif (_i > 0) query_params += \"&\";\n";
+					out << "\t\t\t\tquery_params += \"" << p->name << "=\" + query_value((*(" << p->name
+						<< "))[_i]);\n";
+					out << "\t\t\t}\n";
+				} else if (is_string) {
+					out << "\t\t\tif (!query_params.empty()) query_params += \"&\";\n";
+					out << "\t\t\tquery_params += \"" << p->name << "=\" + (*(" << p->name << "));\n";
+				} else {
+					out << "\t\t\tif (!query_params.empty()) query_params += \"&\";\n";
+					out << "\t\t\tquery_params += \"" << p->name << "=\" + query_value(*(" << p->name << "));\n";
+				}
+				out << "\t\t}\n";
+			}
 		}
-		out << "));\n";
 	} else {
 		out << "\t\treq.target(path);\n";
 	}
 
-	out << "\t\treq.method(::boost::beast::http::verb::" << ep.method << ");\n";
+	std::string verb = ep.method == "delete" ? "delete_" : ep.method;
+	out << "\t\treq.method(::boost::beast::http::verb::" << verb << ");\n";
 
 	// Header parameters
 	for (const auto& p : ep.params) {
@@ -380,45 +470,8 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep
 		}
 	}
 
-	// Request body
-	if (ep.has_request_body) {
-		if (ep.body_content_type.find("application/json") != std::string::npos) {
-			std::string body_var = ep.function_name + "_body";
-			out << "\t\t" << ep.body_type << " " << body_var + ";\n";
-			out << "\t\t// TODO: populate " << body_var + "\n";
-			out << "\t\t{\n";
-			out << "\t\t\t::boost::json::monotonic_resource json_rsc(_json_buffer.data(), _json_buffer.size());\n";
-			out << "\t\t\t// req.body() = ::boost::json::value_from(" << body_var + ", json_rsc);\n";
-			out << "\t\t}\n";
-		} else if (ep.body_content_type.find("application/x-www-form-urlencoded") != std::string::npos) {
-			out << "\t\tconstexpr std::string_view queryfmt = \"";
-			bool first = true;
-			for (const auto& p : ep.params) {
-				if (p.location == "path")
-					continue;
-				if (!first)
-					out << "&";
-				out << p.name << "={}";
-				first = false;
-			}
-			out << "\";\n";
-			out << "\t\treq.body().append(std::format(queryfmt";
-			bool first_arg = true;
-			for (const auto& p : ep.params) {
-				if (p.location == "path")
-					continue;
-				if (!first_arg)
-					out << ", ";
-				out << p.name;
-				first_arg = false;
-			}
-			out << "));\n";
-		}
-	}
-
 	out << "\t\treturn this->async_submit_request(std::move(req), token);\n";
 }
-
 void ClientGenerator::generateClientHpp(std::ostream& out) {
 	out << "#pragma once\n";
 	out << "#include <boost/asio.hpp>\n";
@@ -426,9 +479,9 @@ void ClientGenerator::generateClientHpp(std::ostream& out) {
 	out << "#include <boost/beast/core.hpp>\n";
 	out << "#include <boost/beast/http.hpp>\n";
 	out << "#include <boost/json.hpp>\n";
-	out << "#include <format>\n";
 	out << "#include <memory>\n";
 	out << "#include <optional>\n";
+	out << "#include <regex>\n";
 	out << "#include <string>\n";
 	out << "#include <string_view>\n";
 	out << "\n";
@@ -438,6 +491,11 @@ void ClientGenerator::generateClientHpp(std::ostream& out) {
 	out << "#include <siesta/beast/client.hpp>\n";
 	out << "\n";
 	out << "namespace " << ns << " {\n";
+
+	// Helper to convert any value to query string parameter
+	out << "inline std::string query_value(const auto& val) {\n";
+	out << "    return boost::json::value_to<std::string>(boost::json::value_from(val));\n";
+	out << "}\n\n";
 
 	emitClassHeader(out);
 

@@ -2,6 +2,7 @@
 #include "openapi3_codegen.hpp"
 #include "codegen_client.hpp"
 #include "codegen_defs.hpp"
+#include "codegen_python.hpp"
 #include "dependency_graph.hpp"
 #include "openapi.hpp"
 #include "openapi3.hpp"
@@ -169,11 +170,11 @@ bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path
 	// Create output directory
 	fs::create_directories(output_path);
 
-	// Generate defs.hpp and defs.cpp
+	// Generate openapi_defs.hpp and openapi_defs.cpp
 	::codegen::DefsGenerator gen(order, ast);
 
 	{
-		fs::path defs_hpp = output_path / "defs.hpp";
+		fs::path defs_hpp = output_path / "openapi_defs.hpp";
 		std::ofstream out(defs_hpp);
 		if (!out) {
 			std::cerr << "Failed to open " << defs_hpp << "\n";
@@ -184,7 +185,7 @@ bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path
 	}
 
 	{
-		fs::path defs_cpp = output_path / "defs.cpp";
+		fs::path defs_cpp = output_path / "openapi_defs.cpp";
 		std::ofstream out(defs_cpp);
 		if (!out) {
 			std::cerr << "Failed to open " << defs_cpp << "\n";
@@ -205,6 +206,19 @@ bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path
 		}
 		std::cout << "  Generating " << client_hpp << "\n";
 		client_gen.generateClientHpp(out);
+	}
+
+	// Generate Python module source (codegen_python target)
+	::codegen::PythonGenerator python_gen(ast, spec);
+	{
+		fs::path py_module = output_path / "py_module.cpp";
+		std::ofstream out(py_module);
+		if (!out) {
+			std::cerr << "Failed to open " << py_module << "\n";
+			return false;
+		}
+		std::cout << "  Generating " << py_module << "\n";
+		python_gen.generatePythonModule(out, "siesta_bindings");
 	}
 
 	std::cout << "Code generation complete!\n";

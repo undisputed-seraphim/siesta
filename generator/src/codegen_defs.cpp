@@ -253,7 +253,7 @@ void DefsGenerator::generateDefsHpp(std::ostream& out) {
 }
 
 void DefsGenerator::generateDefsCpp(std::ostream& out) {
-	out << "#include \"defs.hpp\"\n";
+	out << "#include \"openapi_defs.hpp\"\n";
 	out << "namespace api {\n\n";
 
 	int cpp_structs = 0, cpp_variants = 0, cpp_enums = 0;
@@ -396,7 +396,8 @@ void DefsGenerator::emitEnum(std::ostream& out, const schema::EnumType& e) {
 	out << "enum class " << e.name << " : int {\n";
 	for (size_t i = 0; i < e.values.size(); ++i) {
 		const auto& val = e.values[i];
-		out << "    " << val.name;
+		std::string safe_name = sanitize_enum_identifier(val.name);
+		out << "    " << safe_name;
 		if (i + 1 < e.values.size())
 			out << ",";
 		out << "\n";
@@ -594,7 +595,8 @@ void DefsGenerator::emitEnumSerialization(std::ostream& out, const schema::EnumT
 	out << "void tag_invoke(boost::json::value_from_tag, boost::json::value& jv, " << e.name << " val) {\n";
 	out << "    switch (val) {\n";
 	for (const auto& enum_val : e.values) {
-		out << "        case " << e.name << "::" << enum_val.name << ": "
+		std::string safe_name = sanitize_enum_identifier(enum_val.name);
+		out << "        case " << e.name << "::" << safe_name << ": "
 			<< "jv = \"" << escapeCppString(enum_val.value) << "\"; break;\n";
 	}
 	out << "    }\n";
@@ -603,14 +605,16 @@ void DefsGenerator::emitEnumSerialization(std::ostream& out, const schema::EnumT
 	// from_json
 	out << e.name << " tag_invoke(boost::json::value_to_tag<" << e.name << ">, const boost::json::value& jv) {\n";
 	out << "    auto str = jv.as_string();\n";
-	out << "    if (str == \"\") return " << e.name << "::" << (e.values.empty() ? "0" : e.values[0].name) << ";\n";
+	std::string default_val = e.values.empty() ? "0" : sanitize_enum_identifier(e.values[0].name);
+	out << "    if (str == \"\") return " << e.name << "::" << default_val << ";\n";
 	out << "    \n";
 	for (const auto& enum_val : e.values) {
+		std::string safe_name = sanitize_enum_identifier(enum_val.name);
 		out << "    if (str == \"" << escapeCppString(enum_val.value) << "\") {\n";
-		out << "        return " << e.name << "::" << enum_val.name << ";\n";
+		out << "        return " << e.name << "::" << safe_name << ";\n";
 		out << "    }\n";
 	}
-	out << "    return " << e.name << "::" << (e.values.empty() ? "0" : e.values[0].name) << ";\n";
+	out << "    return " << e.name << "::" << default_val << ";\n";
 	out << "}\n\n";
 }
 
