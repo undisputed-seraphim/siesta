@@ -227,9 +227,4 @@ public:
 	ExternalDocumentation externalDocs() const;
 };
 
-void PrintStructDefinitions(
-	const OpenAPIv3& file,
-	const std::filesystem::path& input,
-	const std::filesystem::path& output);
-
 } // namespace openapi::v3

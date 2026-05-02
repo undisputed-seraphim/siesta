@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "openapi3.hpp"
+#include "util.hpp"
 
 namespace openapi::v3 {
 
@@ -86,11 +87,6 @@ Components OpenAPIv3::components() const { return _GetObjectIfExist<Components>(
 Tags OpenAPIv3::tags() const { return _GetObjectIfExist<Tags>("tags"); }
 ExternalDocumentation OpenAPIv3::externalDocs() const {
 	return _GetObjectIfExist<ExternalDocumentation>("externalDocs");
-}
-
-static std::string_view component_path(std::string_view path) noexcept {
-	size_t pos = path.find_last_of('/');
-	return path.substr(pos + 1);
 }
 
 Components::Referenced<JsonSchema> Components::GetSchemaByRef(std::string_view refname) {

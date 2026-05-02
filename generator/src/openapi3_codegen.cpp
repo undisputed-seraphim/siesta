@@ -29,30 +29,6 @@ static schema::NormalizedAST buildAST(const openapi::v3::OpenAPIv3& spec) {
 
 		try {
 			auto type = schema::SchemaParser::parseSchema(schema_obj, safe_name, ast, added_types);
-
-			// Debug: Check if Model or Response are being parsed correctly
-			if (name == "Model" || name == "Response") {
-				std::cout << "    Parsed " << name << " as type ";
-				std::visit(
-					[](const auto& t) {
-						using T = std::decay_t<decltype(t)>;
-						if constexpr (std::is_same_v<T, schema::StructType>)
-							std::cout << "StructType";
-						else if constexpr (std::is_same_v<T, schema::VariantType>)
-							std::cout << "VariantType";
-						else if constexpr (std::is_same_v<T, schema::EnumType>)
-							std::cout << "EnumType";
-						else if constexpr (std::is_same_v<T, schema::PrimitiveType>)
-							std::cout << "PrimitiveType";
-						else if constexpr (std::is_same_v<T, schema::ArrayType>)
-							std::cout << "ArrayType";
-						else if constexpr (std::is_same_v<T, schema::MapType>)
-							std::cout << "MapType";
-					},
-					type);
-				std::cout << "\n";
-			}
-
 			ast.addType(safe_name, std::move(type));
 		} catch (const std::exception& e) {
 			std::cerr << "    Warning: Failed to parse " << name << ": " << e.what() << "\n";

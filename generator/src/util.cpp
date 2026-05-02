@@ -167,3 +167,40 @@ void decompose_http_query(std::string_view raw, std::function<void(std::string_v
 		raw.remove_prefix(q_split == std::string_view::npos ? raw.size() : (q_split + 1));
 	} while (!raw.empty());
 }
+
+std::string escapeCppString(const std::string& s) {
+	std::string result;
+	for (char c : s) {
+		switch (c) {
+		case '\\':
+			result += "\\\\";
+			break;
+		case '"':
+			result += "\\\"";
+			break;
+		case '\n':
+			result += "\\n";
+			break;
+		case '\r':
+			result += "\\r";
+			break;
+		case '\t':
+			result += "\\t";
+			break;
+		default:
+			result += c;
+		}
+	}
+	return result;
+}
+
+bool isSyntheticCppType(const std::string& name) {
+	return name.rfind("std::", 0) == 0 || name == "int" || name == "long" || name == "short" || name == "unsigned" ||
+		   name == "signed" || name == "char" || name == "wchar_t" || name == "bool" || name == "float" ||
+		   name == "double" || name == "void";
+}
+
+std::string_view component_path(std::string_view path) noexcept {
+	size_t pos = path.find_last_of('/');
+	return path.substr(pos + 1);
+}

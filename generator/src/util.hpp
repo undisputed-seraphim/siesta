@@ -42,3 +42,12 @@ void write_multiline_comment(std::ostream& out, std::string_view comment, std::s
 std::string transform_url_to_function_signature(std::string_view);
 
 void decompose_http_query(std::string_view raw, std::function<void(std::string_view, std::string_view)>&& kv_cb);
+
+// Escape a string for embedding in C++ source code
+std::string escapeCppString(const std::string& s);
+
+// Check if a type name is a synthetic C++ type (not a real AST type)
+bool isSyntheticCppType(const std::string& name);
+
+// Get the final component of a path (e.g., "/foo/bar/baz" -> "baz")
+std::string_view component_path(std::string_view path) noexcept;

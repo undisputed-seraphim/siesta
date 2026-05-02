@@ -96,11 +96,6 @@ private:
 	 */
 	std::string cppTypeName(const schema::SchemaType& type) const;
 
-	/**
-	 * Escape string for C++
-	 */
-	static std::string escapeCppString(const std::string& s);
-
 	const analysis::TopologicalOrder& order_;
 	const schema::NormalizedAST& ast_;
 
@@ -140,32 +135,6 @@ inline std::string DefsGenerator::cppTypeName(const schema::SchemaType& type) co
 			}
 		},
 		type);
-	return result;
-}
-
-inline std::string DefsGenerator::escapeCppString(const std::string& s) {
-	std::string result;
-	for (char c : s) {
-		switch (c) {
-		case '\\':
-			result += "\\\\";
-			break;
-		case '"':
-			result += "\\\"";
-			break;
-		case '\n':
-			result += "\\n";
-			break;
-		case '\r':
-			result += "\\r";
-			break;
-		case '\t':
-			result += "\\t";
-			break;
-		default:
-			result += c;
-		}
-	}
 	return result;
 }
 
