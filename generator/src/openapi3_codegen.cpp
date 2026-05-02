@@ -6,29 +6,13 @@
 #include "openapi3.hpp"
 #include "schema_ast.hpp"
 #include "schema_parser.hpp"
+#include "util.hpp"
 #include <boost/json/serialize.hpp>
-#include <cctype>
 #include <fstream>
 #include <iostream>
 
 namespace fs = std::filesystem;
 namespace openapi::v3::codegen {
-
-/**
- * Sanitize a type name to be a valid C++ identifier
- */
-static std::string sanitizeTypeName(const std::string& name) {
-	std::string result;
-	result.reserve(name.size());
-	for (char c : name) {
-		if (std::isalnum(c) || c == '_') {
-			result += c;
-		} else {
-			result += '_';
-		}
-	}
-	return result;
-}
 
 /**
  * Build normalized AST from OpenAPI v3 spec
@@ -40,7 +24,7 @@ static schema::NormalizedAST buildAST(const openapi::v3::OpenAPIv3& spec) {
 	// Process components/schemas
 	for (const auto& [name_sv, schema_obj] : spec.components().schemas()) {
 		std::string name(name_sv);
-		std::string safe_name = sanitizeTypeName(name);
+		std::string safe_name = sanitize(std::string_view(name));
 		std::cout << "  Parsing schema: " << name << " -> " << safe_name << "\n";
 
 		try {
