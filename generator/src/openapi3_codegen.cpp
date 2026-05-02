@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "openapi3_codegen.hpp"
+#include "codegen_client.hpp"
 #include "codegen_defs.hpp"
 #include "dependency_graph.hpp"
 #include "openapi.hpp"
@@ -59,6 +60,46 @@ static schema::NormalizedAST buildAST(const openapi::v3::OpenAPIv3& spec) {
 	std::cout << "  AST summary: " << ast.getTypes().size() << " types (" << struct_count << " structs, "
 			  << variant_count << " variants, " << array_count << " arrays, " << map_count << " maps, " << enum_count
 			  << " enums, " << prim_count << " primitives)\n";
+
+	// Process paths/operations
+	int endpoint_count = 0;
+	const auto& components = spec.components();
+	const auto& comp_params = components.parameters();
+
+	for (const auto& [path_sv, path_obj] : spec.paths()) {
+		std::string path(path_sv);
+		auto path_ops = path_obj.operations();
+
+		for (const auto& [method_sv, op_obj] : path_ops) {
+			std::string method(method_sv);
+			std::transform(method.begin(), method.end(), method.begin(), ::tolower);
+
+			std::string summary = std::string(op_obj.summary());
+			std::string op_id;
+			try {
+				op_id = std::string(op_obj.operationId());
+			} catch (...) {
+				op_id = "";
+			}
+
+			schema::PathItem path_item;
+			path_item.path = path;
+			path_item.operations[method] = op_id.empty() ? summary : op_id;
+			try {
+				path_item.description = std::string(op_obj.description());
+			} catch (...) {
+				path_item.description = "";
+			}
+
+			// Collect parameters (skip for now - complex ref resolution)
+			// TODO: Implement proper parameter resolution
+
+			ast.addPath(path, std::move(path_item));
+			endpoint_count++;
+		}
+	}
+
+	std::cout << "  Path endpoints: " << endpoint_count << "\n";
 
 	return ast;
 }
@@ -151,6 +192,19 @@ bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path
 		}
 		std::cout << "  Generating " << defs_cpp << "\n";
 		gen.generateDefsCpp(out);
+	}
+
+	// Generate client.hpp
+	::codegen::ClientGenerator client_gen(ast, spec);
+	{
+		fs::path client_hpp = output_path / "client.hpp";
+		std::ofstream out(client_hpp);
+		if (!out) {
+			std::cerr << "Failed to open " << client_hpp << "\n";
+			return false;
+		}
+		std::cout << "  Generating " << client_hpp << "\n";
+		client_gen.generateClientHpp(out);
 	}
 
 	std::cout << "Code generation complete!\n";
