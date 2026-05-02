@@ -106,6 +106,11 @@ public:
 			}
 		}
 
+		LOG_SORT(
+			"topologicalSort: %zu nodes in adjacency_, %zu with in_degree=0 (ready to process)",
+			adjacency_.size(),
+			queue.size());
+
 		// Process nodes in order
 		while (!queue.empty()) {
 			std::string current = queue.front();
@@ -123,9 +128,11 @@ public:
 
 		// Check for cycles: if not all nodes processed, there's a cycle
 		if (result.size() != adjacency_.size()) {
+			LOG_SORT("topologicalSort: CYCLE DETECTED — processed %zu of %zu nodes", result.size(), adjacency_.size());
 			return {}; // Cycle detected
 		}
 
+		LOG_SORT("topologicalSort: SUCCESS — %zu types ordered", result.size());
 		return result;
 	}
 
@@ -135,10 +142,16 @@ public:
 	static DependencyGraph buildFromAST(const schema::NormalizedAST& ast) {
 		DependencyGraph graph;
 
+		LOG_DEP("buildFromAST: starting with %zu types from AST", ast.getTypes().size());
+
 		for (const auto& [name, type] : ast.getTypes()) {
 			buildDependencies(name, type, graph);
 		}
 
+		LOG_DEP(
+			"buildFromAST: done — %zu dependency edges collected, %zu unique nodes in adjacency map",
+			graph.dependencies_.size(),
+			graph.adjacency_.size());
 		return graph;
 	}
 
@@ -274,6 +287,8 @@ struct TopologicalOrder {
 inline TopologicalOrder sortTypes(const schema::NormalizedAST& ast) {
 	TopologicalOrder result;
 
+	LOG_SORT("sortTypes: AST has %zu types", ast.getTypes().size());
+
 	auto graph = DependencyGraph::buildFromAST(ast);
 
 	// Check for cycles
@@ -285,11 +300,40 @@ inline TopologicalOrder sortTypes(const schema::NormalizedAST& ast) {
 	// Perform topological sort
 	result.ordered_types = graph.topologicalSort();
 
+	// Filter: only keep types that are actually in the AST
+	// (the dependency graph may contain synthetic types like int32_t, int64_t,
+	// or inline types that were referenced but not added as AST nodes)
+	std::unordered_set<std::string> ast_names;
+	for (const auto& [name, _] : ast.getTypes()) {
+		ast_names.insert(name);
+	}
+	std::vector<std::string> filtered;
+	for (const auto& name : result.ordered_types) {
+		if (ast_names.count(name)) {
+			filtered.push_back(name);
+		}
+	}
+	result.ordered_types = std::move(filtered);
+
 	if (!result.has_cycles && result.ordered_types.empty()) {
 		// Fallback: if no types were sorted (shouldn't happen normally),
 		// add all AST types in arbitrary order
 		for (const auto& [name, _] : ast.getTypes()) {
 			result.ordered_types.push_back(name);
+		}
+	} else if (!result.has_cycles) {
+		// Check how many AST types are NOT in the sorted order
+		std::unordered_set<std::string> sorted_set(result.ordered_types.begin(), result.ordered_types.end());
+		std::vector<std::string> missing;
+		for (const auto& [name, _] : ast.getTypes()) {
+			if (sorted_set.find(name) == sorted_set.end()) {
+				missing.push_back(name);
+			}
+		}
+		if (!missing.empty()) {
+			for (const auto& m : missing) {
+				result.ordered_types.push_back(m);
+			}
 		}
 	}
 
