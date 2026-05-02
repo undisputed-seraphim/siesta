@@ -1,0 +1,79 @@
+# AGENTS.md - OpenAPI-to-C++ Transpiler
+
+## Overview
+
+This project transpiles OpenAPI v3 schemas into production-grade C++ client code and Python extension modules using boost.asio and boost.json. The generator produces:
+- **openapi_defs.hpp/cpp**: Type definitions with JSON serialization (boost::json tag_invoke)
+- **client.hpp**: Completion-token agnostic HTTP client class (extends `siesta::beast::ClientBase`)
+- **py_module.cpp**: nanobind Python extension module with synchronous API wrappers
+
+See `generator/AGENTS.md` for full architecture, file index, and implementation details.
+
+## Key Design Decisions
+
+### 1. allOf → C++ Inheritance ✅
+
+OpenAPI `allOf` maps to C++ multiple inheritance. Serialization merges base class JSON objects before adding derived fields.
+
+### 2. Nested Types → Flat Naming ✅
+
+Nested types use `Parent_Child` naming (not `Parent::Child`) for simpler dependency tracking.
+
+### 3. Variant Deduplication ✅
+
+Duplicate `std::variant<...>` signatures become `using` aliases tracked in a typedef chain. Single-alternative non-nullable variants collapse to typedefs.
+
+### 4. Cyclic Dependencies → Fail Fast ✅
+
+Value-only semantics cannot represent cycles. The generator detects them and aborts with a clear error message.
+
+### 5. Python Bindings via Synchronous Execution ✅
+
+Each Python endpoint method wraps the async C++ client call with `boost::asio::use_future`, runs `io_context`, and converts the JSON response to Python objects.
+
+## Current State
+
+### Completed ✅
+- OpenAPI JSON parsing using simdjson
+- Normalized AST construction (primitives, structs, arrays, maps, enums, variants)
+- Dependency graph with cycle detection and Kahn's topological sort
+- `allOf` inheritance support with merged serialization
+- `defs.hpp/cpp` generation with variant deduplication and typedef chain resolution
+- `client.hpp` generation with path/query/header parameter handling
+- `py_module.cpp` generation with nanobind Python bindings
+- Binance schema: 341 methods, compiles successfully
+- OpenAI schema: 243 methods, compiles successfully
+
+### Known Limitations
+1. **Cyclic dependencies**: Not supported — generator fails with clear error
+2. **Polymorphic dispatch**: `oneOf` generates `std::variant` but no runtime discriminator-based dispatch
+3. **Schema validation**: Minimal OpenAPI spec validation
+4. **Parameter resolution**: Complex `$ref` chains in parameters may not resolve perfectly
+
+## Testing
+
+### Quick Test
+```bash
+# Build generator
+cd build && ninja siesta-generator
+
+# Generate + compile (Binance)
+./build/generator/siesta-generator --input tests/binance.json --output binance/
+cd binance/build && cmake .. -DSIESTA_ROOT=/home/shurelia/siesta && make -j$(nproc)
+
+# Generate + compile (OpenAI — takes ~2-3 min)
+./build/generator/siesta-generator --input openai.json --output openai/
+cd openai/build && cmake .. -DSIESTA_ROOT=/home/shurelia/siesta && make -j$(nproc)
+
+# Test Python import
+python3 -c "import sys; sys.path.insert(0, 'binance/build'); import _siesta_binance; print('OK')"
+```
+
+### Debugging
+```bash
+# Check for warnings / missing types
+./build/generator/siesta-generator --input tests/binance.json --output /tmp/test/ 2>&1 | grep -i 'warning\|cycle\|missing'
+
+# Filter log output by phase (PARSE, DEP, EMIT, SORT)
+./build/generator/siesta-generator --input tests/binance.json --output /tmp/test/ 2>&1 | grep '\[EMIT\]'
+```
