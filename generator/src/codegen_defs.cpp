@@ -462,16 +462,62 @@ void DefsGenerator::emitEnumFromPrimitiveSerialization(
 	out << "}\n\n";
 }
 
-void codegen::DefsGenerator::emitArrayAlias(std::ostream& out, const std::string& name, const schema::ArrayType& arr) {
-	// Emit as: using Name = std::vector<Element>;
-	std::string elem_type = cppTypeName(arr.element_type);
-	out << "using " << name << " = std::vector<" << elem_type << ">;\n";
+static void emitEnumSerializationFromValues(
+	std::ostream& out,
+	const std::string& name,
+	const auto& values,
+	auto get_cpp_name,
+	auto get_json_value) {
+	out << "void tag_invoke(boost::json::value_from_tag, boost::json::value& jv, " << name << " val) {\n";
+	out << "    switch (val) {\n";
+	for (const auto& v : values) {
+		out << "        case " << name << "::" << get_cpp_name(v) << ": jv = \"" << escapeCppString(get_json_value(v))
+			<< "\"; break;\n";
+	}
+	out << "    }\n";
+	out << "}\n\n";
+
+	out << name << " tag_invoke(boost::json::value_to_tag<" << name << ">, const boost::json::value& jv) {\n";
+	out << "    auto str = jv.as_string();\n";
+	out << "    if (str.empty()) return " << name << "::" << get_cpp_name(values[0]) << ";\n";
+	out << "\n";
+	for (const auto& v : values) {
+		out << "    if (str == \"" << escapeCppString(get_json_value(v)) << "\") {\n";
+		out << "        return " << name << "::" << get_cpp_name(v) << ";\n";
+		out << "    }\n";
+	}
+	out << "    return " << name << "::" << get_cpp_name(values[0]) << ";\n";
+	out << "}\n\n";
 }
 
-void codegen::DefsGenerator::emitMapAlias(std::ostream& out, const std::string& name, const schema::MapType& m) {
-	// Emit as: using Name = std::map<std::string, Value>;
-	std::string value_type = cppTypeName(m.value_type);
-	out << "using " << name << " = std::map<std::string, " << value_type << ">;\n";
+static void emitEnumSerializationFromEnumType(std::ostream& out, const schema::EnumType& e) {
+	out << "void tag_invoke(boost::json::value_from_tag, boost::json::value& jv, " << e.name << " val) {\n";
+	out << "    switch (val) {\n";
+	for (const auto& enum_val : e.values) {
+		out << "        case " << e.name << "::" << enum_val.name << ": "
+			<< "jv = \"" << escapeCppString(enum_val.value) << "\"; break;\n";
+	}
+	out << "    }\n";
+	out << "}\n\n";
+
+	out << e.name << " tag_invoke(boost::json::value_to_tag<" << e.name << ">, const boost::json::value& jv) {\n";
+	out << "    auto str = jv.as_string();\n";
+	out << "    if (str == \"\") return " << e.name << "::" << (e.values.empty() ? "0" : e.values[0].name) << ";\n";
+	out << "    \n";
+	for (const auto& enum_val : e.values) {
+		out << "    if (str == \"" << escapeCppString(enum_val.value) << "\") {\n";
+		out << "        return " << e.name << "::" << enum_val.name << ";\n";
+		out << "    }\n";
+	}
+	out << "    return " << e.name << "::" << (e.values.empty() ? "0" : e.values[0].name) << ";\n";
+	out << "}\n\n";
+}
+void DefsGenerator::emitArrayAlias(std::ostream& out, const std::string& name, const schema::ArrayType& arr) {
+	out << "using " << name << " = std::vector<" << cppTypeName(arr.element_type) << ">;\n";
+}
+
+void DefsGenerator::emitMapAlias(std::ostream& out, const std::string& name, const schema::MapType& m) {
+	out << "using " << name << " = std::map<std::string, " << cppTypeName(m.value_type) << ">;\n";
 }
 
 void DefsGenerator::emitStructSerialization(std::ostream& out, const schema::StructType& s) {

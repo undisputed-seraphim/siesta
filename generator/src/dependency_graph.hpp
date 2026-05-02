@@ -1,6 +1,7 @@
 #pragma once
 
 #include "schema_ast.hpp"
+#include "util.hpp"
 #include <queue>
 #include <string>
 #include <unordered_map>
@@ -30,17 +31,6 @@ struct Dependency {
 
 	bool operator==(const Dependency& other) const = default;
 };
-
-/**
- * Check if a type name is a synthetic C++ type (not a real AST type)
- */
-static inline bool isSyntheticCppType(const std::string& name) {
-	// Synthetic types start with std:: or are primitive C++ keywords
-	return name.rfind("std::", 0) == 0 || // starts with "std::"
-		   name == "int" || name == "long" || name == "short" || name == "unsigned" || name == "signed" ||
-		   name == "char" || name == "wchar_t" || name == "bool" || name == "float" || name == "double" ||
-		   name == "void";
-}
 
 /**
  * Dependency graph - tracks all type dependencies for topological sorting
