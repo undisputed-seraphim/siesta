@@ -21,6 +21,9 @@ static schema::NormalizedAST buildAST(const openapi::v3::OpenAPIv3& spec) {
 	schema::NormalizedAST ast;
 	std::unordered_set<std::string> added_types;
 
+	// Count schemas by type for summary
+	int struct_count = 0, variant_count = 0, array_count = 0, map_count = 0, enum_count = 0, prim_count = 0;
+
 	// Process components/schemas
 	for (const auto& [name_sv, schema_obj] : spec.components().schemas()) {
 		std::string name(name_sv);
@@ -30,10 +33,32 @@ static schema::NormalizedAST buildAST(const openapi::v3::OpenAPIv3& spec) {
 		try {
 			auto type = schema::SchemaParser::parseSchema(schema_obj, safe_name, ast, added_types);
 			ast.addType(safe_name, std::move(type));
+
+			std::visit(
+				[&](const auto& t) {
+					using T = std::decay_t<decltype(t)>;
+					if constexpr (std::is_same_v<T, schema::StructType>)
+						struct_count++;
+					else if constexpr (std::is_same_v<T, schema::VariantType>)
+						variant_count++;
+					else if constexpr (std::is_same_v<T, schema::ArrayType>)
+						array_count++;
+					else if constexpr (std::is_same_v<T, schema::MapType>)
+						map_count++;
+					else if constexpr (std::is_same_v<T, schema::EnumType>)
+						enum_count++;
+					else if constexpr (std::is_same_v<T, schema::PrimitiveType>)
+						prim_count++;
+				},
+				type);
 		} catch (const std::exception& e) {
 			std::cerr << "    Warning: Failed to parse " << name << ": " << e.what() << "\n";
 		}
 	}
+
+	std::cout << "  AST summary: " << ast.getTypes().size() << " types (" << struct_count << " structs, "
+			  << variant_count << " variants, " << array_count << " arrays, " << map_count << " maps, " << enum_count
+			  << " enums, " << prim_count << " primitives)\n";
 
 	return ast;
 }
@@ -132,6 +157,22 @@ bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path
 	std::cout << "  - AST built with " << ast.getTypes().size() << " types\n";
 	std::cout << "  - Dependency graph has " << dep_graph.getDependencies().size() << " edges\n";
 	std::cout << "  - Topological sort: " << (order.isValid() ? "SUCCESS" : "FAILED") << "\n";
+	std::cout << "  - Ordered types: " << order.ordered_types.size() << "\n";
+
+	// Cross-check: how many AST types were actually emitted?
+	std::unordered_set<std::string> sorted_set(order.ordered_types.begin(), order.ordered_types.end());
+	int missing = 0;
+	for (const auto& [name, _] : ast.getTypes()) {
+		if (sorted_set.find(name) == sorted_set.end()) {
+			missing++;
+		}
+	}
+	if (missing > 0) {
+		std::cerr << "  *** WARNING: " << missing << " of " << ast.getTypes().size()
+				  << " AST types are NOT in topological order (will be missing from output) ***\n";
+	} else {
+		std::cout << "  - All " << ast.getTypes().size() << " AST types present in output\n";
+	}
 
 	return true;
 }

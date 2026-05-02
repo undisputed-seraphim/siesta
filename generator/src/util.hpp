@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include <cstdarg>
+#include <cstdio>
 #include <functional>
+#include <initializer_list>
+#include <iostream>
 #include <optional>
 #include <ostream>
 #include <string>
@@ -51,3 +55,19 @@ bool isSyntheticCppType(const std::string& name);
 
 // Get the final component of a path (e.g., "/foo/bar/baz" -> "baz")
 std::string_view component_path(std::string_view path) noexcept;
+
+// ---------------------------------------------------------------------------
+// Logging — all go to stderr, prefixed by phase for easy filtering
+// ---------------------------------------------------------------------------
+inline void log_to(std::string_view tag, const char* fmt, ...) {
+	va_list args;
+	va_start(args, fmt);
+	std::cerr << "[" << tag << "] ";
+	std::vfprintf(stderr, fmt, args);
+	std::cerr << "\n";
+	va_end(args);
+}
+#define LOG_PARSE(...) log_to("PARSE", __VA_ARGS__)
+#define LOG_DEP(...) log_to("DEP", __VA_ARGS__)
+#define LOG_EMIT(...) log_to("EMIT", __VA_ARGS__)
+#define LOG_SORT(...) log_to("SORT", __VA_ARGS__)

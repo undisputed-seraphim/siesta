@@ -203,10 +203,12 @@ static VariantType buildVariant(
 	variant.name = std::string(name);
 	variant.description = std::string(desc);
 
+	size_t i = 0;
 	for (const auto& alt : alternatives) {
 		auto alt_ref = SchemaParser::extractTypeRef(alt);
 		if (!alt_ref.name.empty()) {
 			variant.alternatives.push_back(alt_ref);
+			++i;
 			continue;
 		}
 
@@ -232,6 +234,9 @@ static VariantType buildVariant(
 						ast.addType(sanitized_name, std::move(mutable_t));
 						added_types.insert(sanitized_name);
 					}
+				} else if constexpr (std::is_same_v<T, VariantType>) {
+					// Nested variant - use the name directly
+					alt_type_name = t.name;
 				} else {
 					alt_type_name = "std::string";
 				}
@@ -254,9 +259,36 @@ inline SchemaType SchemaParser::parseSchema(
 	auto type = schema.Type_();
 	std::string desc = std::string(schema.description());
 
+	// Log entry: schema name, detected type, and what keys are present
+	std::string keys_present;
+	if (schema.IsRef())
+		keys_present += " $ref";
+	if (!schema.oneOf().empty())
+		keys_present += " oneOf";
+	if (!schema.anyOf().empty())
+		keys_present += " anyOf";
+	if (schema.HasKey("properties"))
+		keys_present += " properties";
+	if (schema.HasKey("allOf"))
+		keys_present += " allOf";
+	if (schema.HasKey("additionalProperties"))
+		keys_present += " additionalProperties";
+	if (!schema.enum_().empty())
+		keys_present += " enum";
+	if (!schema.format().empty())
+		keys_present += " format=" + std::string(schema.format());
+
 	switch (type) {
 	case openapi::v3::JsonSchema::Type::object: {
 		const auto& obj = static_cast<const openapi::v3::Object&>(schema);
+
+		// Check if this object also has oneOf/anyOf — treat as variant (polymorphic object)
+		bool has_oneof = !schema.oneOf().empty();
+		bool has_anyof = !schema.anyOf().empty();
+		if (has_oneof || has_anyof) {
+			return buildVariant(has_oneof ? schema.oneOf() : schema.anyOf(), name, desc, ast, added_types);
+		}
+
 		StructType struct_type;
 		struct_type.name = std::string(name);
 		struct_type.description = desc;
@@ -269,12 +301,6 @@ inline SchemaType SchemaParser::parseSchema(
 				}
 			}
 		}
-
-		// TODO: Handle additionalProperties for map-like schemas
-		// When additionalProperties: true and no properties exist, generate:
-		//   using TypeName = std::map<std::string, boost::json::value>;
-		// instead of an empty struct. This preserves semantic meaning for dynamic schemas.
-		// See: https://swagger.io/docs/specification/data-models/objects/#dictionary
 
 		auto props = obj.properties();
 		for (const auto& [prop_name, prop_schema] : props) {
@@ -465,8 +491,7 @@ inline SchemaType SchemaParser::parseSchema(
 			return parseImplicitObject(obj_schema, name, ast, added_types);
 		}
 
-		// Truly unknown schema - warn and fallback to string
-		std::cerr << "    [WARNING] Unknown schema type for '" << name << "' - defaulting to std::string\n";
+		// Truly unknown schema - fallback to string
 		PrimitiveType prim;
 		prim.kind = PrimitiveKind::String;
 		prim.description = desc;

@@ -33,10 +33,11 @@ static std::string resolveTypeName(
 	}
 
 	const auto* type = ast.getType(current);
-	if (!type)
+	if (!type) {
 		return current;
+	}
 
-	return std::visit(
+	std::string result = std::visit(
 		[&](const auto& t) -> std::string {
 			using T = std::decay_t<decltype(t)>;
 
@@ -63,6 +64,8 @@ static std::string resolveTypeName(
 			}
 		},
 		*type);
+
+	return result;
 }
 
 // Get a canonical signature for variant alternatives (for deduplication)
@@ -95,6 +98,7 @@ static std::pair<std::vector<schema::TypeRef>, bool> processVariantAlternatives(
 
 	// Resolve and deduplicate alternatives
 	std::unordered_map<std::string, schema::TypeRef> seen; // resolved type -> first occurrence
+	std::unordered_set<std::string> duplicates;
 	for (const auto& alt : v.alternatives) {
 		std::string resolved;
 		if (alt.is_inline) {
@@ -104,6 +108,9 @@ static std::pair<std::vector<schema::TypeRef>, bool> processVariantAlternatives(
 		}
 
 		auto [it, inserted] = seen.emplace(resolved, alt);
+		if (!inserted) {
+			duplicates.insert(resolved);
+		}
 	}
 
 	// Collect unique alternatives - create inline TypeRefs with resolved names
@@ -116,6 +123,7 @@ static std::pair<std::vector<schema::TypeRef>, bool> processVariantAlternatives(
 
 	// Check if should collapse to typedef (single alternative, not nullable)
 	bool collapse = (processed.size() == 1 && !v.is_nullable);
+
 	return {processed, collapse};
 }
 
@@ -158,10 +166,13 @@ void DefsGenerator::generateDefsHpp(std::ostream& out) {
 	out << "\n";
 
 	// Full definitions in topological order
+	LOG_EMIT("generateDefsHpp: emitting %zu types from topological order", order_.ordered_types.size());
+	int emitted_structs = 0, emitted_variants = 0, emitted_enums = 0, emitted_typedefs = 0, emitted_aliases = 0;
 	for (const auto& name : order_.ordered_types) {
 		const auto* type = ast_.getType(name);
-		if (!type)
+		if (!type) {
 			continue;
+		}
 
 		std::visit(
 			[&](const auto& t) {
@@ -169,10 +180,13 @@ void DefsGenerator::generateDefsHpp(std::ostream& out) {
 
 				if constexpr (std::is_same_v<T, schema::StructType>) {
 					emitStruct(out, t);
+					emitted_structs++;
 				} else if constexpr (std::is_same_v<T, schema::VariantType>) {
 					emitVariant(out, t);
+					emitted_variants++;
 				} else if constexpr (std::is_same_v<T, schema::EnumType>) {
 					emitEnum(out, t);
+					emitted_enums++;
 				} else if constexpr (std::is_same_v<T, schema::PrimitiveType>) {
 					// Named primitive with enum values - emit as enum class for type safety
 					if (!t.enum_values.empty()) {
@@ -181,17 +195,27 @@ void DefsGenerator::generateDefsHpp(std::ostream& out) {
 						// Plain named primitive - emit as typedef
 						emitPrimitiveTypedef(out, name, t);
 					}
+					emitted_typedefs++;
 				} else if constexpr (std::is_same_v<T, schema::ArrayType>) {
 					// Top-level array schemas - emit as type alias
 					emitArrayAlias(out, name, t);
+					emitted_aliases++;
 				} else if constexpr (std::is_same_v<T, schema::MapType>) {
 					// Top-level map schemas - emit as type alias
 					emitMapAlias(out, name, t);
+					emitted_aliases++;
 				}
 			},
 			*type);
 		out << "\n";
 	}
+	LOG_EMIT(
+		"generateDefsHpp: emitted %d structs, %d variants, %d enums, %d typedefs, %d aliases",
+		emitted_structs,
+		emitted_variants,
+		emitted_enums,
+		emitted_typedefs,
+		emitted_aliases);
 
 	// Serialization declarations
 	out << "// JSON serialization\n";
@@ -232,6 +256,7 @@ void DefsGenerator::generateDefsCpp(std::ostream& out) {
 	out << "#include \"defs.hpp\"\n";
 	out << "namespace api {\n\n";
 
+	int cpp_structs = 0, cpp_variants = 0, cpp_enums = 0;
 	for (const auto& name : order_.ordered_types) {
 		const auto* type = ast_.getType(name);
 		if (!type)
@@ -243,10 +268,13 @@ void DefsGenerator::generateDefsCpp(std::ostream& out) {
 
 				if constexpr (std::is_same_v<T, schema::StructType>) {
 					emitStructSerialization(out, t);
+					cpp_structs++;
 				} else if constexpr (std::is_same_v<T, schema::VariantType>) {
 					emitVariantSerialization(out, t);
+					cpp_variants++;
 				} else if constexpr (std::is_same_v<T, schema::EnumType>) {
 					emitEnumSerialization(out, t);
+					cpp_enums++;
 				} else if constexpr (std::is_same_v<T, schema::PrimitiveType>) {
 					// Primitives with enum values are now enum classes - emit serialization
 					if (!t.enum_values.empty()) {
@@ -258,6 +286,8 @@ void DefsGenerator::generateDefsCpp(std::ostream& out) {
 		out << "\n";
 	}
 
+	LOG_EMIT(
+		"generateDefsCpp: emitted %d struct, %d variant, %d enum serializations", cpp_structs, cpp_variants, cpp_enums);
 	out << "} // namespace api\n";
 }
 
@@ -307,6 +337,7 @@ void DefsGenerator::emitVariant(std::ostream& out, const schema::VariantType& v)
 
 	// Handle empty variant (fallback to std::monostate)
 	if (v.alternatives.empty() && !v.is_nullable) {
+		LOG_EMIT("emitVariant '%s': EMPTY -> std::monostate", v.name.c_str());
 		out << "using " << v.name << " = std::monostate;\n";
 		return;
 	}
@@ -320,6 +351,7 @@ void DefsGenerator::emitVariant(std::ostream& out, const schema::VariantType& v)
 	if (!inserted) {
 		// Duplicate! Emit as alias and track typedef chain
 		std::string target = it->second;
+		LOG_EMIT("emitVariant '%s': DUPLICATE sig='%s' -> alias to '%s'", v.name.c_str(), sig.c_str(), target.c_str());
 		out << "using " << v.name << " = " << target << ";\n";
 		typedef_chain_[v.name] = target;
 		return;
@@ -328,12 +360,19 @@ void DefsGenerator::emitVariant(std::ostream& out, const schema::VariantType& v)
 	// If collapsed to single alternative, emit as typedef and track chain
 	if (should_collapse) {
 		std::string target = cppTypeName(processed_alternatives[0]);
+		LOG_EMIT("emitVariant '%s': COLLAPSED to single alt '%s'", v.name.c_str(), target.c_str());
 		out << "using " << v.name << " = " << target << ";\n";
 		typedef_chain_[v.name] = target;
 		return;
 	}
 
 	// Normal variant typedef
+	LOG_EMIT(
+		"emitVariant '%s': %zu alternatives (nullable=%d) -> std::variant<%s>",
+		v.name.c_str(),
+		processed_alternatives.size(),
+		v.is_nullable,
+		sig.c_str());
 	out << "using " << v.name << " = std::variant<";
 	for (size_t i = 0; i < processed_alternatives.size(); ++i) {
 		if (i > 0)
