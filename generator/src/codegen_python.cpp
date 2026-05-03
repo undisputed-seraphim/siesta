@@ -12,34 +12,28 @@ PythonGenerator::PythonGenerator(const schema::NormalizedAST& ast, const openapi
 	endpoints_ = parseEndpoints();
 }
 
-std::string PythonGenerator::resolveRefName(std::string_view ref) {
+static std::string refComponentName(std::string_view ref) {
 	size_t pos = ref.rfind('/');
 	if (pos != std::string_view::npos) {
-		return "api::" + std::string(ref.substr(pos + 1));
+		return std::string(ref.substr(pos + 1));
 	}
-	return "api::" + std::string(ref);
+	return std::string(ref);
 }
 
-ClientParam PythonGenerator::resolveAndMapParameter(const openapi::v3::Parameter& raw_param) {
+std::string PythonGenerator::resolveRefName(std::string_view ref) {
+	return "api::" + refComponentName(ref);
+}
+
+ClientParam PythonGenerator::resolveAndMapParameter(const openapi::v3::Parameter& raw_param,
+                                                     const std::unordered_map<std::string, ClientParam>& fetched_params) {
 	ClientParam p;
 
 	if (raw_param.IsRef()) {
-		std::string ref_name = resolveRefName(raw_param.ref());
-		auto comp_params = spec_.components().parameters();
-		for (const auto& [n, p_obj] : comp_params) {
-			if (n == ref_name) {
-				p.name = std::string(p_obj.name());
-				p.location = std::string(p_obj.in());
-				p.required = p_obj.required();
-				p.description = std::string(p_obj.description());
-				auto schema = p_obj.schema();
-				p.schema_type = std::string(schema.type());
-				if (!schema.format().empty()) {
-					p.format = std::string(schema.format());
-				}
-				p.cpp_type = schemaToCppType(schema);
-				return p;
-			}
+		std::string ref_name = refComponentName(raw_param.ref());
+		auto it = fetched_params.find(ref_name);
+		if (it != fetched_params.end()) {
+			p = it->second;
+			return p;
 		}
 	}
 
@@ -89,12 +83,31 @@ std::string PythonGenerator::schemaToCppType(const openapi::v3::JsonSchema& sche
 std::vector<PyEndpoint> PythonGenerator::parseEndpoints() {
 	std::vector<PyEndpoint> endpoints;
 	const auto& paths = spec_.paths();
+	const auto& comp_params_raw = spec_.components().parameters();
 
+	// Pre-fetch components/parameters to avoid simdjson on-demand re-iteration
+	std::unordered_map<std::string, ClientParam> fetched_params;
+	for (const auto& [n, p_obj] : comp_params_raw) {
+		ClientParam cp;
+		cp.name = std::string(p_obj.name());
+		cp.location = std::string(p_obj.in());
+		cp.required = p_obj.required();
+		cp.description = std::string(p_obj.description());
+		auto schema = p_obj.schema();
+		cp.schema_type = std::string(schema.type());
+		if (!schema.format().empty()) {
+			cp.format = std::string(schema.format());
+		}
+		cp.cpp_type = schemaToCppType(schema);
+		fetched_params[std::string(n)] = std::move(cp);
+	}
+
+	// Collect path-level parameters into a map by name
 	std::unordered_map<std::string, ClientParam> path_params_map;
 	for (const auto& [path_sv, path_obj] : paths) {
 		auto path_params_list = path_obj.parameters();
 		for (const auto& param : path_params_list) {
-			ClientParam cp = resolveAndMapParameter(param);
+			ClientParam cp = resolveAndMapParameter(param, fetched_params);
 			path_params_map[cp.name] = cp;
 		}
 	}
@@ -138,7 +151,7 @@ std::vector<PyEndpoint> PythonGenerator::parseEndpoints() {
 
 			auto op_params_list = op_obj.parameters();
 			for (const auto& param : op_params_list) {
-				ClientParam cp = resolveAndMapParameter(param);
+				ClientParam cp = resolveAndMapParameter(param, fetched_params);
 				if (merged_params.find(cp.name) == merged_params.end()) {
 					param_order.push_back(cp.name);
 				}
