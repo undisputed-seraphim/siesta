@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "codegen_python.hpp"
+#include "endpoint_util.hpp"
 #include "openapi.hpp"
 #include "openapi3.hpp"
 #include <algorithm>
@@ -10,18 +11,6 @@ PythonGenerator::PythonGenerator(const schema::NormalizedAST& ast, const openapi
 	: ast_(ast)
 	, spec_(spec) {
 	endpoints_ = parseEndpoints();
-}
-
-static std::string refComponentName(std::string_view ref) {
-	size_t pos = ref.rfind('/');
-	if (pos != std::string_view::npos) {
-		return std::string(ref.substr(pos + 1));
-	}
-	return std::string(ref);
-}
-
-std::string PythonGenerator::resolveRefName(std::string_view ref) {
-	return "api::" + refComponentName(ref);
 }
 
 ClientParam PythonGenerator::resolveAndMapParameter(const openapi::v3::Parameter& raw_param,
@@ -120,8 +109,7 @@ std::vector<PyEndpoint> PythonGenerator::parseEndpoints() {
 			std::string method(method_sv);
 			std::transform(method.begin(), method.end(), method.begin(), ::tolower);
 
-			if (method != "get" && method != "post" && method != "put" && method != "delete" && method != "patch" &&
-				method != "head" && method != "options") {
+			if (!isSupportedMethod(method)) {
 				continue;
 			}
 
@@ -180,17 +168,7 @@ std::vector<PyEndpoint> PythonGenerator::parseEndpoints() {
 
 			// Sanitize parameter names to avoid conflicts
 			for (auto& p : ordered_params) {
-				if (p.name == "token" || p.name == "result" || p.name == "error" || p.name == "next" ||
-					p.name == "type" || p.name == "metadata" || p.name == "include" || p.name == "order" ||
-					p.name == "event_types") {
-					p.name = "param_" + p.name;
-				}
-				// Replace brackets and other special chars that break C++ identifiers
-				for (char& c : p.name) {
-					if (c == '[' || c == ']' || c == '(' || c == ')' || c == '{' || c == '}' || c == '.' || c == ',') {
-						c = '_';
-					}
-				}
+				p.name = sanitizeParamName(p.name);
 			}
 			ep.params = std::move(ordered_params);
 			endpoints.push_back(std::move(ep));
@@ -198,31 +176,6 @@ std::vector<PyEndpoint> PythonGenerator::parseEndpoints() {
 	}
 
 	return endpoints;
-}
-
-std::string PythonGenerator::generateFunctionName(std::string_view method, std::string_view path) {
-	std::string result = std::string(method);
-	result += "__";
-	bool first_char = true;
-	for (char c : path) {
-		if (c == '/') {
-			if (!first_char) {
-				result += '_';
-			}
-		} else if (c == '{') {
-			result += '_';
-		} else if (c == '}') {
-			// Skip
-		} else if (c == ':') {
-			result += '_';
-		} else if (c == '-') {
-			result += '_';
-		} else {
-			result += c;
-			first_char = false;
-		}
-	}
-	return result;
 }
 
 void PythonGenerator::emitModulePreamble(std::ostream& out, const std::string& module_name) {

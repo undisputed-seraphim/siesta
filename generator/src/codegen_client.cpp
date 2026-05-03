@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "codegen_client.hpp"
+#include "endpoint_util.hpp"
 #include "openapi.hpp"
 #include "openapi3.hpp"
 #include <unordered_set>
@@ -10,32 +11,6 @@ ClientGenerator::ClientGenerator(const schema::NormalizedAST& ast, const openapi
 	: ast_(ast)
 	, spec_(spec) {
 	endpoints_ = parseEndpoints();
-}
-
-static std::string refComponentName(std::string_view ref) {
-	size_t pos = ref.rfind('/');
-	if (pos != std::string_view::npos) {
-		return std::string(ref.substr(pos + 1));
-	}
-	return std::string(ref);
-}
-
-static std::string resolveRefName(std::string_view ref) {
-	return "api::" + refComponentName(ref);
-}
-
-static std::string sanitizeParamName(std::string name) {
-	if (name == "token" || name == "result" || name == "error" || name == "next" || name == "type" ||
-		name == "metadata" || name == "include" || name == "order" || name == "event_types") {
-		name = "param_" + name;
-	}
-	// Replace brackets and other special chars that break C++ identifiers
-	for (char& c : name) {
-		if (c == '[' || c == ']' || c == '(' || c == ')' || c == '{' || c == '}' || c == '.' || c == ',') {
-			c = '_';
-		}
-	}
-	return name;
 }
 
 ClientParam ClientGenerator::resolveAndMapParameter(const openapi::v3::Parameter& raw_param,
@@ -159,8 +134,7 @@ std::vector<ClientEndpoint> ClientGenerator::parseEndpoints() {
 			std::string method(method_sv);
 			std::transform(method.begin(), method.end(), method.begin(), ::tolower);
 
-			if (method != "get" && method != "post" && method != "put" && method != "delete" && method != "patch" &&
-				method != "head" && method != "options") {
+			if (!isSupportedMethod(method)) {
 				continue;
 			}
 
@@ -296,33 +270,6 @@ std::vector<ClientEndpoint> ClientGenerator::parseEndpoints() {
 	}
 
 	return endpoints;
-}
-
-std::string ClientGenerator::generateFunctionName(std::string_view method, std::string_view path) {
-	std::string result = std::string(method);
-	result += "__";
-
-	bool first_char = true;
-	for (char c : path) {
-		if (c == '/') {
-			if (!first_char) {
-				result += '_';
-			}
-		} else if (c == '{') {
-			result += '_';
-		} else if (c == '}') {
-			// Skip
-		} else if (c == ':') {
-			result += '_';
-		} else if (c == '-') {
-			result += '_';
-		} else {
-			result += c;
-			first_char = false;
-		}
-	}
-
-	return result;
 }
 
 void ClientGenerator::emitClassHeader(std::ostream& out) {

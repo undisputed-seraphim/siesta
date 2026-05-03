@@ -56,11 +56,6 @@ private:
 	std::vector<PyEndpoint> parseEndpoints();
 
 	/**
-	 * Extract the type name from a $ref path
-	 */
-	static std::string resolveRefName(std::string_view ref);
-
-	/**
 	 * Resolve a parameter $ref to its actual definition from components
 	 */
 	ClientParam resolveAndMapParameter(const openapi::v3::Parameter& raw_param,
@@ -70,11 +65,6 @@ private:
 	 * Map an OpenAPI schema to a C++ type string
 	 */
 	std::string schemaToCppType(const openapi::v3::JsonSchema& schema);
-
-	/**
-	 * Generate the function name from HTTP method and path
-	 */
-	static std::string generateFunctionName(std::string_view method, std::string_view path);
 
 	/**
 	 * Emit the module preamble (includes, namespace, JSON conversion helpers)

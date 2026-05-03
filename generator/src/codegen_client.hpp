@@ -52,8 +52,6 @@ private:
 	                                   const std::unordered_map<std::string, ClientParam>& fetched_params);
 	std::string schemaToCppType(const openapi::v3::JsonSchema& schema);
 
-	static std::string generateFunctionName(std::string_view method, std::string_view path);
-
 	void emitClassHeader(std::ostream& out);
 	void emitEndpoint(std::ostream& out, const ClientEndpoint& ep);
 	void emitMethodSignature(std::ostream& out, const ClientEndpoint& ep);
