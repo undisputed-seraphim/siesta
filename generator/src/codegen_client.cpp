@@ -397,25 +397,24 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep
 	bool has_format_args = !path_params.empty() || !query_params.empty();
 
 	if (has_format_args) {
-		// Use string concatenation instead of std::format for compatibility with std::optional and std::vector
 		out << "\t\tstd::string target_path(static_cast<std::string_view>(path));\n";
 		for (const auto* p : path_params) {
 			bool is_string = p->cpp_type.find("string") != std::string::npos;
 			if (p->required) {
 				if (is_string) {
-					out << "\t\ttarget_path = std::regex_replace(target_path, std::regex(\"{}\"), " << p->name
-						<< ");\n";
+					out << "\t\tif (auto _p = target_path.find(\"{}\"); _p != std::string::npos) target_path.replace(_p, 2, "
+						<< p->name << ");\n";
 				} else {
-					out << "\t\ttarget_path = std::regex_replace(target_path, std::regex(\"{}\"), std::to_string("
+					out << "\t\tif (auto _p = target_path.find(\"{}\"); _p != std::string::npos) target_path.replace(_p, 2, std::to_string("
 						<< p->name << "));\n";
 				}
 			} else {
 				out << "\t\tif (" << p->name << ".has_value()) {\n";
 				if (is_string) {
-					out << "\t\t\ttarget_path = std::regex_replace(target_path, std::regex(\"{}\"), *(*" << p->name
-						<< "));\n";
+					out << "\t\t\tif (auto _p = target_path.find(\"{}\"); _p != std::string::npos) target_path.replace(_p, 2, *("
+						<< p->name << "));\n";
 				} else {
-					out << "\t\t\ttarget_path = std::regex_replace(target_path, std::regex(\"{}\"), std::to_string(*("
+					out << "\t\t\tif (auto _p = target_path.find(\"{}\"); _p != std::string::npos) target_path.replace(_p, 2, std::to_string(*("
 						<< p->name << ")));\n";
 				}
 				out << "\t\t}\n";
@@ -492,7 +491,6 @@ void ClientGenerator::generateClientHpp(std::ostream& out) {
 	out << "#include <boost/json.hpp>\n";
 	out << "#include <memory>\n";
 	out << "#include <optional>\n";
-	out << "#include <regex>\n";
 	out << "#include <string>\n";
 	out << "#include <string_view>\n";
 	out << "\n";
