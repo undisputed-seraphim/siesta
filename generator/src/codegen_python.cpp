@@ -125,6 +125,27 @@ std::vector<PyEndpoint> PythonGenerator::parseEndpoints(const openapi::v3::OpenA
 		}
 	}
 
+	// Pre-fetch security schemes
+	struct SchemeInfo {
+		std::string type;
+		std::string name;
+		std::string in;
+		std::string scheme;
+	};
+	std::unordered_map<std::string, SchemeInfo> security_schemes;
+	for (const auto& [n, s] : spec.components().securitySchemes()) {
+		SchemeInfo info;
+		info.type = std::string(s.type());
+		if (info.type == "apiKey") {
+			info.name = std::string(s.name());
+			info.in = std::string(s.in());
+		} else if (info.type == "http") {
+			info.scheme = std::string(s.scheme());
+		}
+		security_schemes[std::string(n)] = std::move(info);
+	}
+	bool has_global_security = spec.hasGlobalSecurity();
+
 	// Collect path-level parameters into a map by name
 	std::unordered_map<std::string, ClientParam> path_params_map;
 	for (const auto& [path_sv, path_obj] : paths) {
@@ -237,6 +258,22 @@ std::vector<PyEndpoint> PythonGenerator::parseEndpoints(const openapi::v3::OpenA
 						ep.has_request_body = true;
 						break;
 					}
+				}
+			}
+
+			// Determine security for this endpoint
+			bool has_op_security = false;
+			try {
+				has_op_security = op_obj.HasKey("security");
+			} catch (...) {}
+			if ((has_op_security || (!has_op_security && has_global_security)) && !security_schemes.empty()) {
+				const auto& [scheme_name, info] = *security_schemes.begin();
+				if (info.type == "apiKey" && info.in == "header") {
+					ep.auth_type = ClientEndpoint::AuthType::ApiKey;
+					ep.auth_header_name = info.name;
+				} else if (info.type == "http" && info.scheme == "bearer") {
+					ep.auth_type = ClientEndpoint::AuthType::HttpBearer;
+					ep.auth_header_name = "Authorization";
 				}
 			}
 
@@ -457,6 +494,24 @@ void PythonGenerator::emitEndpointWrapper(std::ostream& out, const PyEndpoint& e
 	}
 }
 void PythonGenerator::emitModuleBody(std::ostream& out, const std::vector<PyEndpoint>& endpoints) {
+	// Determine auth config
+	ClientEndpoint::AuthType auth_type = ClientEndpoint::AuthType::None;
+	std::string auth_member_name;
+	std::string auth_param_name;
+	for (const auto& ep : endpoints) {
+		if (ep.auth_type != ClientEndpoint::AuthType::None) {
+			auth_type = ep.auth_type;
+			if (auth_type == ClientEndpoint::AuthType::ApiKey) {
+				auth_member_name = "api_key";
+				auth_param_name = "api_key";
+			} else if (auth_type == ClientEndpoint::AuthType::HttpBearer) {
+				auth_member_name = "bearer_token";
+				auth_param_name = "bearer_token";
+			}
+			break;
+		}
+	}
+
 	out << "\n";
 	out << "// Python extension module definition\n";
 	out << "// The module name should match the shared library name (e.g., _binance.so -> _binance)\n";
@@ -466,8 +521,14 @@ void PythonGenerator::emitModuleBody(std::ostream& out, const std::vector<PyEndp
 	out << "struct ClientWrapper {\n";
 	out << "\topenapi::Client client;\n";
 	out << "\tboost::asio::io_context ctx;\n";
-	out << "\tClientWrapper(std::string host = \"localhost\", uint16_t port = 443)\n";
-	out << "\t\t: client(ctx) {\n";
+	if (auth_type != ClientEndpoint::AuthType::None) {
+		out << "\tClientWrapper(std::string host = \"localhost\", uint16_t port = 443, std::string " << auth_param_name
+			<< " = \"\")\n";
+		out << "\t\t: client(ctx, std::move(" << auth_param_name << ")) {\n";
+	} else {
+		out << "\tClientWrapper(std::string host = \"localhost\", uint16_t port = 443)\n";
+		out << "\t\t: client(ctx) {\n";
+	}
 	out << "\t\tclient.start(boost::asio::ip::make_address(host), port);\n";
 	out << "\t}\n";
 	out << "\t~ClientWrapper() { client.stop(); }\n";
@@ -485,9 +546,15 @@ void PythonGenerator::emitModuleBody(std::ostream& out, const std::vector<PyEndp
 	out << "\tm.doc() = \"Siesta-generated Python bindings for OpenAPI client\";\n";
 	out << "\n";
 	out << "\t// Client class wrapping the C++ siesta client\n";
-	out << "\tnb::class_<ClientWrapper>(m, \"Client\")\n";
-	out << "\t\t.def(nb::init<std::string, uint16_t>(), nb::arg(\"host\") = std::string(\"localhost\"), "
-		   "nb::arg(\"port\") = 443)\n";
+	if (auth_type != ClientEndpoint::AuthType::None) {
+		out << "\tnb::class_<ClientWrapper>(m, \"Client\")\n";
+		out << "\t\t.def(nb::init<std::string, uint16_t, std::string>(), nb::arg(\"host\") = std::string(\"localhost\"), "
+			   "nb::arg(\"port\") = 443, nb::arg(\"" << auth_param_name << "\") = std::string(\"\"))\n";
+	} else {
+		out << "\tnb::class_<ClientWrapper>(m, \"Client\")\n";
+		out << "\t\t.def(nb::init<std::string, uint16_t>(), nb::arg(\"host\") = std::string(\"localhost\"), "
+			   "nb::arg(\"port\") = 443)\n";
+	}
 	out << "\t\t.def(\"start\", &ClientWrapper::start, nb::arg(\"host\"), nb::arg(\"port\"))\n";
 	out << "\t\t.def(\"stop\", &ClientWrapper::stop)\n";
 	out << "\t\t// Endpoint methods will be added here by the generator\n";
