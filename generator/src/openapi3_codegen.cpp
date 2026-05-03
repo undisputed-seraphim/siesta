@@ -5,6 +5,7 @@
 #include "codegen_defs.hpp"
 #include "codegen_python.hpp"
 #include "codegen_server.hpp"
+#include "codegen_server_python.hpp"
 
 using codegen::sanitize;
 #include "dependency_graph.hpp"
@@ -202,6 +203,12 @@ bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path
 	{
 		::codegen::ServerGenerator gen;
 		std::cout << "  Generating server.hpp/cpp\n";
+		gen(args, output_path);
+	}
+
+	{
+		::codegen::ServerPythonGenerator gen("siesta_bindings");
+		std::cout << "  Generating server_py.cpp\n";
 		gen(args, output_path);
 	}
 
