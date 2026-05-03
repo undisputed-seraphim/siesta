@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include "codegen_base.hpp"
 #include "openapi3.hpp"
 #include "schema_ast.hpp"
 #include "util.hpp"
@@ -39,14 +40,12 @@ struct ClientEndpoint {
 	std::string body_content_type;
 };
 
-class ClientGenerator {
+class ClientGenerator : public ICodeGenerator {
 public:
-	ClientGenerator(const schema::NormalizedAST& ast, const openapi::v3::OpenAPIv3& spec);
-
-	void generateClientHpp(std::ostream& out);
+	void operator()(const CodegenArgs& args, const std::filesystem::path& output_dir) override;
 
 private:
-	std::vector<ClientEndpoint> parseEndpoints();
+	std::vector<ClientEndpoint> parseEndpoints(const openapi::v3::OpenAPIv3& spec);
 
 	ClientParam resolveAndMapParameter(const openapi::v3::Parameter& raw_param,
 	                                   const std::unordered_map<std::string, ClientParam>& fetched_params);
@@ -56,10 +55,7 @@ private:
 	void emitEndpoint(std::ostream& out, const ClientEndpoint& ep);
 	void emitMethodSignature(std::ostream& out, const ClientEndpoint& ep);
 	void emitMethodBody(std::ostream& out, const ClientEndpoint& ep);
-
-	const schema::NormalizedAST& ast_;
-	const openapi::v3::OpenAPIv3& spec_;
-	std::vector<ClientEndpoint> endpoints_;
+	void generateClientHpp(std::ostream& out, const std::vector<ClientEndpoint>& endpoints);
 };
 
 } // namespace codegen

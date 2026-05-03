@@ -4,13 +4,28 @@
 #include "openapi.hpp"
 #include "openapi3.hpp"
 #include <algorithm>
+#include <fstream>
 
 namespace codegen {
 
-PythonGenerator::PythonGenerator(const schema::NormalizedAST& ast, const openapi::v3::OpenAPIv3& spec)
-	: ast_(ast)
-	, spec_(spec) {
-	endpoints_ = parseEndpoints();
+void PythonGenerator::operator()(const CodegenArgs& args, const std::filesystem::path& output_dir) {
+	if (!args.spec) {
+		return;
+	}
+
+	auto endpoints = parseEndpoints(*args.spec);
+
+	std::filesystem::create_directories(output_dir);
+	auto py_path = output_dir / "py_module.cpp";
+	std::ofstream out(py_path);
+	if (!out) {
+		return;
+	}
+
+	emitModulePreamble(out, module_name_);
+	out << "\n";
+	emitModuleBody(out, endpoints);
+	out << "\n";
 }
 
 ClientParam PythonGenerator::resolveAndMapParameter(const openapi::v3::Parameter& raw_param,
@@ -69,10 +84,10 @@ std::string PythonGenerator::schemaToCppType(const openapi::v3::JsonSchema& sche
 	return "std::string";
 }
 
-std::vector<PyEndpoint> PythonGenerator::parseEndpoints() {
+std::vector<PyEndpoint> PythonGenerator::parseEndpoints(const openapi::v3::OpenAPIv3& spec) {
 	std::vector<PyEndpoint> endpoints;
-	const auto& paths = spec_.paths();
-	const auto& comp_params_raw = spec_.components().parameters();
+	const auto& paths = spec.paths();
+	const auto& comp_params_raw = spec.components().parameters();
 
 	// Pre-fetch components/parameters to avoid simdjson on-demand re-iteration
 	std::unordered_map<std::string, ClientParam> fetched_params;
@@ -420,13 +435,6 @@ void PythonGenerator::emitModuleBody(std::ostream& out, const std::vector<PyEndp
 
 	out << "\n";
 	out << "}\n";
-}
-
-void PythonGenerator::generatePythonModule(std::ostream& out, const std::string& module_name) {
-	emitModulePreamble(out, module_name);
-	out << "\n";
-	emitModuleBody(out, endpoints_);
-	out << "\n";
 }
 
 } // namespace codegen

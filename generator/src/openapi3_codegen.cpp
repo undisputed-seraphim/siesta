@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "openapi3_codegen.hpp"
+#include "codegen_base.hpp"
 #include "codegen_client.hpp"
 #include "codegen_defs.hpp"
 #include "codegen_python.hpp"
@@ -177,58 +178,24 @@ bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path
 
 	std::cout << "Phase 4: Generating C++ code...\n";
 
-	// Create output directory
-	fs::create_directories(output_path);
-
-	// Generate openapi_defs.hpp and openapi_defs.cpp
-	::codegen::DefsGenerator gen(order, ast);
+	::codegen::CodegenArgs args{ast, order, &spec};
 
 	{
-		fs::path defs_hpp = output_path / "openapi_defs.hpp";
-		std::ofstream out(defs_hpp);
-		if (!out) {
-			std::cerr << "Failed to open " << defs_hpp << "\n";
-			return false;
-		}
-		std::cout << "  Generating " << defs_hpp << "\n";
-		gen.generateDefsHpp(out);
+		::codegen::DefsGenerator gen;
+		std::cout << "  Generating openapi_defs.hpp/cpp\n";
+		gen(args, output_path);
 	}
 
 	{
-		fs::path defs_cpp = output_path / "openapi_defs.cpp";
-		std::ofstream out(defs_cpp);
-		if (!out) {
-			std::cerr << "Failed to open " << defs_cpp << "\n";
-			return false;
-		}
-		std::cout << "  Generating " << defs_cpp << "\n";
-		gen.generateDefsCpp(out);
+		::codegen::ClientGenerator gen;
+		std::cout << "  Generating client.hpp\n";
+		gen(args, output_path);
 	}
 
-	// Generate client.hpp
-	::codegen::ClientGenerator client_gen(ast, spec);
 	{
-		fs::path client_hpp = output_path / "client.hpp";
-		std::ofstream out(client_hpp);
-		if (!out) {
-			std::cerr << "Failed to open " << client_hpp << "\n";
-			return false;
-		}
-		std::cout << "  Generating " << client_hpp << "\n";
-		client_gen.generateClientHpp(out);
-	}
-
-	// Generate Python module source (codegen_python target)
-	::codegen::PythonGenerator python_gen(ast, spec);
-	{
-		fs::path py_module = output_path / "py_module.cpp";
-		std::ofstream out(py_module);
-		if (!out) {
-			std::cerr << "Failed to open " << py_module << "\n";
-			return false;
-		}
-		std::cout << "  Generating " << py_module << "\n";
-		python_gen.generatePythonModule(out, "siesta_bindings");
+		::codegen::PythonGenerator gen("siesta_bindings");
+		std::cout << "  Generating py_module.cpp\n";
+		gen(args, output_path);
 	}
 
 	std::cout << "Code generation complete!\n";
