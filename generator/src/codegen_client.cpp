@@ -365,30 +365,55 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep
 				out << "\t\t}\n";
 			}
 		}
-		out << "\t\tstd::string query_params;\n";
+		// Sep required from optional query params
+		// Required go directly into target_path; optional go into query_params
+		std::vector<const ClientParam*> required_query;
+		std::vector<const ClientParam*> optional_query;
 		for (const auto* p : query_params) {
+			if (p->required) {
+				required_query.push_back(p);
+			} else {
+				optional_query.push_back(p);
+			}
+		}
+
+		// Emit required query params directly into target_path
+		if (!required_query.empty() || !optional_query.empty()) {
+			out << "\t\tbool target_has_query = false;\n";
+		}
+		for (const auto* p : required_query) {
 			bool is_vector = p->cpp_type.find("vector") != std::string::npos;
 			bool is_string = p->cpp_type.find("string") != std::string::npos;
-			bool is_vector_string = is_vector && is_string;
-			if (p->required) {
-				if (is_vector_string) {
+			if (is_vector) {
+				if (is_string) {
 					out << "\t\tfor (size_t _i = 0; _i < (" << p->name << ").size(); ++_i) {\n";
-					out << "\t\t\tif (_i > 0) query_params += \"&\";\n";
-					out << "\t\t\tquery_params += \"" << p->name << "=\" + (" << p->name << ")[_i];\n";
+					out << "\t\t\tif (_i > 0 || target_has_query) target_path += \"&\";\n";
+					out << "\t\t\telse target_path += \"?\"; target_has_query = true;\n";
+					out << "\t\t\ttarget_path += \"" << p->name << "=\" + (" << p->name << ")[_i];\n";
 					out << "\t\t}\n";
-				} else if (is_vector) {
-					out << "\t\tfor (size_t _i = 0; _i < (" << p->name << ").size(); ++_i) {\n";
-					out << "\t\t\tif (_i > 0) query_params += \"&\";\n";
-					out << "\t\t\tquery_params += \"" << p->name << "=\" + query_value((" << p->name << ")[_i]);\n";
-					out << "\t\t}\n";
-				} else if (is_string) {
-					out << "\t\tif (!query_params.empty()) query_params += \"&\";\n";
-					out << "\t\tquery_params += \"" << p->name << "=\" + (" << p->name << ");\n";
 				} else {
-					out << "\t\tif (!query_params.empty()) query_params += \"&\";\n";
-					out << "\t\tquery_params += \"" << p->name << "=\" + query_value(" << p->name << ");\n";
+					out << "\t\tfor (size_t _i = 0; _i < (" << p->name << ").size(); ++_i) {\n";
+					out << "\t\t\tif (_i > 0 || target_has_query) target_path += \"&\";\n";
+					out << "\t\t\telse target_path += \"?\"; target_has_query = true;\n";
+					out << "\t\t\ttarget_path += \"" << p->name << "=\" + query_value((" << p->name << ")[_i]);\n";
+					out << "\t\t}\n";
 				}
+			} else if (is_string) {
+				out << "\t\tif (target_has_query) target_path += \"&\"; else target_path += \"?\"; target_has_query = true;\n";
+				out << "\t\ttarget_path += \"" << p->name << "=\" + (" << p->name << ");\n";
 			} else {
+				out << "\t\tif (target_has_query) target_path += \"&\"; else target_path += \"?\"; target_has_query = true;\n";
+				out << "\t\ttarget_path += \"" << p->name << "=\" + query_value(" << p->name << ");\n";
+			}
+		}
+
+		// Emit optional query params via query_params string
+		if (!optional_query.empty()) {
+			out << "\t\tstd::string query_params;\n";
+			for (const auto* p : optional_query) {
+				bool is_vector = p->cpp_type.find("vector") != std::string::npos;
+				bool is_string = p->cpp_type.find("string") != std::string::npos;
+				bool is_vector_string = is_vector && is_string;
 				out << "\t\tif (" << p->name << ".has_value()) {\n";
 				if (is_vector_string) {
 					out << "\t\t\tfor (size_t _i = 0; _i < (*(" << p->name << ")).size(); ++_i) {\n";
@@ -410,8 +435,11 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep
 				}
 				out << "\t\t}\n";
 			}
+			out << "\t\tif (!query_params.empty()) {\n";
+			out << "\t\t\tif (target_has_query) target_path += \"&\" + query_params;\n";
+			out << "\t\t\telse target_path += \"?\" + query_params;\n";
+			out << "\t\t}\n";
 		}
-		out << "\t\tif (!query_params.empty()) target_path += \"?\" + query_params;\n";
 		out << "\t\treq.target(target_path);\n";
 	} else {
 		out << "\t\treq.target(path);\n";
