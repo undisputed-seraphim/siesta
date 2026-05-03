@@ -19,16 +19,13 @@ namespace fs = std::filesystem;
 namespace openapi::v3::codegen {
 
 /**
- * Build normalized AST from OpenAPI v3 spec
+ * Parse components/schemas into the AST, counting each type.
  */
-static schema::NormalizedAST buildAST(const openapi::v3::OpenAPIv3& spec) {
-	schema::NormalizedAST ast;
+static void parseSchemas(const openapi::v3::OpenAPIv3& spec, schema::NormalizedAST& ast) {
 	std::unordered_set<std::string> added_types;
 
-	// Count schemas by type for summary
 	int struct_count = 0, variant_count = 0, array_count = 0, map_count = 0, enum_count = 0, prim_count = 0;
 
-	// Process components/schemas
 	for (const auto& [name_sv, schema_obj] : spec.components().schemas()) {
 		std::string name(name_sv);
 		std::string safe_name = sanitize(std::string_view(name));
@@ -63,11 +60,13 @@ static schema::NormalizedAST buildAST(const openapi::v3::OpenAPIv3& spec) {
 	std::cout << "  AST summary: " << ast.getTypes().size() << " types (" << struct_count << " structs, "
 			  << variant_count << " variants, " << array_count << " arrays, " << map_count << " maps, " << enum_count
 			  << " enums, " << prim_count << " primitives)\n";
+}
 
-	// Process paths/operations
+/**
+ * Collect path/operation metadata into the AST.
+ */
+static int parsePaths(const openapi::v3::OpenAPIv3& spec, schema::NormalizedAST& ast) {
 	int endpoint_count = 0;
-	const auto& components = spec.components();
-	const auto& comp_params = components.parameters();
 
 	for (const auto& [path_sv, path_obj] : spec.paths()) {
 		std::string path(path_sv);
@@ -94,14 +93,24 @@ static schema::NormalizedAST buildAST(const openapi::v3::OpenAPIv3& spec) {
 				path_item.description = "";
 			}
 
-			// Collect parameters (skip for now - complex ref resolution)
-			// TODO: Implement proper parameter resolution
-
 			ast.addPath(path, std::move(path_item));
 			endpoint_count++;
 		}
 	}
 
+	return endpoint_count;
+}
+
+/**
+ * Build normalized AST from OpenAPI v3 spec
+ */
+static schema::NormalizedAST buildAST(const openapi::v3::OpenAPIv3& spec) {
+	schema::NormalizedAST ast;
+
+	std::cout << "Phase 1: Building normalized AST...\n";
+	parseSchemas(spec, ast);
+
+	auto endpoint_count = parsePaths(spec, ast);
 	std::cout << "  Path endpoints: " << endpoint_count << "\n";
 
 	return ast;
@@ -123,7 +132,6 @@ bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path
 
 	const auto& spec = static_cast<const openapi::v3::OpenAPIv3&>(file);
 
-	std::cout << "Phase 1: Building normalized AST...\n";
 	auto ast = buildAST(spec);
 
 	// Validate AST
