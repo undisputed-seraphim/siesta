@@ -106,6 +106,23 @@ std::vector<PyEndpoint> PythonGenerator::parseEndpoints(const openapi::v3::OpenA
 		fetched_params[std::string(n)] = std::move(cp);
 	}
 
+	// Pre-fetch components/requestBodies
+	const auto& comp_bodies_raw = spec.components().requestBodies();
+	std::unordered_map<std::string, std::string> body_schema_names;
+	for (const auto& [n, b_obj] : comp_bodies_raw) {
+		auto content = b_obj.content();
+		for (const auto& [ct, mt] : content) {
+			(void)ct;
+			auto schema = mt.schema();
+			if (schema.IsRef()) {
+				body_schema_names[std::string(n)] = resolveRefName(schema.ref());
+			} else {
+				body_schema_names[std::string(n)] = schemaToCppType(schema);
+			}
+			break;
+		}
+	}
+
 	// Collect path-level parameters into a map by name
 	std::unordered_map<std::string, ClientParam> path_params_map;
 	for (const auto& [path_sv, path_obj] : paths) {
@@ -192,6 +209,35 @@ std::vector<PyEndpoint> PythonGenerator::parseEndpoints(const openapi::v3::OpenA
 				p.name = sanitizeParamName(p.name);
 			}
 			ep.params = std::move(ordered_params);
+
+			// Extract request body info
+			auto req_body = op_obj.requestBody();
+			if (req_body) {
+				auto ref_opt = req_body.TryGetRef();
+				if (ref_opt.has_value()) {
+					std::string body_name = refComponentName(ref_opt.value());
+					auto it = body_schema_names.find(body_name);
+					if (it != body_schema_names.end()) {
+						ep.body_type = it->second;
+						ep.has_request_body = true;
+					}
+				} else {
+					auto content = req_body.content();
+					for (const auto& [ct, mt] : content) {
+						ep.body_content_type = std::string(ct);
+						auto schema = mt.schema();
+						if (schema) {
+							ep.body_type = schemaToCppType(schema);
+						}
+						if (ep.body_type.empty()) {
+							ep.body_type = "std::string";
+						}
+						ep.has_request_body = true;
+						break;
+					}
+				}
+			}
+
 			endpoints.push_back(std::move(ep));
 		}
 	}
@@ -292,11 +338,13 @@ void PythonGenerator::emitModulePreamble(std::ostream& out, const std::string& m
 }
 
 void PythonGenerator::emitEndpointWrapper(std::ostream& out, const PyEndpoint& ep, bool is_last) {
-	// Emit method signature with parameters
 	out << "\t\t.def(\"" << ep.function_name << "\",\n";
 	out << "\t\t\t[](ClientWrapper& self";
 
-	// Emit parameters
+	if (ep.has_request_body) {
+		out << ", const " << ep.body_type << "& body";
+	}
+
 	for (size_t i = 0; i < ep.params.size(); ++i) {
 		out << ", ";
 		const auto& param = ep.params[i];
@@ -317,12 +365,21 @@ void PythonGenerator::emitEndpointWrapper(std::ostream& out, const PyEndpoint& e
 
 	// Generate the actual method call with use_future as last argument
 	out << "\t\t\tauto future = self.client." << ep.function_name << "(";
-	for (size_t i = 0; i < ep.params.size(); ++i) {
-		if (i > 0)
-			out << ", ";
-		out << ep.params[i].name;
+
+	bool has_previous = false;
+	if (ep.has_request_body) {
+		out << "body";
+		has_previous = true;
 	}
-	if (!ep.params.empty()) {
+	for (size_t i = 0; i < ep.params.size(); ++i) {
+		if (has_previous) {
+			out << ", ";
+		}
+		out << ep.params[i].name;
+		has_previous = true;
+	}
+
+	if (has_previous) {
 		out << ", ";
 	}
 	out << "boost::asio::use_future);\n";
@@ -345,7 +402,7 @@ void PythonGenerator::emitEndpointWrapper(std::ostream& out, const PyEndpoint& e
 
 	// Close lambda and .def() call
 	std::string doc = ep.description.empty() ? ep.summary : ep.description;
-	bool has_trailing = !ep.params.empty() || !doc.empty();
+	bool has_trailing = ep.has_request_body || !ep.params.empty() || !doc.empty();
 
 	if (has_trailing) {
 		out << "\t\t},\n";
@@ -356,12 +413,18 @@ void PythonGenerator::emitEndpointWrapper(std::ostream& out, const PyEndpoint& e
 	}
 
 	// Emit parameter names for documentation
-	if (!ep.params.empty()) {
+	if (ep.has_request_body || !ep.params.empty()) {
 		out << "\t\t";
+		bool first = true;
+		if (ep.has_request_body) {
+			out << "nb::arg(\"body\")";
+			first = false;
+		}
 		for (size_t i = 0; i < ep.params.size(); ++i) {
-			if (i > 0)
+			if (!first)
 				out << ", ";
 			out << "nb::arg(\"" << ep.params[i].name << "\")";
+			first = false;
 		}
 		out << ",\n";
 	}

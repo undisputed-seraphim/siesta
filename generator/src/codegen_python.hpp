@@ -24,6 +24,9 @@ struct PyEndpoint {
 	std::string summary;
 	std::string description;
 	std::vector<ClientParam> params;
+	bool has_request_body = false;
+	std::string body_type;
+	std::string body_content_type;
 };
 
 class PythonGenerator : public ICodeGenerator {

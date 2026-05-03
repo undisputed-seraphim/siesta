@@ -244,7 +244,7 @@ std::vector<ClientEndpoint> ClientGenerator::parseEndpoints(const openapi::v3::O
 				}
 			}
 
-			// Build path template
+			// Build path template with path parameter placeholders
 			std::string template_str = path;
 			bool has_path_placeholders = path.find('{') != std::string_view::npos;
 
@@ -258,24 +258,6 @@ std::vector<ClientEndpoint> ClientGenerator::parseEndpoints(const openapi::v3::O
 							pos = template_str.find(placeholder, pos + 2);
 						}
 					}
-				}
-			}
-
-			// Append query parameters
-			std::vector<const ClientParam*> query_params;
-			for (const auto& p : ep.params) {
-				if (p.location == "query") {
-					query_params.push_back(&p);
-				}
-			}
-
-			if (!query_params.empty()) {
-				template_str += '?';
-				for (size_t i = 0; i < query_params.size(); ++i) {
-					if (i > 0) {
-						template_str += '&';
-					}
-					template_str += query_params[i]->name + "={}";
 				}
 			}
 
@@ -314,8 +296,15 @@ void ClientGenerator::emitEndpoint(std::ostream& out, const ClientEndpoint& ep) 
 void ClientGenerator::emitMethodSignature(std::ostream& out, const ClientEndpoint& ep) {
 	out << "\tauto " << ep.function_name << "(";
 
+	bool has_previous = false;
+
+	if (ep.has_request_body) {
+		out << "const " << ep.body_type << "& body";
+		has_previous = true;
+	}
+
 	for (size_t i = 0; i < ep.params.size(); ++i) {
-		if (i > 0) {
+		if (has_previous) {
 			out << ", ";
 		}
 		const auto& p = ep.params[i];
@@ -325,9 +314,10 @@ void ClientGenerator::emitMethodSignature(std::ostream& out, const ClientEndpoin
 			out << p.cpp_type << " ";
 		}
 		out << p.name;
+		has_previous = true;
 	}
 
-	if (!ep.params.empty()) {
+	if (has_previous) {
 		out << ", ";
 	}
 	out << "::boost::asio::completion_token_for<void(outcome_type)> auto&& token";
@@ -338,7 +328,6 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep
 	out << "\t\tconstexpr std::string_view path = \"" << escapeCppString(ep.path_template) << "\";\n";
 	out << "\t\trequest_type req;\n";
 
-	// Build format args list
 	std::vector<const ClientParam*> path_params;
 	std::vector<const ClientParam*> query_params;
 
@@ -422,8 +411,16 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep
 				out << "\t\t}\n";
 			}
 		}
+		out << "\t\tif (!query_params.empty()) target_path += \"?\" + query_params;\n";
+		out << "\t\treq.target(target_path);\n";
 	} else {
 		out << "\t\treq.target(path);\n";
+	}
+
+	// Request body
+	if (ep.has_request_body) {
+		out << "\t\treq.body() = boost::json::serialize(boost::json::value_from(body));\n";
+		out << "\t\treq.set(::boost::beast::http::field::content_type, \"" << ep.body_content_type << "\");\n";
 	}
 
 	std::string verb = ep.method == "delete" ? "delete_" : ep.method;
@@ -432,7 +429,11 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep
 	// Header parameters
 	for (const auto& p : ep.params) {
 		if (p.location == "header") {
-			out << "\t\treq.set(\"" << p.name << "\", " << p.name << ");\n";
+			if (p.required) {
+				out << "\t\treq.set(\"" << p.name << "\", " << p.name << ");\n";
+			} else {
+				out << "\t\tif (" << p.name << ".has_value()) req.set(\"" << p.name << "\", *(" << p.name << "));\n";
+			}
 		}
 	}
 
