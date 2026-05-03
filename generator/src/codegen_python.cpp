@@ -42,6 +42,7 @@ ClientParam PythonGenerator::resolveAndMapParameter(const openapi::v3::Parameter
 	}
 
 	p.name = std::string(raw_param.name());
+	p.wire_name = p.name;
 	p.location = std::string(raw_param.in());
 	p.required = raw_param.required();
 	p.description = std::string(raw_param.description());
@@ -94,6 +95,7 @@ std::vector<PyEndpoint> PythonGenerator::parseEndpoints(const openapi::v3::OpenA
 	for (const auto& [n, p_obj] : comp_params_raw) {
 		ClientParam cp;
 		cp.name = std::string(p_obj.name());
+		cp.wire_name = cp.name;
 		cp.location = std::string(p_obj.in());
 		cp.required = p_obj.required();
 		cp.description = std::string(p_obj.description());
@@ -479,7 +481,7 @@ void PythonGenerator::emitModuleBody(std::ostream& out, const std::vector<PyEndp
 	out << "\n";
 
 	// Client class definition
-	out << "NB_MODULE(siesta_bindings, m) {\n";
+	out << "NB_MODULE(" << module_name_ << ", m) {\n";
 	out << "\tm.doc() = \"Siesta-generated Python bindings for OpenAPI client\";\n";
 	out << "\n";
 	out << "\t// Client class wrapping the C++ siesta client\n";

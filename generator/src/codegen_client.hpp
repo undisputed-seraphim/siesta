@@ -19,6 +19,7 @@ namespace codegen {
 
 struct ClientParam {
 	std::string name;
+	std::string wire_name;
 	std::string cpp_type;
 	bool required = false;
 	std::string description;

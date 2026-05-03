@@ -39,6 +39,7 @@ ClientParam ClientGenerator::resolveAndMapParameter(const openapi::v3::Parameter
 
 	// Inline parameter or ref resolution failed - use typed methods
 	p.name = std::string(raw_param.name());
+	p.wire_name = p.name;
 	p.location = std::string(raw_param.in());
 	p.required = raw_param.required();
 	p.description = std::string(raw_param.description());
@@ -97,6 +98,7 @@ std::vector<ClientEndpoint> ClientGenerator::parseEndpoints(const openapi::v3::O
 	for (const auto& [n, p_obj] : comp_params_raw) {
 		ClientParam cp;
 		cp.name = std::string(p_obj.name());
+		cp.wire_name = cp.name;
 		cp.location = std::string(p_obj.in());
 		cp.required = p_obj.required();
 		cp.description = std::string(p_obj.description());
@@ -389,21 +391,21 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep
 					out << "\t\tfor (size_t _i = 0; _i < (" << p->name << ").size(); ++_i) {\n";
 					out << "\t\t\tif (_i > 0 || target_has_query) target_path += \"&\";\n";
 					out << "\t\t\telse target_path += \"?\"; target_has_query = true;\n";
-					out << "\t\t\ttarget_path += \"" << p->name << "=\" + (" << p->name << ")[_i];\n";
+					out << "\t\t\ttarget_path += \"" << p->wire_name << "=\" + (" << p->name << ")[_i];\n";
 					out << "\t\t}\n";
 				} else {
 					out << "\t\tfor (size_t _i = 0; _i < (" << p->name << ").size(); ++_i) {\n";
 					out << "\t\t\tif (_i > 0 || target_has_query) target_path += \"&\";\n";
 					out << "\t\t\telse target_path += \"?\"; target_has_query = true;\n";
-					out << "\t\t\ttarget_path += \"" << p->name << "=\" + query_value((" << p->name << ")[_i]);\n";
+					out << "\t\t\ttarget_path += \"" << p->wire_name << "=\" + query_value((" << p->name << ")[_i]);\n";
 					out << "\t\t}\n";
 				}
 			} else if (is_string) {
 				out << "\t\tif (target_has_query) target_path += \"&\"; else target_path += \"?\"; target_has_query = true;\n";
-				out << "\t\ttarget_path += \"" << p->name << "=\" + (" << p->name << ");\n";
+				out << "\t\ttarget_path += \"" << p->wire_name << "=\" + (" << p->name << ");\n";
 			} else {
 				out << "\t\tif (target_has_query) target_path += \"&\"; else target_path += \"?\"; target_has_query = true;\n";
-				out << "\t\ttarget_path += \"" << p->name << "=\" + query_value(" << p->name << ");\n";
+				out << "\t\ttarget_path += \"" << p->wire_name << "=\" + query_value(" << p->name << ");\n";
 			}
 		}
 
@@ -418,20 +420,20 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep
 				if (is_vector_string) {
 					out << "\t\t\tfor (size_t _i = 0; _i < (*(" << p->name << ")).size(); ++_i) {\n";
 					out << "\t\t\t\tif (_i > 0) query_params += \"&\";\n";
-					out << "\t\t\t\tquery_params += \"" << p->name << "=\" + (*(" << p->name << "))[_i];\n";
+					out << "\t\t\t\tquery_params += \"" << p->wire_name << "=\" + (*(" << p->name << "))[_i];\n";
 					out << "\t\t\t}\n";
 				} else if (is_vector) {
 					out << "\t\t\tfor (size_t _i = 0; _i < (*(" << p->name << ")).size(); ++_i) {\n";
 					out << "\t\t\t\tif (_i > 0) query_params += \"&\";\n";
-					out << "\t\t\t\tquery_params += \"" << p->name << "=\" + query_value((*(" << p->name
+					out << "\t\t\t\tquery_params += \"" << p->wire_name << "=\" + query_value((*(" << p->name
 						<< "))[_i]);\n";
 					out << "\t\t\t}\n";
 				} else if (is_string) {
 					out << "\t\t\tif (!query_params.empty()) query_params += \"&\";\n";
-					out << "\t\t\tquery_params += \"" << p->name << "=\" + (*(" << p->name << "));\n";
+					out << "\t\t\tquery_params += \"" << p->wire_name << "=\" + (*(" << p->name << "));\n";
 				} else {
 					out << "\t\t\tif (!query_params.empty()) query_params += \"&\";\n";
-					out << "\t\t\tquery_params += \"" << p->name << "=\" + query_value(*(" << p->name << "));\n";
+					out << "\t\t\tquery_params += \"" << p->wire_name << "=\" + query_value(*(" << p->name << "));\n";
 				}
 				out << "\t\t}\n";
 			}
@@ -449,6 +451,7 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep
 	if (ep.has_request_body) {
 		out << "\t\treq.body() = boost::json::serialize(boost::json::value_from(body));\n";
 		out << "\t\treq.set(::boost::beast::http::field::content_type, \"" << ep.body_content_type << "\");\n";
+		out << "\t\treq.prepare_payload();\n";
 	}
 
 	std::string verb = ep.method == "delete" ? "delete_" : ep.method;
@@ -458,9 +461,9 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep
 	for (const auto& p : ep.params) {
 		if (p.location == "header") {
 			if (p.required) {
-				out << "\t\treq.set(\"" << p.name << "\", " << p.name << ");\n";
+				out << "\t\treq.set(\"" << p.wire_name << "\", " << p.name << ");\n";
 			} else {
-				out << "\t\tif (" << p.name << ".has_value()) req.set(\"" << p.name << "\", *(" << p.name << "));\n";
+				out << "\t\tif (" << p.name << ".has_value()) req.set(\"" << p.wire_name << "\", *(" << p.name << "));\n";
 			}
 		}
 	}
