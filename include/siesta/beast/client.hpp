@@ -14,7 +14,6 @@
 #include <functional>
 #include <memory>
 
-#include <siesta/asio/queue.hpp>
 #include <siesta/beast/error.hpp>
 #include <siesta/format.hpp>
 

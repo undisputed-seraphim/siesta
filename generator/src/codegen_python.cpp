@@ -131,7 +131,7 @@ std::vector<PyEndpoint> PythonGenerator::parseEndpoints() {
 
 			ep.function_name = generateFunctionName(method, path);
 
-			std::unordered_map<std::string, ClientParam> merged_params = path_params_map;
+			std::unordered_map<std::string, ClientParam> op_overrides;
 			std::vector<std::string> param_order;
 			for (const auto& [name, _] : path_params_map) {
 				param_order.push_back(name);
@@ -140,27 +140,33 @@ std::vector<PyEndpoint> PythonGenerator::parseEndpoints() {
 			auto op_params_list = op_obj.parameters();
 			for (const auto& param : op_params_list) {
 				ClientParam cp = resolveAndMapParameter(param, fetched_params);
-				if (merged_params.find(cp.name) == merged_params.end()) {
+				auto it = path_params_map.find(cp.name);
+				if (it == path_params_map.end() && op_overrides.find(cp.name) == op_overrides.end()) {
 					param_order.push_back(cp.name);
 				}
-				merged_params[cp.name] = cp;
+				op_overrides[cp.name] = cp;
 			}
 
+			auto lookup = [&](const std::string& name) -> const ClientParam& {
+				auto oit = op_overrides.find(name);
+				if (oit != op_overrides.end()) return oit->second;
+				return path_params_map.at(name);
+			};
 			std::vector<ClientParam> ordered_params;
 			for (const auto& name : param_order) {
-				const auto& cp = merged_params[name];
+				const auto& cp = lookup(name);
 				if (cp.location == "path") {
 					ordered_params.push_back(cp);
 				}
 			}
 			for (const auto& name : param_order) {
-				const auto& cp = merged_params[name];
+				const auto& cp = lookup(name);
 				if (cp.location == "query") {
 					ordered_params.push_back(cp);
 				}
 			}
 			for (const auto& name : param_order) {
-				const auto& cp = merged_params[name];
+				const auto& cp = lookup(name);
 				if (cp.location == "header") {
 					ordered_params.push_back(cp);
 				}

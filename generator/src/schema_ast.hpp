@@ -162,7 +162,7 @@ public:
 	/**
 	 * Get type by name (returns nullptr if not found)
 	 */
-	const SchemaType* getType(const std::string& name) const {
+	const SchemaType* getType(const std::string& name) const noexcept {
 		auto it = types_.find(name);
 		return (it != types_.end()) ? &it->second : nullptr;
 	}
@@ -207,57 +207,10 @@ public:
 	 * Validate the AST for common schema errors
 	 * Returns list of error messages (empty if valid)
 	 */
-	std::vector<std::string> validate() const {
-		std::vector<std::string> errors;
-
-		// Check for duplicate type names (already handled by map, but log duplicates)
-		// Check for missing type references
-		for (const auto& [name, type] : types_) {
-			validateType(type, name, errors);
-		}
-
-		return errors;
-	}
+	std::vector<std::string> validate() const;
 
 private:
-	void validateType(const SchemaType& type, const std::string& context, std::vector<std::string>& errors) const {
-		// Visit each type and check references
-		std::visit(
-			[&](const auto& t) {
-				using T = std::decay_t<decltype(t)>;
-
-				if constexpr (std::is_same_v<T, StructType>) {
-					for (const auto& field : t.fields) {
-						// Check if field type exists (skip inline types)
-						if (!field.type.is_inline && !hasType(field.type.name)) {
-							errors.push_back(
-								context + ": field '" + field.name + "' references unknown type '" + field.type.name +
-								"'");
-						}
-					}
-					for (const auto& base : t.allOf_bases) {
-						if (!hasType(base.name)) {
-							errors.push_back(context + ": base type '" + base.name + "' not found");
-						}
-					}
-				} else if constexpr (std::is_same_v<T, VariantType>) {
-					for (const auto& alt : t.alternatives) {
-						if (!alt.is_inline && !hasType(alt.name)) {
-							errors.push_back(context + ": variant alternative '" + alt.name + "' not found");
-						}
-					}
-				} else if constexpr (std::is_same_v<T, ArrayType>) {
-					if (!t.element_type.is_inline && !hasType(t.element_type.name)) {
-						errors.push_back(context + ": array element type '" + t.element_type.name + "' not found");
-					}
-				} else if constexpr (std::is_same_v<T, MapType>) {
-					if (!t.value_type.is_inline && !hasType(t.value_type.name)) {
-						errors.push_back(context + ": map value type '" + t.value_type.name + "' not found");
-					}
-				}
-			},
-			type);
-	}
+	void validateType(const SchemaType& type, const std::string& context, std::vector<std::string>& errors) const;
 
 	TypeMap types_;
 	PathMap paths_;
