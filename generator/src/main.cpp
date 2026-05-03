@@ -44,7 +44,7 @@ int main(int argc, char* argv[]) try {
 		throw std::runtime_error("File at " + input_json.string() + " does not exist.");
 	} else {
 		input_json = fs::absolute(input_json);
-		std::cout << "Reading from " << input_json.string() << std::endl;
+		std::cout << "Reading from " << input_json.string() << '\n';
 	}
 	output_dir = fs::absolute(output_dir);
 	if (!fs::exists(output_dir)) {
@@ -53,7 +53,7 @@ int main(int argc, char* argv[]) try {
 	if (!fs::is_directory(output_dir)) {
 		throw std::runtime_error("Output path " + output_dir.string() + " is not a directory.");
 	} else {
-		std::cout << "Writing to " << output_dir.string() << std::endl;
+		std::cout << "Writing to " << output_dir.string() << '\n';
 	}
 
 	if (!openapi::v3::codegen::generateFromOpenAPI(input_json, output_dir)) {

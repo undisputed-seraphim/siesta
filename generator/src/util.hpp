@@ -36,10 +36,17 @@ void write_multiline_comment(std::ostream& out, std::string_view comment, std::s
 std::string escapeCppString(const std::string& s);
 
 // Check if a type name is a synthetic C++ type (not a real AST type)
-bool isSyntheticCppType(const std::string& name);
+inline constexpr bool isSyntheticCppType(const std::string& name) {
+	return name.rfind("std::", 0) == 0 || name == "int" || name == "long" || name == "short" || name == "unsigned" ||
+		   name == "signed" || name == "char" || name == "wchar_t" || name == "bool" || name == "float" ||
+		   name == "double" || name == "void";
+}
 
 // Get the final component of a path (e.g., "/foo/bar/baz" -> "baz")
-std::string_view component_path(std::string_view path) noexcept;
+inline constexpr std::string_view component_path(std::string_view path) noexcept {
+	size_t pos = path.find_last_of('/');
+	return path.substr(pos + 1);
+}
 
 // ---------------------------------------------------------------------------
 // Logging — all go to stderr, prefixed by phase for easy filtering

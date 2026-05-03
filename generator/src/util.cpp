@@ -192,6 +192,7 @@ void write_multiline_comment(std::ostream& out, std::string_view comment, std::s
 
 std::string escapeCppString(const std::string& s) {
 	std::string result;
+	result.reserve(s.size() * 2);
 	for (char c : s) {
 		switch (c) {
 		case '\\':
@@ -214,17 +215,6 @@ std::string escapeCppString(const std::string& s) {
 		}
 	}
 	return result;
-}
-
-bool isSyntheticCppType(const std::string& name) {
-	return name.rfind("std::", 0) == 0 || name == "int" || name == "long" || name == "short" || name == "unsigned" ||
-		   name == "signed" || name == "char" || name == "wchar_t" || name == "bool" || name == "float" ||
-		   name == "double" || name == "void";
-}
-
-std::string_view component_path(std::string_view path) noexcept {
-	size_t pos = path.find_last_of('/');
-	return path.substr(pos + 1);
 }
 
 } // namespace codegen
