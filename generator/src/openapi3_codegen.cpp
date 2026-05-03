@@ -3,6 +3,8 @@
 #include "codegen_client.hpp"
 #include "codegen_defs.hpp"
 #include "codegen_python.hpp"
+
+using codegen::sanitize;
 #include "dependency_graph.hpp"
 #include "openapi.hpp"
 #include "openapi3.hpp"

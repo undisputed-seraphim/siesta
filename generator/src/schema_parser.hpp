@@ -52,7 +52,7 @@ inline TypeRef SchemaParser::extractTypeRef(const openapi::v3::JsonSchema& schem
 		if (pos != std::string_view::npos) {
 			// Sanitize the extracted type name
 			std::string raw_name(ref.substr(pos + 1));
-			return TypeRef{sanitize(std::string_view(raw_name)), false};
+			return TypeRef{codegen::sanitize(std::string_view(raw_name)), false};
 		}
 	}
 	return TypeRef{};
@@ -129,7 +129,7 @@ static SchemaType parseImplicitObject(
 			const auto* struct_ptr = std::get_if<StructType>(&inline_type);
 			if (struct_ptr) {
 				// Inline struct in allOf - add to AST with mangled name
-				std::string mangled_name = sanitize(struct_ptr->name);
+				std::string mangled_name = codegen::sanitize(struct_ptr->name);
 				struct_type.allOf_bases.push_back(TypeRef{mangled_name, false});
 
 				if (added_types.find(mangled_name) == added_types.end()) {
@@ -146,7 +146,7 @@ static SchemaType parseImplicitObject(
 	auto props = obj.properties();
 	for (const auto& [prop_name, prop_schema] : props) {
 		Member member;
-		member.name = sanitize(std::string(prop_name));
+		member.name = codegen::sanitize(std::string(prop_name));
 		member.description = std::string(prop_schema.description());
 
 		if (prop_schema.IsRef()) {
@@ -159,7 +159,7 @@ static SchemaType parseImplicitObject(
 			if (struct_ptr) {
 				// Inline struct within a parent struct - keep local
 				std::string raw_name = std::string(name) + "_" + std::string(prop_name);
-				std::string mangled_name = sanitize(std::string_view(raw_name));
+				std::string mangled_name = codegen::sanitize(std::string_view(raw_name));
 
 				cpp_type = mangled_name;
 
@@ -224,7 +224,7 @@ static VariantType buildVariant(
 					alt_type_name = "std::vector<" + SchemaParser::cppTypeFromTypeRef(t.element_type) + ">";
 				} else if constexpr (std::is_same_v<T, StructType>) {
 					std::string raw_name = std::string(name) + "_alt_" + std::to_string(variant.alternatives.size());
-					std::string sanitized_name = sanitize(std::string_view(raw_name));
+					std::string sanitized_name = codegen::sanitize(std::string_view(raw_name));
 
 					auto mutable_t = t;
 					mutable_t.name = sanitized_name;
@@ -308,7 +308,7 @@ inline SchemaType SchemaParser::parseSchema(
 		auto props = obj.properties();
 		for (const auto& [prop_name, prop_schema] : props) {
 			Member member;
-			member.name = sanitize(std::string(prop_name));
+			member.name = codegen::sanitize(std::string(prop_name));
 			member.description = std::string(prop_schema.description());
 
 			if (prop_schema.IsRef()) {
@@ -331,7 +331,7 @@ inline SchemaType SchemaParser::parseSchema(
 						} else if constexpr (std::is_same_v<T, StructType>) {
 							// Inline struct within a parent struct - keep local
 							std::string raw_name = std::string(name) + "_" + std::string(prop_name);
-							std::string mangled_name = sanitize(std::string_view(raw_name));
+							std::string mangled_name = codegen::sanitize(std::string_view(raw_name));
 
 							// Set the struct's name before adding to AST
 							auto mutable_t = t;
@@ -386,7 +386,7 @@ inline SchemaType SchemaParser::parseSchema(
 						elem_cpp_type = codegen::primitiveToCpp(t.kind, t.int_format, t.num_format);
 					} else if constexpr (std::is_same_v<T, StructType>) {
 						// Sanitize name: replace invalid characters with underscores
-						std::string sanitized_name = sanitize(std::string_view(elem_name));
+						std::string sanitized_name = codegen::sanitize(std::string_view(elem_name));
 
 						// Set the struct's name before adding to AST
 						auto mutable_t = t;
