@@ -8,8 +8,6 @@
 #include <vector>
 #include <optional>
 
-using namespace std::literals;
-
 namespace siesta {
 
 template <typename MappedType, typename CharT, typename Alloc = std::allocator<CharT>>

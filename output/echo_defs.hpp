@@ -6,8 +6,6 @@
 #include <vector>
 #include <boost/json.hpp>
 
-using namespace std::literals;
-
 namespace swagger {
 
 struct EchoResponse {
