@@ -3,14 +3,24 @@
 #include "endpoint_util.hpp"
 #include "openapi.hpp"
 #include "openapi3.hpp"
+#include <fstream>
 #include <unordered_set>
 
 namespace codegen {
 
-ClientGenerator::ClientGenerator(const schema::NormalizedAST& ast, const openapi::v3::OpenAPIv3& spec)
-	: ast_(ast)
-	, spec_(spec) {
-	endpoints_ = parseEndpoints();
+void ClientGenerator::operator()(const CodegenArgs& args, const std::filesystem::path& output_dir) {
+	if (!args.spec) {
+		return;
+	}
+
+	auto endpoints = parseEndpoints(*args.spec);
+
+	std::filesystem::create_directories(output_dir);
+	auto client_path = output_dir / "client.hpp";
+	std::ofstream out(client_path);
+	if (out) {
+		generateClientHpp(out, endpoints);
+	}
 }
 
 ClientParam ClientGenerator::resolveAndMapParameter(const openapi::v3::Parameter& raw_param,
@@ -77,10 +87,10 @@ std::string ClientGenerator::schemaToCppType(const openapi::v3::JsonSchema& sche
 	return "std::string";
 }
 
-std::vector<ClientEndpoint> ClientGenerator::parseEndpoints() {
+std::vector<ClientEndpoint> ClientGenerator::parseEndpoints(const openapi::v3::OpenAPIv3& spec) {
 	std::vector<ClientEndpoint> endpoints;
-	const auto& paths = spec_.paths();
-	const auto& comp_params_raw = spec_.components().parameters();
+	const auto& paths = spec.paths();
+	const auto& comp_params_raw = spec.components().parameters();
 
 	// Pre-fetch components/parameters to avoid simdjson on-demand re-iteration
 	std::unordered_map<std::string, ClientParam> fetched_params;
@@ -100,7 +110,7 @@ std::vector<ClientEndpoint> ClientGenerator::parseEndpoints() {
 	}
 
 	// Pre-fetch components/requestBodies similarly
-	const auto& comp_bodies_raw = spec_.components().requestBodies();
+	const auto& comp_bodies_raw = spec.components().requestBodies();
 	std::unordered_map<std::string, std::string> body_schema_names;
 	for (const auto& [n, b_obj] : comp_bodies_raw) {
 		auto content = b_obj.content();
@@ -428,7 +438,7 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep
 
 	out << "\t\treturn this->async_submit_request(std::move(req), token);\n";
 }
-void ClientGenerator::generateClientHpp(std::ostream& out) {
+void ClientGenerator::generateClientHpp(std::ostream& out, const std::vector<ClientEndpoint>& endpoints) {
 	out << "#pragma once\n";
 	out << "#include <boost/asio.hpp>\n";
 	out << "#include <boost/asio/ip/tcp.hpp>\n";
@@ -454,7 +464,7 @@ void ClientGenerator::generateClientHpp(std::ostream& out) {
 
 	emitClassHeader(out);
 
-	for (const auto& ep : endpoints_) {
+	for (const auto& ep : endpoints) {
 		emitEndpoint(out, ep);
 	}
 

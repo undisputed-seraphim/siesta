@@ -2,6 +2,7 @@
 #include "codegen_defs.hpp"
 #include "util.hpp"
 #include <algorithm>
+#include <fstream>
 #include <sstream>
 #include <unordered_set>
 
@@ -127,7 +128,32 @@ static std::pair<std::vector<schema::TypeRef>, bool> processVariantAlternatives(
 	return {processed, collapse};
 }
 
-void DefsGenerator::generateDefsHpp(std::ostream& out) {
+void DefsGenerator::operator()(const CodegenArgs& args, const std::filesystem::path& output_dir) {
+	const auto& ast = args.ast;
+	const auto& order = args.order;
+
+	std::filesystem::create_directories(output_dir);
+
+	{
+		auto path = output_dir / "openapi_defs.hpp";
+		std::ofstream out(path);
+		if (out) {
+			generateDefsHpp(out, order, ast);
+		}
+	}
+
+	{
+		auto path = output_dir / "openapi_defs.cpp";
+		std::ofstream out(path);
+		if (out) {
+			generateDefsCpp(out, order, ast);
+		}
+	}
+}
+
+void DefsGenerator::generateDefsHpp(std::ostream& out,
+                                     const analysis::TopologicalOrder& order,
+                                     const schema::NormalizedAST& ast) {
 	// Header guard
 	out << "#pragma once\n\n";
 
@@ -145,8 +171,8 @@ void DefsGenerator::generateDefsHpp(std::ostream& out) {
 
 	// Forward declarations for all types
 	out << "// Forward declarations\n";
-	for (const auto& name : order_.ordered_types) {
-		const auto* type = ast_.getType(name);
+	for (const auto& name : order.ordered_types) {
+		const auto* type = ast.getType(name);
 		if (type) {
 			std::visit(
 				[&](const auto& t) {
@@ -166,10 +192,10 @@ void DefsGenerator::generateDefsHpp(std::ostream& out) {
 	out << "\n";
 
 	// Full definitions in topological order
-	LOG_EMIT("generateDefsHpp: emitting %zu types from topological order", order_.ordered_types.size());
+	LOG_EMIT("generateDefsHpp: emitting %zu types from topological order", order.ordered_types.size());
 	int emitted_structs = 0, emitted_variants = 0, emitted_enums = 0, emitted_typedefs = 0, emitted_aliases = 0;
-	for (const auto& name : order_.ordered_types) {
-		const auto* type = ast_.getType(name);
+	for (const auto& name : order.ordered_types) {
+		const auto* type = ast.getType(name);
 		if (!type) {
 			continue;
 		}
@@ -182,7 +208,7 @@ void DefsGenerator::generateDefsHpp(std::ostream& out) {
 					emitStruct(out, t);
 					emitted_structs++;
 				} else if constexpr (std::is_same_v<T, schema::VariantType>) {
-					emitVariant(out, t);
+					emitVariant(out, t, ast);
 					emitted_variants++;
 				} else if constexpr (std::is_same_v<T, schema::EnumType>) {
 					emitEnum(out, t);
@@ -219,8 +245,8 @@ void DefsGenerator::generateDefsHpp(std::ostream& out) {
 
 	// Serialization declarations
 	out << "// JSON serialization\n";
-	for (const auto& name : order_.ordered_types) {
-		const auto* type = ast_.getType(name);
+	for (const auto& name : order.ordered_types) {
+		const auto* type = ast.getType(name);
 		if (!type)
 			continue;
 
@@ -252,13 +278,15 @@ void DefsGenerator::generateDefsHpp(std::ostream& out) {
 	out << "\n} // namespace api\n";
 }
 
-void DefsGenerator::generateDefsCpp(std::ostream& out) {
+void DefsGenerator::generateDefsCpp(std::ostream& out,
+                                     const analysis::TopologicalOrder& order,
+                                     const schema::NormalizedAST& ast) {
 	out << "#include \"openapi_defs.hpp\"\n";
 	out << "namespace api {\n\n";
 
 	int cpp_structs = 0, cpp_variants = 0, cpp_enums = 0;
-	for (const auto& name : order_.ordered_types) {
-		const auto* type = ast_.getType(name);
+	for (const auto& name : order.ordered_types) {
+		const auto* type = ast.getType(name);
 		if (!type)
 			continue;
 
@@ -270,7 +298,7 @@ void DefsGenerator::generateDefsCpp(std::ostream& out) {
 					emitStructSerialization(out, t);
 					cpp_structs++;
 				} else if constexpr (std::is_same_v<T, schema::VariantType>) {
-					emitVariantSerialization(out, t);
+					emitVariantSerialization(out, t, ast);
 					cpp_variants++;
 				} else if constexpr (std::is_same_v<T, schema::EnumType>) {
 					emitEnumSerialization(out, t);
@@ -329,7 +357,7 @@ void DefsGenerator::emitStruct(std::ostream& out, const schema::StructType& s) {
 	out << "};\n";
 }
 
-void DefsGenerator::emitVariant(std::ostream& out, const schema::VariantType& v) {
+void DefsGenerator::emitVariant(std::ostream& out, const schema::VariantType& v, const schema::NormalizedAST& ast) {
 	// Documentation
 	if (!v.description.empty()) {
 		out << "/**\n * " << escapeCppString(v.description) << "\n */\n";
@@ -343,10 +371,10 @@ void DefsGenerator::emitVariant(std::ostream& out, const schema::VariantType& v)
 	}
 
 	// Process alternatives: deduplicate and check for collapse
-	auto [processed_alternatives, should_collapse] = processVariantAlternatives(ast_, typedef_chain_, v);
+	auto [processed_alternatives, should_collapse] = processVariantAlternatives(ast, typedef_chain_, v);
 
 	// Check if this is a duplicate variant
-	std::string sig = getVariantSignature(ast_, typedef_chain_, processed_alternatives);
+	std::string sig = getVariantSignature(ast, typedef_chain_, processed_alternatives);
 	auto [it, inserted] = emitted_variant_signatures_.emplace(sig, v.name);
 	if (!inserted) {
 		// Duplicate! Emit as alias and track typedef chain
@@ -550,10 +578,10 @@ void DefsGenerator::emitStructSerialization(std::ostream& out, const schema::Str
 	out << "}\n\n";
 }
 
-void DefsGenerator::emitVariantSerialization(std::ostream& out, const schema::VariantType& v) {
+void DefsGenerator::emitVariantSerialization(std::ostream& out, const schema::VariantType& v, const schema::NormalizedAST& ast) {
 	// Process alternatives to check if this is a duplicate or collapsed variant
-	auto [processed_alternatives, should_collapse] = processVariantAlternatives(ast_, typedef_chain_, v);
-	std::string sig = getVariantSignature(ast_, typedef_chain_, processed_alternatives);
+	auto [processed_alternatives, should_collapse] = processVariantAlternatives(ast, typedef_chain_, v);
+	std::string sig = getVariantSignature(ast, typedef_chain_, processed_alternatives);
 
 	// Check if duplicate (already emitted signature exists)
 	auto it = emitted_variant_signatures_.find(sig);

@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
+#include "codegen_base.hpp"
 #include "dependency_graph.hpp"
 #include "schema_ast.hpp"
 #include "util.hpp"
@@ -9,100 +10,34 @@
 
 namespace codegen {
 
-/**
- * C++ Code Generator for defs.hpp and defs.cpp
- */
-class DefsGenerator {
+class DefsGenerator : public ICodeGenerator {
 public:
-	DefsGenerator(const analysis::TopologicalOrder& order, const schema::NormalizedAST& ast)
-		: order_(order)
-		, ast_(ast) {}
-
-	/**
-	 * Generate defs.hpp content
-	 */
-	void generateDefsHpp(std::ostream& out);
-
-	/**
-	 * Generate defs.cpp content
-	 */
-	void generateDefsCpp(std::ostream& out);
+	void operator()(const CodegenArgs& args, const std::filesystem::path& output_dir) override;
 
 private:
-	/**
-	 * Emit a single struct definition
-	 */
+	void generateDefsHpp(std::ostream& out,
+	                     const analysis::TopologicalOrder& order,
+	                     const schema::NormalizedAST& ast);
+	void generateDefsCpp(std::ostream& out,
+	                     const analysis::TopologicalOrder& order,
+	                     const schema::NormalizedAST& ast);
+
 	void emitStruct(std::ostream& out, const schema::StructType& s);
-
-	/**
-	 * Emit struct serialization code
-	 */
 	void emitStructSerialization(std::ostream& out, const schema::StructType& s);
-
-	/**
-	 * Emit a single variant definition
-	 */
-	void emitVariant(std::ostream& out, const schema::VariantType& v);
-
-	/**
-	 * Emit variant serialization code
-	 */
-	void emitVariantSerialization(std::ostream& out, const schema::VariantType& v);
-
-	// Arrays and maps are inline types - handled in struct fields
-
-	/**
-	 * Emit a single enum definition
-	 */
+	void emitVariant(std::ostream& out, const schema::VariantType& v, const schema::NormalizedAST& ast);
+	void emitVariantSerialization(std::ostream& out, const schema::VariantType& v, const schema::NormalizedAST& ast);
 	void emitEnum(std::ostream& out, const schema::EnumType& e);
-
-	/**
-	 * Emit enum serialization code
-	 */
 	void emitEnumSerialization(std::ostream& out, const schema::EnumType& e);
-
-	/**
-	 * Emit typedef for named primitive with enum values (deprecated - use emitEnumFromPrimitive)
-	 */
 	void emitPrimitiveTypedef(std::ostream& out, const std::string& name, const schema::PrimitiveType& p);
-
-	/**
-	 * Emit enum class from primitive type with enum values
-	 */
 	void emitEnumFromPrimitive(std::ostream& out, const std::string& name, const schema::PrimitiveType& p);
-
-	/**
-	 * Emit serialization for enum class from primitive
-	 */
 	void emitEnumFromPrimitiveSerialization(std::ostream& out, const std::string& name, const schema::PrimitiveType& p);
-
-	/**
-	 * Emit type alias for top-level array schema
-	 */
 	void emitArrayAlias(std::ostream& out, const std::string& name, const schema::ArrayType& arr);
-
-	/**
-	 * Emit type alias for top-level map schema
-	 */
 	void emitMapAlias(std::ostream& out, const std::string& name, const schema::MapType& m);
 
-	/**
-	 * Get C++ type name for a TypeRef
-	 */
 	std::string cppTypeName(const schema::TypeRef& ref) const;
-
-	/**
-	 * Get C++ type name for a SchemaType
-	 */
 	std::string cppTypeName(const schema::SchemaType& type) const;
 
-	const analysis::TopologicalOrder& order_;
-	const schema::NormalizedAST& ast_;
-
-	// Track emitted variant signatures for duplicate detection
 	mutable std::unordered_map<std::string, std::string> emitted_variant_signatures_;
-
-	// Track typedef chains for resolution (e.g., ModelIdsShared -> Verbosity -> std::string)
 	mutable std::unordered_map<std::string, std::string> typedef_chain_;
 };
 
