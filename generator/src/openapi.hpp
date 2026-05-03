@@ -84,7 +84,7 @@ public:
 	inline size_t size() const noexcept { return _is_valid ? simdjson::dom::array::size() : 0; }
 	inline bool empty() const noexcept { return (size() == 0); }
 
-	const T& front() const noexcept { return *(this->begin()); }
+	T front() const { return *(this->begin()); }
 
 private:
 	bool _is_valid;

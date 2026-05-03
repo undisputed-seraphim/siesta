@@ -48,7 +48,8 @@ public:
 private:
 	std::vector<ClientEndpoint> parseEndpoints();
 
-	ClientParam resolveAndMapParameter(const openapi::v3::Parameter& raw_param);
+	ClientParam resolveAndMapParameter(const openapi::v3::Parameter& raw_param,
+	                                   const std::unordered_map<std::string, ClientParam>& fetched_params);
 	std::string schemaToCppType(const openapi::v3::JsonSchema& schema);
 
 	static std::string generateFunctionName(std::string_view method, std::string_view path);

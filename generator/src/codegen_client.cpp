@@ -19,12 +19,16 @@ ClientGenerator::ClientGenerator(const schema::NormalizedAST& ast, const openapi
 	endpoints_ = parseEndpoints();
 }
 
-static std::string resolveRefName(std::string_view ref) {
+static std::string refComponentName(std::string_view ref) {
 	size_t pos = ref.rfind('/');
 	if (pos != std::string_view::npos) {
-		return "api::" + std::string(ref.substr(pos + 1));
+		return std::string(ref.substr(pos + 1));
 	}
-	return "api::" + std::string(ref);
+	return std::string(ref);
+}
+
+static std::string resolveRefName(std::string_view ref) {
+	return "api::" + refComponentName(ref);
 }
 
 static std::string sanitizeParamName(std::string name) {
@@ -41,30 +45,17 @@ static std::string sanitizeParamName(std::string name) {
 	return name;
 }
 
-ClientParam ClientGenerator::resolveAndMapParameter(const openapi::v3::Parameter& raw_param) {
+ClientParam ClientGenerator::resolveAndMapParameter(const openapi::v3::Parameter& raw_param,
+                                                      const std::unordered_map<std::string, ClientParam>& fetched_params) {
 	ClientParam p;
 
 	// Check if this is a $ref
 	if (raw_param.IsRef()) {
-		// Resolve from components
-		std::string ref_name = resolveRefName(raw_param.ref());
-		auto comp_params = spec_.components().parameters();
-		for (const auto& [n, p_obj] : comp_params) {
-			if (n == ref_name) {
-				// p_obj is Parameter (not optional) from MapAdaptor iteration
-				p.name = std::string(p_obj.name());
-				p.location = std::string(p_obj.in());
-				p.required = p_obj.required();
-				p.description = std::string(p_obj.description());
-
-				auto schema = p_obj.schema();
-				p.schema_type = std::string(schema.type());
-				if (!schema.format().empty()) {
-					p.format = std::string(schema.format());
-				}
-				p.cpp_type = schemaToCppType(schema);
-				return p;
-			}
+		std::string ref_name = refComponentName(raw_param.ref());
+		auto it = fetched_params.find(ref_name);
+		if (it != fetched_params.end()) {
+			p = it->second;
+			return p;
 		}
 	}
 
@@ -121,13 +112,48 @@ std::string ClientGenerator::schemaToCppType(const openapi::v3::JsonSchema& sche
 std::vector<ClientEndpoint> ClientGenerator::parseEndpoints() {
 	std::vector<ClientEndpoint> endpoints;
 	const auto& paths = spec_.paths();
+	const auto& comp_params_raw = spec_.components().parameters();
+
+	// Pre-fetch components/parameters to avoid simdjson on-demand re-iteration
+	std::unordered_map<std::string, ClientParam> fetched_params;
+	for (const auto& [n, p_obj] : comp_params_raw) {
+		ClientParam cp;
+		cp.name = std::string(p_obj.name());
+		cp.location = std::string(p_obj.in());
+		cp.required = p_obj.required();
+		cp.description = std::string(p_obj.description());
+		auto schema = p_obj.schema();
+		cp.schema_type = std::string(schema.type());
+		if (!schema.format().empty()) {
+			cp.format = std::string(schema.format());
+		}
+		cp.cpp_type = schemaToCppType(schema);
+		fetched_params[std::string(n)] = std::move(cp);
+	}
+
+	// Pre-fetch components/requestBodies similarly
+	const auto& comp_bodies_raw = spec_.components().requestBodies();
+	std::unordered_map<std::string, std::string> body_schema_names;
+	for (const auto& [n, b_obj] : comp_bodies_raw) {
+		auto content = b_obj.content();
+		for (const auto& [ct, mt] : content) {
+			(void)ct;
+			auto schema = mt.schema();
+			if (schema.IsRef()) {
+				body_schema_names[std::string(n)] = resolveRefName(schema.ref());
+			} else {
+				body_schema_names[std::string(n)] = schemaToCppType(schema);
+			}
+			break;
+		}
+	}
 
 	// Collect path-level parameters into a map by name
 	std::unordered_map<std::string, ClientParam> path_params_map;
 	for (const auto& [path_sv, path_obj] : paths) {
 		auto path_params_list = path_obj.parameters();
 		for (const auto& param : path_params_list) {
-			ClientParam cp = resolveAndMapParameter(param);
+			ClientParam cp = resolveAndMapParameter(param, fetched_params);
 			path_params_map[cp.name] = cp;
 		}
 	}
@@ -172,7 +198,7 @@ std::vector<ClientEndpoint> ClientGenerator::parseEndpoints() {
 
 			auto op_params_list = op_obj.parameters();
 			for (const auto& param : op_params_list) {
-				ClientParam cp = resolveAndMapParameter(param);
+				ClientParam cp = resolveAndMapParameter(param, fetched_params);
 				if (merged_params.find(cp.name) == merged_params.end()) {
 					param_order.push_back(cp.name);
 				}
@@ -211,26 +237,11 @@ std::vector<ClientEndpoint> ClientGenerator::parseEndpoints() {
 			if (req_body) {
 				auto ref_opt = req_body.TryGetRef();
 				if (ref_opt.has_value()) {
-					// Resolve from components
-					std::string body_name = resolveRefName(ref_opt.value());
-					auto comp_bodies = spec_.components().requestBodies();
-					for (const auto& [n, b_obj] : comp_bodies) {
-						if (n == body_name) {
-							auto content = b_obj.content();
-							for (const auto& [ct, mt] : content) {
-								ep.body_content_type = std::string(ct);
-								auto schema = mt.schema();
-								if (schema) {
-									ep.body_type = schemaToCppType(schema);
-								}
-								if (ep.body_type.empty()) {
-									ep.body_type = "std::string";
-								}
-								ep.has_request_body = true;
-								break;
-							}
-							break;
-						}
+					std::string body_name = refComponentName(ref_opt.value());
+					auto it = body_schema_names.find(body_name);
+					if (it != body_schema_names.end()) {
+						ep.body_type = it->second;
+						ep.has_request_body = true;
 					}
 				} else {
 					// Inline request body

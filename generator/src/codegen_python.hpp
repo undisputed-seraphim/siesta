@@ -63,7 +63,8 @@ private:
 	/**
 	 * Resolve a parameter $ref to its actual definition from components
 	 */
-	ClientParam resolveAndMapParameter(const openapi::v3::Parameter& raw_param);
+	ClientParam resolveAndMapParameter(const openapi::v3::Parameter& raw_param,
+	                                   const std::unordered_map<std::string, ClientParam>& fetched_params);
 
 	/**
 	 * Map an OpenAPI schema to a C++ type string
