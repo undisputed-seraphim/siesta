@@ -6,13 +6,6 @@
 
 namespace codegen {
 
-static constexpr const char* QUERY_VALUE_HELPER = R"(
-	template<typename T>
-	inline std::string query_value(const T& val) {
-		return boost::json::value_to<std::string>(boost::json::value_from(val));
-	}
-)";
-
 ClientGenerator::ClientGenerator(const schema::NormalizedAST& ast, const openapi::v3::OpenAPIv3& spec)
 	: ast_(ast)
 	, spec_(spec) {

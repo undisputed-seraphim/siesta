@@ -43,8 +43,6 @@ std::string sanitize_enum_identifier(std::string_view input);
 
 void write_multiline_comment(std::ostream& out, std::string_view comment, std::string_view indent = "");
 
-std::string transform_url_to_function_signature(std::string_view);
-
 void decompose_http_query(std::string_view raw, std::function<void(std::string_view, std::string_view)>&& kv_cb);
 
 // Escape a string for embedding in C++ source code

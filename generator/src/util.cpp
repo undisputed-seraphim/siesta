@@ -217,22 +217,6 @@ void write_multiline_comment(std::ostream& out, std::string_view comment, std::s
 	}
 }
 
-// TODO
-std::string transform_url_to_function_signature(std::string_view url) {
-	std::string result;
-	result.reserve(url.size());
-	// Count number of parameters by counting brace pairs and single colons.
-	int num_params = 0;
-	std::vector<std::string> parameters;
-	while (!url.empty()) {
-		auto brace = url.find_first_of('{');
-		if (brace != std::string_view::npos) {
-		}
-		auto colon = url.find_first_of(':');
-	}
-	return result;
-}
-
 void decompose_http_query(std::string_view raw, std::function<void(std::string_view, std::string_view)>&& kv_cb) {
 	do {
 		const size_t q_split = raw.find_first_of('&');
