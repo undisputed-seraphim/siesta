@@ -2,6 +2,8 @@
 #include "openapi3.hpp"
 #include "util.hpp"
 
+using codegen::component_path;
+
 namespace openapi::v3 {
 
 // RequestBody

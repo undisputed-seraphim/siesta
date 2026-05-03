@@ -2,6 +2,8 @@
 #include "openapi.hpp"
 #include "util.hpp"
 
+using codegen::sanitize;
+
 namespace openapi {
 
 RequestMethod RequestMethodFromString(std::string_view key) {

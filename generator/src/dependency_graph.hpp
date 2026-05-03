@@ -165,21 +165,21 @@ private:
 					// Fields depend on their types (including inline structs)
 					for (const auto& field : t.fields) {
 						// Skip synthetic C++ types - they're not real AST nodes
-						if (!isSyntheticCppType(field.type.name)) {
+						if (!codegen::isSyntheticCppType(field.type.name)) {
 							graph.addDependency({name}, field.type, DepKind::Value);
 						} else if (field.type.name.rfind("std::vector<", 0) == 0) {
 							// For inline arrays like std::vector<T>, depend on T
 							// Extract element type from "std::vector<T>"
 							std::string elem_type = field.type.name.substr(12); // skip "std::vector<"
 							elem_type.pop_back();								// remove ">"
-							if (!isSyntheticCppType(elem_type)) {
+							if (!codegen::isSyntheticCppType(elem_type)) {
 								graph.addDependency({name}, {elem_type, false}, DepKind::ArrayElem);
 							}
 						} else if (field.type.name.rfind("std::map<std::string, ", 0) == 0) {
 							// For inline maps like std::map<std::string, T>, depend on T
 							std::string value_type = field.type.name.substr(22); // skip "std::map<std::string, "
 							value_type.pop_back();								 // remove ">"
-							if (!isSyntheticCppType(value_type)) {
+							if (!codegen::isSyntheticCppType(value_type)) {
 								graph.addDependency({name}, {value_type, false}, DepKind::MapValue);
 							}
 						}
@@ -187,14 +187,14 @@ private:
 					}
 					// Base classes are dependencies
 					for (const auto& base : t.allOf_bases) {
-						if (!isSyntheticCppType(base.name)) {
+						if (!codegen::isSyntheticCppType(base.name)) {
 							graph.addDependency({name}, base, DepKind::Base);
 						}
 					}
 				} else if constexpr (std::is_same_v<T, schema::VariantType>) {
 					// All alternatives must be defined before the variant
 					for (const auto& alt : t.alternatives) {
-						if (isSyntheticCppType(alt.name)) {
+						if (codegen::isSyntheticCppType(alt.name)) {
 							// Extract real dependencies from synthetic C++ types
 							std::string dep_type;
 							if (alt.name.rfind("std::vector<", 0) == 0) {
@@ -206,7 +206,7 @@ private:
 								dep_type = alt.name.substr(22);
 								dep_type.pop_back(); // remove ">"
 							}
-							if (!dep_type.empty() && !isSyntheticCppType(dep_type)) {
+							if (!dep_type.empty() && !codegen::isSyntheticCppType(dep_type)) {
 								graph.addDependency({name}, {dep_type, false}, DepKind::Variant);
 							}
 						} else {
@@ -217,12 +217,12 @@ private:
 					}
 				} else if constexpr (std::is_same_v<T, schema::ArrayType>) {
 					// For ArrayType schemas, depend on element type (not std::vector<...>)
-					if (!isSyntheticCppType(t.element_type.name)) {
+					if (!codegen::isSyntheticCppType(t.element_type.name)) {
 						graph.addDependency({name}, t.element_type, DepKind::ArrayElem);
 					}
 				} else if constexpr (std::is_same_v<T, schema::MapType>) {
 					// For MapType schemas, depend on value type (not std::map<...>)
-					if (!isSyntheticCppType(t.value_type.name)) {
+					if (!codegen::isSyntheticCppType(t.value_type.name)) {
 						graph.addDependency({name}, t.value_type, DepKind::MapValue);
 					}
 				}

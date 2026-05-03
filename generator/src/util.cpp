@@ -3,9 +3,9 @@
 
 #include "util.hpp"
 
-using namespace std::literals;
-
 #include "schema_ast.hpp"
+
+using namespace std::literals;
 
 namespace codegen {
 
@@ -34,34 +34,6 @@ std::string primitiveToCpp(
 		return "std::nullptr_t";
 	}
 	return "std::string";
-}
-
-} // namespace codegen
-
-void ltrim(std::string_view& s) {
-	while (std::isspace(s.front())) {
-		s.remove_prefix(1);
-	}
-}
-
-void rtrim(std::string_view& s) {
-	while (std::isspace(s.back())) {
-		s.remove_suffix(1);
-	}
-}
-
-void trim(std::string_view& s) {
-	ltrim(s);
-	rtrim(s);
-}
-
-bool compare_ignore_case(std::string_view l, std::string_view r) noexcept {
-	if (l.size() == r.size()) {
-		return std::equal(l.begin(), l.end(), r.begin(), r.end(), [](char a, char b) -> bool {
-			return std::tolower(a) == std::tolower(b);
-		});
-	}
-	return false;
 }
 
 void sanitize(std::string& input) {
@@ -208,23 +180,14 @@ std::string sanitize_enum_identifier(std::string_view input) {
 
 void write_multiline_comment(std::ostream& out, std::string_view comment, std::string_view indent) {
 	while (!comment.empty()) {
-		trim(comment);
+		while (!comment.empty() && std::isspace(comment.front())) comment.remove_prefix(1);
+		while (!comment.empty() && std::isspace(comment.back())) comment.remove_suffix(1);
 		auto br = comment.find_first_of('\n');
 		out << indent << "// " << comment.substr(0, br) << '\n';
 		if (br == std::string_view::npos)
 			break;
 		comment.remove_prefix(br);
 	}
-}
-
-void decompose_http_query(std::string_view raw, std::function<void(std::string_view, std::string_view)>&& kv_cb) {
-	do {
-		const size_t q_split = raw.find_first_of('&');
-		auto kv = raw.substr(0, q_split);
-		const size_t kv_split = kv.find_first_of('=');
-		kv_cb(kv.substr(0, kv_split), kv.substr(kv_split + 1, std::string_view::npos));
-		raw.remove_prefix(q_split == std::string_view::npos ? raw.size() : (q_split + 1));
-	} while (!raw.empty());
 }
 
 std::string escapeCppString(const std::string& s) {
@@ -263,3 +226,5 @@ std::string_view component_path(std::string_view path) noexcept {
 	size_t pos = path.find_last_of('/');
 	return path.substr(pos + 1);
 }
+
+} // namespace codegen
