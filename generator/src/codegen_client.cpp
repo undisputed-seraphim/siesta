@@ -15,6 +15,21 @@ void ClientGenerator::operator()(const CodegenArgs& args, const std::filesystem:
 
 	auto endpoints = parseEndpoints(*args.spec);
 
+	// Determine class-wide auth config from the first secured endpoint
+	for (const auto& ep : endpoints) {
+		if (ep.auth_type != ClientEndpoint::AuthType::None) {
+			auth_type_ = ep.auth_type;
+			if (auth_type_ == ClientEndpoint::AuthType::ApiKey) {
+				auth_member_name_ = "_api_key";
+				auth_param_name_ = "api_key";
+			} else if (auth_type_ == ClientEndpoint::AuthType::HttpBearer) {
+				auth_member_name_ = "_bearer_token";
+				auth_param_name_ = "bearer_token";
+			}
+			break;
+		}
+	}
+
 	std::filesystem::create_directories(output_dir);
 	auto client_path = output_dir / "client.hpp";
 	std::ofstream out(client_path);
@@ -127,6 +142,29 @@ std::vector<ClientEndpoint> ClientGenerator::parseEndpoints(const openapi::v3::O
 			break;
 		}
 	}
+
+	// Pre-fetch security schemes
+	struct SchemeInfo {
+		std::string type;
+		std::string name;
+		std::string in;
+		std::string scheme;
+	};
+	std::unordered_map<std::string, SchemeInfo> security_schemes;
+	for (const auto& [name, scheme] : spec.components().securitySchemes()) {
+		SchemeInfo info;
+		info.type = std::string(scheme.type());
+		if (info.type == "apiKey") {
+			info.name = std::string(scheme.name());
+			info.in = std::string(scheme.in());
+		} else if (info.type == "http") {
+			info.scheme = std::string(scheme.scheme());
+		}
+		security_schemes[std::string(name)] = std::move(info);
+	}
+
+	// Determine global security status
+	bool has_global_security = spec.hasGlobalSecurity();
 
 	// Collect path-level parameters into a map by name
 	std::unordered_map<std::string, ClientParam> path_params_map;
@@ -246,6 +284,22 @@ std::vector<ClientEndpoint> ClientGenerator::parseEndpoints(const openapi::v3::O
 				}
 			}
 
+			// Determine security for this endpoint
+			bool has_op_security = false;
+			try {
+				has_op_security = op_obj.HasKey("security");
+			} catch (...) {}
+			if ((has_op_security || (!has_op_security && has_global_security)) && !security_schemes.empty()) {
+				const auto& [scheme_name, info] = *security_schemes.begin();
+				if (info.type == "apiKey" && info.in == "header") {
+					ep.auth_type = ClientEndpoint::AuthType::ApiKey;
+					ep.auth_header_name = info.name;
+				} else if (info.type == "http" && info.scheme == "bearer") {
+					ep.auth_type = ClientEndpoint::AuthType::HttpBearer;
+					ep.auth_header_name = "Authorization";
+				}
+			}
+
 			// Build path template with path parameter placeholders
 			std::string template_str = path;
 			bool has_path_placeholders = path.find('{') != std::string_view::npos;
@@ -275,8 +329,18 @@ std::vector<ClientEndpoint> ClientGenerator::parseEndpoints(const openapi::v3::O
 void ClientGenerator::emitClassHeader(std::ostream& out) {
 	out << "\n";
 	out << "class Client : public ::siesta::beast::ClientBase {\n";
+	if (auth_type_ != ClientEndpoint::AuthType::None) {
+		out << "\tstd::string " << auth_member_name_ << ";\n";
+	}
 	out << "public:\n";
-	out << "\tusing ::siesta::beast::ClientBase::ClientBase;\n";
+	if (auth_type_ != ClientEndpoint::AuthType::None) {
+		out << "\tClient(::boost::asio::io_context& ctx, std::string " << auth_param_name_
+			<< ", Config conf = Config())\n";
+		out << "\t\t: ClientBase(ctx, conf)\n";
+		out << "\t\t, " << auth_member_name_ << "(std::move(" << auth_param_name_ << ")) {}\n";
+	} else {
+		out << "\tusing ::siesta::beast::ClientBase::ClientBase;\n";
+	}
 	out << "\tusing ::siesta::beast::ClientBase::Config;\n";
 	out << "\tusing ::siesta::beast::ClientBase::shared_from_this;\n";
 	out << "\n";
@@ -456,6 +520,13 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep
 
 	std::string verb = ep.method == "delete" ? "delete_" : ep.method;
 	out << "\t\treq.method(::boost::beast::http::verb::" << verb << ");\n";
+
+	// Auth header
+	if (ep.auth_type == ClientEndpoint::AuthType::ApiKey) {
+		out << "\t\treq.set(\"" << ep.auth_header_name << "\", " << auth_member_name_ << ");\n";
+	} else if (ep.auth_type == ClientEndpoint::AuthType::HttpBearer) {
+		out << "\t\treq.set(\"" << ep.auth_header_name << "\", \"Bearer \" + " << auth_member_name_ << ");\n";
+	}
 
 	// Header parameters
 	for (const auto& p : ep.params) {

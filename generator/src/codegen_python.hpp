@@ -27,6 +27,8 @@ struct PyEndpoint {
 	bool has_request_body = false;
 	std::string body_type;
 	std::string body_content_type;
+	ClientEndpoint::AuthType auth_type = ClientEndpoint::AuthType::None;
+	std::string auth_header_name;
 };
 
 class PythonGenerator : public ICodeGenerator {

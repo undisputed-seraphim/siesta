@@ -225,7 +225,7 @@ public:
 	Paths paths() const;
 	// webhooks
 	Components components() const;
-	// security
+	bool hasGlobalSecurity() const { return HasKey("security"); }
 	Tags tags() const;
 	ExternalDocumentation externalDocs() const;
 };

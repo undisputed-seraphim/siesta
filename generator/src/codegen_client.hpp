@@ -39,6 +39,10 @@ struct ClientEndpoint {
 	bool has_request_body = false;
 	std::string body_type;
 	std::string body_content_type;
+	// Security
+	enum class AuthType { None, ApiKey, HttpBearer };
+	AuthType auth_type = AuthType::None;
+	std::string auth_header_name;
 };
 
 class ClientGenerator : public ICodeGenerator {
@@ -57,6 +61,10 @@ private:
 	void emitMethodSignature(std::ostream& out, const ClientEndpoint& ep);
 	void emitMethodBody(std::ostream& out, const ClientEndpoint& ep);
 	void generateClientHpp(std::ostream& out, const std::vector<ClientEndpoint>& endpoints);
+
+	ClientEndpoint::AuthType auth_type_ = ClientEndpoint::AuthType::None;
+	std::string auth_member_name_;
+	std::string auth_param_name_;
 };
 
 } // namespace codegen
