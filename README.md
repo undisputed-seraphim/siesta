@@ -87,9 +87,8 @@ cd out && cmake -B build -DSIESTA_ROOT=.. -GNinja && ninja -C build
 
 # Run the echo integration tests (reference)
 cd tests/echo && ./run.sh
-```
 
-The `echo/` directory is the reference test project. It has a single `GET
+The `tests/echo/` directory is the reference test project. It has a single `GET
 /echo?message=` endpoint and includes a C++ test server binary, a Python
 client test suite, and a shell orchestrator. Use it to verify that generator
 changes haven't broken anything.

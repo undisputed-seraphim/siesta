@@ -2,12 +2,14 @@
 
 ## Overview
 
-This project transpiles OpenAPI v3 schemas into production-grade C++ client code and Python extension modules using boost.asio and boost.json. The generator produces:
+This project transpiles OpenAPI v3 schemas into production-grade C++ client/server code and Python extension modules using boost.asio and boost.json. The generator produces:
 - **openapi_defs.hpp/cpp**: Type definitions with JSON serialization (boost::json tag_invoke)
 - **client.hpp**: Completion-token agnostic HTTP client class (extends `siesta::beast::ClientBase`)
-- **py_module.cpp**: nanobind Python extension module with synchronous API wrappers
+- **server.hpp/cpp**: Abstract server class with virtual dispatch (extends `siesta::beast::ServerBase`)
+- **py_module.cpp**: nanobind Python extension module with synchronous client wrappers
+- **server_py.cpp**: nanobind trampoline for Python-side server subclassing
 
-See `generator/AGENTS.md` for full architecture, file index, and implementation details.
+See `generator/ARCHITECTURE.md` for full architecture, file index, data flow, and implementation details.
 
 ## Key Design Decisions
 
@@ -31,6 +33,10 @@ Value-only semantics cannot represent cycles. The generator detects them and abo
 
 Each Python endpoint method wraps the async C++ client call with `boost::asio::use_future`, runs `io_context`, and converts the JSON response to Python objects.
 
+### 6. Shared Endpoint IR ✅
+
+Endpoints are parsed once via `endpoint_ir.hpp/cpp` → `parseEndpoints()` and passed to all backends via `CodegenArgs::endpoints`. Backends consume `std::vector<Endpoint>` — they no longer re-parse the OpenAPI spec independently.
+
 ## Current State
 
 ### Completed ✅
@@ -40,9 +46,11 @@ Each Python endpoint method wraps the async C++ client call with `boost::asio::u
 - `allOf` inheritance support with merged serialization
 - `defs.hpp/cpp` generation with variant deduplication and typedef chain resolution
 - `client.hpp` generation with path/query/header parameter handling
+- `server.hpp/cpp` generation with static-path + parameterised-path dispatch
 - `py_module.cpp` generation with nanobind Python bindings
-- Binance schema: 341 methods, compiles successfully
-- OpenAI schema: 243 methods, compiles successfully
+- `server_py.cpp` generation with nanobind trampoline server subclassing
+- Binance schema: 339 endpoints, compiles successfully
+- OpenAI schema: 243 endpoints, compiles successfully
 
 ### Known Limitations
 1. **Cyclic dependencies**: Not supported — generator fails with clear error
