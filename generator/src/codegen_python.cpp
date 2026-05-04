@@ -403,7 +403,7 @@ void PythonGenerator::emitEndpointWrapper(std::ostream& out, const PyEndpoint& e
 	out << "\t\ttry {\n";
 
 	// Generate the actual method call with use_future as last argument
-	out << "\t\t\tauto future = self.client." << ep.function_name << "(";
+	out << "\t\t\tauto future = self.client->" << ep.function_name << "(";
 
 	bool has_previous = false;
 	if (ep.has_request_body) {
@@ -463,6 +463,9 @@ void PythonGenerator::emitEndpointWrapper(std::ostream& out, const PyEndpoint& e
 			if (!first)
 				out << ", ";
 			out << "nb::arg(\"" << ep.params[i].name << "\")";
+			if (!ep.params[i].required) {
+				out << " = nb::none()";
+			}
 			first = false;
 		}
 		out << ",\n";
@@ -519,25 +522,25 @@ void PythonGenerator::emitModuleBody(std::ostream& out, const std::vector<PyEndp
 
 	// Wrapper struct that owns the io_context
 	out << "struct ClientWrapper {\n";
-	out << "\topenapi::Client client;\n";
 	out << "\tboost::asio::io_context ctx;\n";
+	out << "\tstd::shared_ptr<openapi::Client> client;\n";
 	if (auth_type != ClientEndpoint::AuthType::None) {
 		out << "\tClientWrapper(std::string host = \"localhost\", uint16_t port = 443, std::string " << auth_param_name
 			<< " = \"\")\n";
-		out << "\t\t: client(ctx, std::move(" << auth_param_name << ")) {\n";
+		out << "\t\t: client(std::make_shared<openapi::Client>(ctx, std::move(" << auth_param_name << "))) {\n";
 	} else {
 		out << "\tClientWrapper(std::string host = \"localhost\", uint16_t port = 443)\n";
-		out << "\t\t: client(ctx) {\n";
+		out << "\t\t: client(std::make_shared<openapi::Client>(ctx)) {\n";
 	}
-	out << "\t\tclient.start(boost::asio::ip::make_address(host), port);\n";
+	out << "\t\tclient->start(boost::asio::ip::make_address(host), port);\n";
 	out << "\t}\n";
-	out << "\t~ClientWrapper() { client.stop(); }\n";
+	out << "\t~ClientWrapper() { client->stop(); }\n";
 	out << "\tauto& context() { return ctx; }\n";
 	out << "\tvoid start(std::string host, uint16_t port) {\n";
-	out << "\t\tclient.stop();\n";
-	out << "\t\tclient.start(boost::asio::ip::make_address(host), port);\n";
+	out << "\t\tclient->stop();\n";
+	out << "\t\tclient->start(boost::asio::ip::make_address(host), port);\n";
 	out << "\t}\n";
-	out << "\tvoid stop() { client.stop(); }\n";
+	out << "\tvoid stop() { client->stop(); }\n";
 	out << "};\n";
 	out << "\n";
 

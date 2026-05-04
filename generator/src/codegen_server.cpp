@@ -196,7 +196,8 @@ void ServerGenerator::emitServerCpp(std::ostream& out, const std::vector<ServerE
 	out << "\n";
 
 	out << "void Server::handle_request(const request req, Session::Ptr session) {\n";
-	out << "\tconst auto target = req.target();\n";
+	out << "\tstd::string_view target = std::string_view(req.target());\n";
+	out << "\tif (auto q = target.find('?'); q != std::string_view::npos) target = target.substr(0, q);\n";
 	out << "\tconst auto method = req.method();\n";
 	out << "\n";
 

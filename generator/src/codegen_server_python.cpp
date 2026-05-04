@@ -142,21 +142,21 @@ void ServerPythonGenerator::emitServerPy(std::ostream& out, const std::vector<Se
 	out << "\n";
 
 	// Trampoline class
-	out << "struct PyServer : openapi::Server {\n";
-	out << "\tNB_TRAMPOLINE(Server, 0);\n";
-	out << "\tboost::asio::io_context ctx;\n";
-	out << "\tstd::thread _thread;\n";
+	out << "namespace _siesta_detail { struct ServerCtx { boost::asio::io_context ctx; }; }\n";
+	out << "\n";
+
+	out << "struct PyServer : _siesta_detail::ServerCtx, openapi::Server {\n";
+	out << "\tNB_TRAMPOLINE(Server, " << endpoints.size() << ");\n";
 	out << "\n";
 	out << "\tPyServer() : openapi::Server(ctx) {}\n";
-	out << "\t~PyServer() { shutdown(); }\n";
+	out << "\t~PyServer() { ctx.stop(); }\n";
 	out << "\n";
 	out << "\tvoid listen(std::string host, uint16_t port) {\n";
 	out << "\t\topenapi::Server::start(ctx, boost::asio::ip::make_address(host), port);\n";
-	out << "\t\t_thread = std::thread([this] { ctx.run(); });\n";
+	out << "\t\tctx.run();\n";
 	out << "\t}\n";
 	out << "\tvoid shutdown() {\n";
 	out << "\t\tctx.stop();\n";
-	out << "\t\tif (_thread.joinable()) _thread.join();\n";
 	out << "\t}\n";
 	out << "\n";
 
@@ -165,14 +165,17 @@ void ServerPythonGenerator::emitServerPy(std::ostream& out, const std::vector<Se
 			write_multiline_comment(out, ep.summary, "\t");
 		}
 		out << "\tvoid " << ep.function_name << "(const request req, Session::Ptr session) override {\n";
-		out << "\t\tnb::gil_scoped_acquire _gil;\n";
-		out << "\t\tif (nb::override ov = nb_type->lookup_override(\"" << ep.function_name << "\")) {\n";
-		out << "\t\t\twrite_json_response(session, ov(request_to_dict(req)));\n";
-		out << "\t\t} else {\n";
-		out << "\t\t\tauto& resp = session->get_response();\n";
-		out << "\t\t\tresp.result(http::status::not_implemented);\n";
-		out << "\t\t\tsession->write();\n";
+		out << "\t\t{\n";
+		out << "\t\t\tnb::detail::ticket nb_ticket(nb_trampoline, \"" << ep.function_name << "\", false);\n";
+		out << "\t\t\tif (nb_ticket.key.is_valid()) {\n";
+		out << "\t\t\t\tnb::object result = nb_trampoline.base().attr(nb_ticket.key)(request_to_dict(req));\n";
+		out << "\t\t\t\twrite_json_response(session, std::move(result));\n";
+		out << "\t\t\t\treturn;\n";
+		out << "\t\t\t}\n";
 		out << "\t\t}\n";
+		out << "\t\tauto& resp = session->get_response();\n";
+		out << "\t\tresp.result(http::status::not_implemented);\n";
+		out << "\t\tsession->write();\n";
 		out << "\t}\n";
 		out << "\n";
 	}
@@ -184,10 +187,10 @@ void ServerPythonGenerator::emitServerPy(std::ostream& out, const std::vector<Se
 	out << "\tm.doc() = \"Siesta-generated Python server bindings\";\n";
 	out << "\tnb::class_<openapi::Server, PyServer>(m, \"Server\")\n";
 	out << "\t\t.def(nb::init<>())\n";
-	out << "\t\t.def(\"listen\", &PyServer::listen,\n";
-	out << "\t\t     nb::arg(\"host\") = std::string(\"localhost\"),\n";
-	out << "\t\t     nb::arg(\"port\") = 443)\n";
-	out << "\t\t.def(\"shutdown\", &PyServer::shutdown);\n";
+	out << "\t\t.def(\"listen\", [](openapi::Server& s, std::string host, uint16_t port) {\n";
+	out << "\t\t\tstatic_cast<PyServer&>(s).listen(std::move(host), port);\n";
+	out << "\t\t}, nb::arg(\"host\") = std::string(\"localhost\"), nb::arg(\"port\") = 443)\n";
+	out << "\t\t.def(\"shutdown\", [](openapi::Server& s) { static_cast<PyServer&>(s).shutdown(); });\n";
 	out << "}\n";
 	out << "\n";
 }
