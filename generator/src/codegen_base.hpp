@@ -2,6 +2,7 @@
 #pragma once
 
 #include "dependency_graph.hpp"
+#include "endpoint_ir.hpp"
 #include "schema_ast.hpp"
 #include <filesystem>
 
@@ -16,6 +17,7 @@ struct CodegenArgs {
 	const analysis::TopologicalOrder& order;
 	const openapi::v3::OpenAPIv3* spec = nullptr;
 	std::string module_name = "siesta_bindings";
+	const std::vector<Endpoint>* endpoints = nullptr;
 };
 
 class ICodeGenerator {

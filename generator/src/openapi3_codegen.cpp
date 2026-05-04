@@ -6,6 +6,7 @@
 #include "codegen_python.hpp"
 #include "codegen_server.hpp"
 #include "codegen_server_python.hpp"
+#include "endpoint_ir.hpp"
 
 using codegen::sanitize;
 #include "dependency_graph.hpp"
@@ -21,9 +22,6 @@ using codegen::sanitize;
 namespace fs = std::filesystem;
 namespace openapi::v3::codegen {
 
-/**
- * Parse components/schemas into the AST, counting each type.
- */
 static void parseSchemas(const openapi::v3::OpenAPIv3& spec, schema::NormalizedAST& ast) {
 	std::unordered_set<std::string> added_types;
 
@@ -65,9 +63,6 @@ static void parseSchemas(const openapi::v3::OpenAPIv3& spec, schema::NormalizedA
 			  << " enums, " << prim_count << " primitives)\n";
 }
 
-/**
- * Collect path/operation metadata into the AST.
- */
 static int parsePaths(const openapi::v3::OpenAPIv3& spec, schema::NormalizedAST& ast) {
 	int endpoint_count = 0;
 
@@ -104,9 +99,6 @@ static int parsePaths(const openapi::v3::OpenAPIv3& spec, schema::NormalizedAST&
 	return endpoint_count;
 }
 
-/**
- * Build normalized AST from OpenAPI v3 spec
- */
 static schema::NormalizedAST buildAST(const openapi::v3::OpenAPIv3& spec) {
 	schema::NormalizedAST ast;
 
@@ -120,14 +112,12 @@ static schema::NormalizedAST buildAST(const openapi::v3::OpenAPIv3& spec) {
 }
 
 bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path, GenMode mode, bool python) {
-	// Load OpenAPI spec using the base loader
 	openapi::OpenAPI file;
 	if (!file.Load(input_path.string())) {
 		std::cerr << "Failed to load " << input_path << "\n";
 		return false;
 	}
 
-	// Check version and cast appropriately
 	if (file.MajorVersion() != 3) {
 		std::cerr << "Only OpenAPI v3 is supported\n";
 		return false;
@@ -137,7 +127,6 @@ bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path
 
 	auto ast = buildAST(spec);
 
-	// Validate AST
 	std::cout << "Validating AST...\n";
 	auto errors = ast.validate();
 	if (!errors.empty()) {
@@ -178,6 +167,13 @@ bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path
 		std::cout << "\n";
 	}
 
+	// Parse endpoints once — shared by all backends
+	bool gen_client = (mode == GenMode::client || mode == GenMode::both);
+	bool gen_server = (mode == GenMode::server || mode == GenMode::both);
+	auto endpoints = gen_client || gen_server
+	                     ? ::codegen::parseEndpoints(spec)
+	                     : std::vector<::codegen::Endpoint>{};
+
 	std::cout << "Phase 4: Generating C++ code...\n";
 
 	std::string title = std::string(spec.info().title());
@@ -187,16 +183,13 @@ bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path
 	std::string client_mod = module_name;
 	std::string server_mod = server_module;
 
-	::codegen::CodegenArgs args{ast, order, &spec, std::move(module_name)};
+	::codegen::CodegenArgs args{ast, order, &spec, std::move(module_name), &endpoints};
 
 	{
 		::codegen::DefsGenerator gen;
 		std::cout << "  Generating openapi_defs.hpp/cpp\n";
 		gen(args, output_path);
 	}
-
-	bool gen_client = (mode == GenMode::client || mode == GenMode::both);
-	bool gen_server = (mode == GenMode::server || mode == GenMode::both);
 
 	if (gen_client) {
 		::codegen::ClientGenerator gen;
@@ -217,7 +210,7 @@ bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path
 	}
 
 	if (python && gen_server) {
-		::codegen::CodegenArgs server_args{ast, order, &spec, std::move(server_module)};
+		::codegen::CodegenArgs server_args{ast, order, &spec, std::move(server_module), &endpoints};
 		::codegen::ServerPythonGenerator gen;
 		std::cout << "  Generating server_py.cpp\n";
 		gen(server_args, output_path);
@@ -241,7 +234,6 @@ bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path
 	std::cout << "  - Topological sort: " << (order.isValid() ? "SUCCESS" : "FAILED") << "\n";
 	std::cout << "  - Ordered types: " << order.ordered_types.size() << "\n";
 
-	// Cross-check: how many AST types were actually emitted?
 	std::unordered_set<std::string> sorted_set(order.ordered_types.begin(), order.ordered_types.end());
 	int missing = 0;
 	for (const auto& [name, _] : ast.getTypes()) {

@@ -2,7 +2,7 @@
 #pragma once
 
 #include "codegen_base.hpp"
-#include "codegen_server.hpp"
+#include "endpoint_ir.hpp"
 #include "openapi3.hpp"
 #include "schema_ast.hpp"
 #include "util.hpp"
@@ -24,8 +24,7 @@ public:
 	void operator()(const CodegenArgs& args, const std::filesystem::path& output_dir) override;
 
 private:
-	std::vector<ServerEndpoint> parseEndpoints(const openapi::v3::OpenAPIv3& spec);
-	void emitServerPy(std::ostream& out, const std::vector<ServerEndpoint>& endpoints);
+	void emitServerPy(std::ostream& out, const std::vector<Endpoint>& endpoints);
 
 	std::string module_name_;
 };
