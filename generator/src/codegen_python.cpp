@@ -13,6 +13,7 @@ void PythonGenerator::operator()(const CodegenArgs& args, const std::filesystem:
 		return;
 	}
 
+	module_name_ = args.module_name;
 	auto endpoints = parseEndpoints(*args.spec);
 
 	std::filesystem::create_directories(output_dir);
@@ -424,6 +425,7 @@ void PythonGenerator::emitEndpointWrapper(std::ostream& out, const PyEndpoint& e
 	out << "boost::asio::use_future);\n";
 
 	// Run the io_context to process the async request
+	out << "\t\t\tctx.restart();\n";
 	out << "\t\t\tctx.run();\n";
 
 	// Get the result from the future
@@ -533,12 +535,15 @@ void PythonGenerator::emitModuleBody(std::ostream& out, const std::vector<PyEndp
 		out << "\t\t: client(std::make_shared<openapi::Client>(ctx)) {\n";
 	}
 	out << "\t\tclient->start(boost::asio::ip::make_address(host), port);\n";
+	out << "\t\tctx.run();\n";
 	out << "\t}\n";
 	out << "\t~ClientWrapper() { client->stop(); }\n";
 	out << "\tauto& context() { return ctx; }\n";
 	out << "\tvoid start(std::string host, uint16_t port) {\n";
 	out << "\t\tclient->stop();\n";
 	out << "\t\tclient->start(boost::asio::ip::make_address(host), port);\n";
+	out << "\t\tctx.restart();\n";
+	out << "\t\tctx.run();\n";
 	out << "\t}\n";
 	out << "\tvoid stop() { client->stop(); }\n";
 	out << "};\n";

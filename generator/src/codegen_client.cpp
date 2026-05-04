@@ -455,7 +455,7 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep
 					out << "\t\tfor (size_t _i = 0; _i < (" << p->name << ").size(); ++_i) {\n";
 					out << "\t\t\tif (_i > 0 || target_has_query) target_path += \"&\";\n";
 					out << "\t\t\telse target_path += \"?\"; target_has_query = true;\n";
-					out << "\t\t\ttarget_path += \"" << p->wire_name << "=\" + (" << p->name << ")[_i];\n";
+					out << "\t\t\ttarget_path += \"" << p->wire_name << "=\" + url_encode((" << p->name << ")[_i]);\n";
 					out << "\t\t}\n";
 				} else {
 					out << "\t\tfor (size_t _i = 0; _i < (" << p->name << ").size(); ++_i) {\n";
@@ -466,7 +466,7 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep
 				}
 			} else if (is_string) {
 				out << "\t\tif (target_has_query) target_path += \"&\"; else target_path += \"?\"; target_has_query = true;\n";
-				out << "\t\ttarget_path += \"" << p->wire_name << "=\" + (" << p->name << ");\n";
+				out << "\t\ttarget_path += \"" << p->wire_name << "=\" + url_encode(" << p->name << ");\n";
 			} else {
 				out << "\t\tif (target_has_query) target_path += \"&\"; else target_path += \"?\"; target_has_query = true;\n";
 				out << "\t\ttarget_path += \"" << p->wire_name << "=\" + query_value(" << p->name << ");\n";
@@ -484,7 +484,7 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep
 				if (is_vector_string) {
 					out << "\t\t\tfor (size_t _i = 0; _i < (*(" << p->name << ")).size(); ++_i) {\n";
 					out << "\t\t\t\tif (_i > 0) query_params += \"&\";\n";
-					out << "\t\t\t\tquery_params += \"" << p->wire_name << "=\" + (*(" << p->name << "))[_i];\n";
+					out << "\t\t\t\tquery_params += \"" << p->wire_name << "=\" + url_encode((*(" << p->name << "))[_i]);\n";
 					out << "\t\t\t}\n";
 				} else if (is_vector) {
 					out << "\t\t\tfor (size_t _i = 0; _i < (*(" << p->name << ")).size(); ++_i) {\n";
@@ -494,7 +494,7 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep
 					out << "\t\t\t}\n";
 				} else if (is_string) {
 					out << "\t\t\tif (!query_params.empty()) query_params += \"&\";\n";
-					out << "\t\t\tquery_params += \"" << p->wire_name << "=\" + (*(" << p->name << "));\n";
+					out << "\t\t\tquery_params += \"" << p->wire_name << "=\" + url_encode(*(" << p->name << "));\n";
 				} else {
 					out << "\t\t\tif (!query_params.empty()) query_params += \"&\";\n";
 					out << "\t\t\tquery_params += \"" << p->wire_name << "=\" + query_value(*(" << p->name << "));\n";
@@ -559,6 +559,22 @@ void ClientGenerator::generateClientHpp(std::ostream& out, const std::vector<Cli
 	out << "#include <siesta/beast/client.hpp>\n";
 	out << "\n";
 	out << "namespace " << ns << " {\n";
+
+	// Helper to percent-encode a string for use in URL query parameters
+	out << "inline std::string url_encode(std::string_view sv) {\n";
+	out << "\tstd::string result;\n";
+	out << "\tresult.reserve(sv.size() * 3);\n";
+	out << "\tfor (unsigned char c : sv) {\n";
+	out << "\t\tif ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {\n";
+	out << "\t\t\tresult += c;\n";
+	out << "\t\t} else {\n";
+	out << "\t\t\tresult += '%';\n";
+	out << "\t\t\tresult += \"0123456789ABCDEF\"[c >> 4];\n";
+	out << "\t\t\tresult += \"0123456789ABCDEF\"[c & 15];\n";
+	out << "\t\t}\n";
+	out << "\t}\n";
+	out << "\treturn result;\n";
+	out << "}\n\n";
 
 	// Helper to convert any value to query string parameter
 	out << "inline std::string query_value(const auto& val) {\n";

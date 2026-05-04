@@ -33,8 +33,7 @@ struct PyEndpoint {
 
 class PythonGenerator : public ICodeGenerator {
 public:
-	explicit PythonGenerator(std::string module_name)
-		: module_name_(std::move(module_name)) {}
+	explicit PythonGenerator() = default;
 
 	void operator()(const CodegenArgs& args, const std::filesystem::path& output_dir) override;
 

@@ -77,12 +77,13 @@ protected:
 		t = T(json::value_to<T>(json::parse(resp.body(), &json_rsc)));
 	}
 
-	enum { send, recv, done } _state;
+	enum { send, recv, done } _state{send};
 
 	template <::boost::asio::completion_token_for<void(outcome_type)> CompletionToken>
 	auto async_submit_request(request_type req, CompletionToken&& token) {
+		_request = std::move(req);
 		return ::boost::asio::async_compose<CompletionToken, void(outcome_type)>(
-			[this, lifetime = shared_from_this(), req = std::forward<request_type>(req)](
+			[this, lifetime = shared_from_this()](
 				auto& self, ::boost::system::error_code error = {}, std::size_t bytes = 0) -> void {
 				namespace http = ::boost::beast::http;
 				if (error) {
@@ -93,7 +94,7 @@ protected:
 				case send: {
 					_state = recv;
 					_stream.expires_after(_conf.write_timeout);
-					http::async_write(_stream, req, std::move(self));
+					http::async_write(_stream, _request, std::move(self));
 					return;
 				}
 				case recv: {
