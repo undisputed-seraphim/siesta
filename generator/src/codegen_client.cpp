@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "codegen_client.hpp"
-#include "endpoint_util.hpp"
 #include "openapi.hpp"
 #include "openapi3.hpp"
 #include <fstream>
@@ -9,20 +8,20 @@
 namespace codegen {
 
 void ClientGenerator::operator()(const CodegenArgs& args, const std::filesystem::path& output_dir) {
-	if (!args.spec) {
+	if (!args.spec || !args.endpoints || args.endpoints->empty()) {
 		return;
 	}
 
-	auto endpoints = parseEndpoints(*args.spec);
+	const auto& endpoints = *args.endpoints;
 
 	// Determine class-wide auth config from the first secured endpoint
 	for (const auto& ep : endpoints) {
-		if (ep.auth_type != ClientEndpoint::AuthType::None) {
+		if (ep.auth_type != AuthType::None) {
 			auth_type_ = ep.auth_type;
-			if (auth_type_ == ClientEndpoint::AuthType::ApiKey) {
+			if (auth_type_ == AuthType::ApiKey) {
 				auth_member_name_ = "_api_key";
 				auth_param_name_ = "api_key";
-			} else if (auth_type_ == ClientEndpoint::AuthType::HttpBearer) {
+			} else if (auth_type_ == AuthType::HttpBearer) {
 				auth_member_name_ = "_bearer_token";
 				auth_param_name_ = "bearer_token";
 			}
@@ -38,302 +37,14 @@ void ClientGenerator::operator()(const CodegenArgs& args, const std::filesystem:
 	}
 }
 
-ClientParam ClientGenerator::resolveAndMapParameter(const openapi::v3::Parameter& raw_param,
-                                                      const std::unordered_map<std::string, ClientParam>& fetched_params) {
-	ClientParam p;
-
-	// Check if this is a $ref
-	if (raw_param.IsRef()) {
-		std::string ref_name = refComponentName(raw_param.ref());
-		auto it = fetched_params.find(ref_name);
-		if (it != fetched_params.end()) {
-			p = it->second;
-			return p;
-		}
-	}
-
-	// Inline parameter or ref resolution failed - use typed methods
-	p.name = std::string(raw_param.name());
-	p.wire_name = p.name;
-	p.location = std::string(raw_param.in());
-	p.required = raw_param.required();
-	p.description = std::string(raw_param.description());
-
-	auto schema = raw_param.schema();
-	p.schema_type = std::string(schema.type());
-	if (!schema.format().empty()) {
-		p.format = std::string(schema.format());
-	}
-	p.cpp_type = schemaToCppType(schema);
-
-	return p;
-}
-
-std::string ClientGenerator::schemaToCppType(const openapi::v3::JsonSchema& schema) {
-	if (schema.IsRef()) {
-		return resolveRefName(schema.ref());
-	}
-
-	std::string_view type = schema.type();
-	std::string_view format = schema.format();
-
-	if (type == "string") {
-		return "std::string";
-	} else if (type == "integer") {
-		if (format == "int64")
-			return "int64_t";
-		if (format == "uint32")
-			return "uint32_t";
-		if (format == "uint64")
-			return "uint64_t";
-		return "int32_t";
-	} else if (type == "number") {
-		return "double";
-	} else if (type == "boolean") {
-		return "bool";
-	} else if (type == "array") {
-		const auto& arr = static_cast<const openapi::v3::Array&>(schema);
-		auto items = arr.items();
-		std::string elem_type = schemaToCppType(items);
-		return "std::vector<" + elem_type + ">";
-	} else if (type == "object") {
-		return "std::string";
-	}
-
-	return "std::string";
-}
-
-std::vector<ClientEndpoint> ClientGenerator::parseEndpoints(const openapi::v3::OpenAPIv3& spec) {
-	std::vector<ClientEndpoint> endpoints;
-	const auto& paths = spec.paths();
-	const auto& comp_params_raw = spec.components().parameters();
-
-	// Pre-fetch components/parameters to avoid simdjson on-demand re-iteration
-	std::unordered_map<std::string, ClientParam> fetched_params;
-	for (const auto& [n, p_obj] : comp_params_raw) {
-		ClientParam cp;
-		cp.name = std::string(p_obj.name());
-		cp.wire_name = cp.name;
-		cp.location = std::string(p_obj.in());
-		cp.required = p_obj.required();
-		cp.description = std::string(p_obj.description());
-		auto schema = p_obj.schema();
-		cp.schema_type = std::string(schema.type());
-		if (!schema.format().empty()) {
-			cp.format = std::string(schema.format());
-		}
-		cp.cpp_type = schemaToCppType(schema);
-		fetched_params[std::string(n)] = std::move(cp);
-	}
-
-	// Pre-fetch components/requestBodies similarly
-	const auto& comp_bodies_raw = spec.components().requestBodies();
-	std::unordered_map<std::string, std::string> body_schema_names;
-	for (const auto& [n, b_obj] : comp_bodies_raw) {
-		auto content = b_obj.content();
-		for (const auto& [ct, mt] : content) {
-			(void)ct;
-			auto schema = mt.schema();
-			if (schema.IsRef()) {
-				body_schema_names[std::string(n)] = resolveRefName(schema.ref());
-			} else {
-				body_schema_names[std::string(n)] = schemaToCppType(schema);
-			}
-			break;
-		}
-	}
-
-	// Pre-fetch security schemes
-	struct SchemeInfo {
-		std::string type;
-		std::string name;
-		std::string in;
-		std::string scheme;
-	};
-	std::unordered_map<std::string, SchemeInfo> security_schemes;
-	for (const auto& [name, scheme] : spec.components().securitySchemes()) {
-		SchemeInfo info;
-		info.type = std::string(scheme.type());
-		if (info.type == "apiKey") {
-			info.name = std::string(scheme.name());
-			info.in = std::string(scheme.in());
-		} else if (info.type == "http") {
-			info.scheme = std::string(scheme.scheme());
-		}
-		security_schemes[std::string(name)] = std::move(info);
-	}
-
-	// Determine global security status
-	bool has_global_security = spec.hasGlobalSecurity();
-
-	// Collect path-level parameters into a map by name
-	std::unordered_map<std::string, ClientParam> path_params_map;
-	for (const auto& [path_sv, path_obj] : paths) {
-		auto path_params_list = path_obj.parameters();
-		for (const auto& param : path_params_list) {
-			ClientParam cp = resolveAndMapParameter(param, fetched_params);
-			path_params_map[cp.name] = cp;
-		}
-	}
-
-	for (const auto& [path_sv, path_obj] : paths) {
-		std::string path(path_sv);
-		auto path_ops = path_obj.operations();
-
-		for (const auto& [method_sv, op_obj] : path_ops) {
-			std::string method(method_sv);
-			std::transform(method.begin(), method.end(), method.begin(), ::tolower);
-
-			if (!isSupportedMethod(method)) {
-				continue;
-			}
-
-			ClientEndpoint ep;
-			ep.method = method;
-			ep.path = path;
-
-			try {
-				auto summary = op_obj.summary();
-				if (!summary.empty()) {
-					ep.summary = std::string(summary);
-				}
-				auto description = op_obj.description();
-				if (!description.empty()) {
-					ep.description = std::string(description);
-				}
-			} catch (...) {
-			}
-
-			ep.function_name = generateFunctionName(method, path);
-
-			// Merge path-level and operation-level parameters, preserving order
-			std::unordered_map<std::string, ClientParam> op_overrides;
-			std::vector<std::string> param_order;
-			for (const auto& [name, _] : path_params_map) {
-				param_order.push_back(name);
-			}
-
-			auto op_params_list = op_obj.parameters();
-			for (const auto& param : op_params_list) {
-				ClientParam cp = resolveAndMapParameter(param, fetched_params);
-				auto it = path_params_map.find(cp.name);
-				if (it == path_params_map.end() && op_overrides.find(cp.name) == op_overrides.end()) {
-					param_order.push_back(cp.name);
-				}
-				op_overrides[cp.name] = cp;
-			}
-
-			// Convert to ordered vector: path params first, then query, then header
-			auto lookup = [&](const std::string& name) -> const ClientParam& {
-				auto oit = op_overrides.find(name);
-				if (oit != op_overrides.end()) return oit->second;
-				return path_params_map.at(name);
-			};
-			std::vector<ClientParam> ordered_params;
-			for (const auto& name : param_order) {
-				const auto& cp = lookup(name);
-				if (cp.location == "path") {
-					ordered_params.push_back(cp);
-				}
-			}
-			for (const auto& name : param_order) {
-				const auto& cp = lookup(name);
-				if (cp.location == "query") {
-					ordered_params.push_back(cp);
-				}
-			}
-			for (const auto& name : param_order) {
-				const auto& cp = lookup(name);
-				if (cp.location == "header") {
-					ordered_params.push_back(cp);
-				}
-			}
-
-			// Sanitize parameter names to avoid conflicts
-			for (auto& p : ordered_params) {
-				p.name = sanitizeParamName(p.name);
-			}
-			ep.params = std::move(ordered_params);
-
-			// Extract request body info
-			auto req_body = op_obj.requestBody();
-			if (req_body) {
-				auto ref_opt = req_body.TryGetRef();
-				if (ref_opt.has_value()) {
-					std::string body_name = refComponentName(ref_opt.value());
-					auto it = body_schema_names.find(body_name);
-					if (it != body_schema_names.end()) {
-						ep.body_type = it->second;
-						ep.has_request_body = true;
-					}
-				} else {
-					// Inline request body
-					auto content = req_body.content();
-					for (const auto& [ct, mt] : content) {
-						ep.body_content_type = std::string(ct);
-						auto schema = mt.schema();
-						if (schema) {
-							ep.body_type = schemaToCppType(schema);
-						}
-						if (ep.body_type.empty()) {
-							ep.body_type = "std::string";
-						}
-						ep.has_request_body = true;
-						break;
-					}
-				}
-			}
-
-			// Determine security for this endpoint
-			bool has_op_security = false;
-			try {
-				has_op_security = op_obj.HasKey("security");
-			} catch (...) {}
-			if ((has_op_security || (!has_op_security && has_global_security)) && !security_schemes.empty()) {
-				const auto& [scheme_name, info] = *security_schemes.begin();
-				if (info.type == "apiKey" && info.in == "header") {
-					ep.auth_type = ClientEndpoint::AuthType::ApiKey;
-					ep.auth_header_name = info.name;
-				} else if (info.type == "http" && info.scheme == "bearer") {
-					ep.auth_type = ClientEndpoint::AuthType::HttpBearer;
-					ep.auth_header_name = "Authorization";
-				}
-			}
-
-			// Build path template with path parameter placeholders
-			std::string template_str = path;
-			bool has_path_placeholders = path.find('{') != std::string_view::npos;
-
-			if (has_path_placeholders) {
-				for (const auto& pp : ep.params) {
-					if (pp.location == "path") {
-						std::string placeholder = "{" + pp.name + "}";
-						size_t pos = template_str.find(placeholder);
-						while (pos != std::string::npos) {
-							template_str.replace(pos, placeholder.length(), "{}");
-							pos = template_str.find(placeholder, pos + 2);
-						}
-					}
-				}
-			}
-
-			ep.path_template = template_str;
-
-			endpoints.push_back(std::move(ep));
-		}
-	}
-
-	return endpoints;
-}
-
 void ClientGenerator::emitClassHeader(std::ostream& out) {
 	out << "\n";
 	out << "class Client : public ::siesta::beast::ClientBase {\n";
-	if (auth_type_ != ClientEndpoint::AuthType::None) {
+	if (auth_type_ != AuthType::None) {
 		out << "\tstd::string " << auth_member_name_ << ";\n";
 	}
 	out << "public:\n";
-	if (auth_type_ != ClientEndpoint::AuthType::None) {
+	if (auth_type_ != AuthType::None) {
 		out << "\tClient(::boost::asio::io_context& ctx, std::string " << auth_param_name_
 			<< ", Config conf = Config())\n";
 		out << "\t\t: ClientBase(ctx, conf)\n";
@@ -346,7 +57,7 @@ void ClientGenerator::emitClassHeader(std::ostream& out) {
 	out << "\n";
 }
 
-void ClientGenerator::emitEndpoint(std::ostream& out, const ClientEndpoint& ep) {
+void ClientGenerator::emitEndpoint(std::ostream& out, const Endpoint& ep) {
 	std::string text = ep.description.empty() ? ep.summary : ep.description;
 	if (!text.empty()) {
 		write_multiline_comment(out, text, "\t");
@@ -359,7 +70,7 @@ void ClientGenerator::emitEndpoint(std::ostream& out, const ClientEndpoint& ep) 
 	out << "\n";
 }
 
-void ClientGenerator::emitMethodSignature(std::ostream& out, const ClientEndpoint& ep) {
+void ClientGenerator::emitMethodSignature(std::ostream& out, const Endpoint& ep) {
 	out << "\tauto " << ep.function_name << "(";
 
 	bool has_previous = false;
@@ -390,7 +101,7 @@ void ClientGenerator::emitMethodSignature(std::ostream& out, const ClientEndpoin
 	out << ")";
 }
 
-void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep) {
+void ClientGenerator::emitMethodBody(std::ostream& out, const Endpoint& ep) {
 	out << "\t\tconstexpr std::string_view path = \"" << escapeCppString(ep.path_template) << "\";\n";
 	out << "\t\trequest_type req;\n";
 
@@ -431,8 +142,6 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep
 				out << "\t\t}\n";
 			}
 		}
-		// Sep required from optional query params
-		// Required go directly into target_path; optional go into query_params
 		std::vector<const ClientParam*> required_query;
 		std::vector<const ClientParam*> optional_query;
 		for (const auto* p : query_params) {
@@ -443,7 +152,6 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep
 			}
 		}
 
-		// Emit required query params directly into target_path
 		if (!required_query.empty() || !optional_query.empty()) {
 			out << "\t\tbool target_has_query = false;\n";
 		}
@@ -473,7 +181,6 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep
 			}
 		}
 
-		// Emit optional query params via query_params string
 		if (!optional_query.empty()) {
 			out << "\t\tstd::string query_params;\n";
 			for (const auto* p : optional_query) {
@@ -511,7 +218,6 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep
 		out << "\t\treq.target(path);\n";
 	}
 
-	// Request body
 	if (ep.has_request_body) {
 		out << "\t\treq.body() = boost::json::serialize(boost::json::value_from(body));\n";
 		out << "\t\treq.set(::boost::beast::http::field::content_type, \"" << ep.body_content_type << "\");\n";
@@ -521,14 +227,12 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep
 	std::string verb = ep.method == "delete" ? "delete_" : ep.method;
 	out << "\t\treq.method(::boost::beast::http::verb::" << verb << ");\n";
 
-	// Auth header
-	if (ep.auth_type == ClientEndpoint::AuthType::ApiKey) {
+	if (ep.auth_type == AuthType::ApiKey) {
 		out << "\t\treq.set(\"" << ep.auth_header_name << "\", " << auth_member_name_ << ");\n";
-	} else if (ep.auth_type == ClientEndpoint::AuthType::HttpBearer) {
+	} else if (ep.auth_type == AuthType::HttpBearer) {
 		out << "\t\treq.set(\"" << ep.auth_header_name << "\", \"Bearer \" + " << auth_member_name_ << ");\n";
 	}
 
-	// Header parameters
 	for (const auto& p : ep.params) {
 		if (p.location == "header") {
 			if (p.required) {
@@ -541,7 +245,8 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const ClientEndpoint& ep
 
 	out << "\t\treturn this->async_submit_request(std::move(req), token);\n";
 }
-void ClientGenerator::generateClientHpp(std::ostream& out, const std::vector<ClientEndpoint>& endpoints) {
+
+void ClientGenerator::generateClientHpp(std::ostream& out, const std::vector<Endpoint>& endpoints) {
 	out << "#pragma once\n";
 	out << "#include <boost/asio.hpp>\n";
 	out << "#include <boost/asio/ip/tcp.hpp>\n";
@@ -560,7 +265,6 @@ void ClientGenerator::generateClientHpp(std::ostream& out, const std::vector<Cli
 	out << "\n";
 	out << "namespace " << ns << " {\n";
 
-	// Helper to percent-encode a string for use in URL query parameters
 	out << "inline std::string url_encode(std::string_view sv) {\n";
 	out << "\tstd::string result;\n";
 	out << "\tresult.reserve(sv.size() * 3);\n";
@@ -576,7 +280,6 @@ void ClientGenerator::generateClientHpp(std::ostream& out, const std::vector<Cli
 	out << "\treturn result;\n";
 	out << "}\n\n";
 
-	// Helper to convert any value to query string parameter
 	out << "inline std::string query_value(const auto& val) {\n";
 	out << "    return boost::json::value_to<std::string>(boost::json::value_from(val));\n";
 	out << "}\n\n";

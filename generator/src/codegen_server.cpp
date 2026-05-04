@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "codegen_server.hpp"
-#include "endpoint_util.hpp"
 #include "openapi.hpp"
 #include "openapi3.hpp"
 #include <algorithm>
@@ -9,11 +8,11 @@
 namespace codegen {
 
 void ServerGenerator::operator()(const CodegenArgs& args, const std::filesystem::path& output_dir) {
-	if (!args.spec) {
+	if (!args.spec || !args.endpoints || args.endpoints->empty()) {
 		return;
 	}
 
-	auto endpoints = parseEndpoints(*args.spec);
+	const auto& endpoints = *args.endpoints;
 
 	std::filesystem::create_directories(output_dir);
 	{
@@ -32,57 +31,7 @@ void ServerGenerator::operator()(const CodegenArgs& args, const std::filesystem:
 	}
 }
 
-std::vector<ServerEndpoint> ServerGenerator::parseEndpoints(const openapi::v3::OpenAPIv3& spec) {
-	std::vector<ServerEndpoint> endpoints;
-
-	for (const auto& [path_sv, path_obj] : spec.paths()) {
-		std::string path(path_sv);
-		auto path_ops = path_obj.operations();
-
-		for (const auto& [method_sv, op_obj] : path_ops) {
-			std::string method(method_sv);
-			std::transform(method.begin(), method.end(), method.begin(), ::tolower);
-
-			if (!isSupportedMethod(method)) {
-				continue;
-			}
-
-			ServerEndpoint ep;
-			ep.method = method;
-			ep.path = path;
-			ep.function_name = generateFunctionName(method, path);
-
-			try {
-				auto summary = op_obj.summary();
-				if (!summary.empty()) {
-					ep.summary = std::string(summary);
-				}
-			} catch (...) {
-			}
-
-			// Build path pattern: replace {param} with {} for matching
-			std::string pattern = path;
-			bool has_placeholders = path.find('{') != std::string_view::npos;
-			if (has_placeholders) {
-				auto pos = pattern.find('{');
-				while (pos != std::string::npos) {
-					auto end = pattern.find('}', pos);
-					if (end != std::string::npos) {
-						pattern.replace(pos, end - pos + 1, "{}");
-					}
-					pos = pattern.find('{', pos + 2);
-				}
-			}
-			ep.path_pattern = pattern;
-
-			endpoints.push_back(std::move(ep));
-		}
-	}
-
-	return endpoints;
-}
-
-void ServerGenerator::emitServerHpp(std::ostream& out, const std::vector<ServerEndpoint>& endpoints) {
+void ServerGenerator::emitServerHpp(std::ostream& out, const std::vector<Endpoint>& endpoints) {
 	out << "#pragma once\n";
 	out << "#include <boost/asio.hpp>\n";
 	out << "#include <boost/asio/ip/tcp.hpp>\n";
@@ -123,7 +72,7 @@ void ServerGenerator::emitServerHpp(std::ostream& out, const std::vector<ServerE
 	out << "} // namespace openapi\n";
 }
 
-void ServerGenerator::emitServerCpp(std::ostream& out, const std::vector<ServerEndpoint>& endpoints) {
+void ServerGenerator::emitServerCpp(std::ostream& out, const std::vector<Endpoint>& endpoints) {
 	out << "#include \"server.hpp\"\n";
 	out << "\n";
 	out << "#include <string_view>\n";
@@ -139,18 +88,16 @@ void ServerGenerator::emitServerCpp(std::ostream& out, const std::vector<ServerE
 	out << "using fnptr_t = Server::fnptr_t;\n";
 	out << "\n";
 
-	// Separate static and parameterized paths
-	std::vector<const ServerEndpoint*> static_eps;
-	std::vector<const ServerEndpoint*> param_eps;
+	std::vector<const Endpoint*> static_eps;
+	std::vector<const Endpoint*> param_eps;
 	for (const auto& ep : endpoints) {
-		if (ep.path_pattern.find("{}") != std::string::npos) {
+		if (ep.path_template.find("{}") != std::string::npos) {
 			param_eps.push_back(&ep);
 		} else {
 			static_eps.push_back(&ep);
 		}
 	}
 
-	// Static paths — fast unordered_map O(1) lookup
 	if (!static_eps.empty()) {
 		out << "const std::unordered_map<std::pair<std::string_view, http::verb>, Server::fnptr_t,\n";
 		out << "    ::siesta::beast::__detail::MapHash> STATIC_PATHS = {\n";
@@ -162,7 +109,6 @@ void ServerGenerator::emitServerCpp(std::ostream& out, const std::vector<ServerE
 		out << "};\n\n";
 	}
 
-	// Segment-by-segment match helper
 	out << "bool match_path(std::string_view pattern, std::string_view target) {\n";
 	out << "\twhile (!pattern.empty() && !target.empty()) {\n";
 	out << "\t\tif (pattern.front() == '/' && target.front() == '/') {\n";
@@ -186,7 +132,7 @@ void ServerGenerator::emitServerCpp(std::ostream& out, const std::vector<ServerE
 		out << "const std::pair<std::string_view, std::pair<http::verb, fnptr_t>> PARAM_PATHS[] = {\n";
 		for (const auto* ep : param_eps) {
 			std::string verb = ep->method == "delete" ? "delete_" : ep->method;
-			out << "\t{\"" << escapeCppString(ep->path_pattern) << "\"sv, {http::verb::" << verb
+			out << "\t{\"" << escapeCppString(ep->path_template) << "\"sv, {http::verb::" << verb
 				<< ", &Server::" << ep->function_name << "}},\n";
 		}
 		out << "};\n\n";
