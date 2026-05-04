@@ -34,3 +34,4 @@
 [Bb]uild/
 .vscode/
 .cache/
+tests/echo/load_test/profiles/

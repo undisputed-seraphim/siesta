@@ -7,14 +7,15 @@
 
 #include <boost/asio.hpp>
 #include <boost/beast/http.hpp>
-#include <iostream>
+#include <csignal>
+#include <cstdio>
 #include <iostream>
 #include <string>
 #include <string_view>
 
-#include <iostream>
-#include <string>
-#include <string_view>
+#ifdef ENABLE_PROFILER
+#include <gperftools/profiler.h>
+#endif
 
 namespace asio = ::boost::asio;
 namespace http = ::boost::beast::http;
@@ -65,14 +66,40 @@ struct EchoServer : openapi::Server {
 	}
 };
 
+#ifdef ENABLE_PROFILER
+static volatile sig_atomic_t profiler_running = 1;
+
+static void handle_signal(int) {
+	if (!profiler_running) return;
+	ProfilerFlush();
+	ProfilerStop();
+	profiler_running = 0;
+	_exit(0);
+}
+#endif
+
 int main(int argc, char* argv[]) {
 	std::string host = argc > 1 ? argv[1] : "127.0.0.1";
 	uint16_t port = argc > 2 ? static_cast<uint16_t>(std::stoi(argv[2])) : 9900;
+
+#ifdef ENABLE_PROFILER
+	const char* profile_path = getenv("CPUPROFILE");
+	if (profile_path) {
+		ProfilerStart(profile_path);
+		std::signal(SIGINT, handle_signal);
+		std::signal(SIGTERM, handle_signal);
+	}
+#endif
 
 	asio::io_context ctx;
 	EchoServer server(ctx);
 	server.start(asio::ip::make_address(host), port);
 	std::cout << "echo-server listening on " << host << ":" << port << std::endl;
 	ctx.run();
+
+#ifdef ENABLE_PROFILER
+	if (profile_path && profiler_running)
+		ProfilerStop();
+#endif
 	return 0;
 }
