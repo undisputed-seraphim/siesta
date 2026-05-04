@@ -311,6 +311,24 @@ Recent structural improvements (committed in atomic steps with verification):
 23. **Shared `siesta/beast/python_util.hpp`**: `json_to_python` and `extract_response_json` (~90 lines) moved from per-schema inline emission into a single siesta runtime header, included by all generated `py_module.cpp` files.
 24. **Generated code quality**: Removed unnecessary `static_cast<std::string_view>(path)`, `std::move` on NRVO returns, `std::string_view(req.target())` redundant constructor; replaced `using namespace std::literals` with targeted `using std::literals::string_view_literals::operator""sv`.
 
+## Siesta Runtime Refactors
+
+25. **Removed legacy `async_result`/`async_request`**: Dead code (40 lines) superseded by `async_submit_request`; removed `#include <boost/asio/async_result.hpp>`.
+
+26. **Host header**: `ClientBase` now stores `_host_value` (address:port) from `start()` and sets `http::field::host` in `async_submit_request` — Beast requires explicit Host for HTTP/1.1 clients.
+
+27. **`_state` moved into compose lambda**: Eliminates shared mutable state on `ClientBase` between composed-operation invocations. No more `enum { send, recv, done }` member.
+
+28. **ServerBase API cleanup**: `io_context* _ctx` stored as member; `start(address, port)` no longer requires an `io_context&` parameter. Eliminated fragile `[&ctx]` dangling-reference captures in `start()` and `on_accept()`.
+
+29. **ServerBase Config**: `read_timeout` (default 1h) and `write_timeout` (default 30s) added to the previously-empty `Config` struct. `Session::do_read()` and `Session::write()` now use config values instead of hardcoded constants.
+
+30. **`asio::dispatch` → `asio::post`**: `Session::run()` now uses `post` to guarantee deferred execution, avoiding potential deep recursion.
+
+31. **`std::bind_front` → lambdas**: All 4 async callback sites (client resolve/connect, session do_read/write) replaced with explicit lambdas — better inlining, no binder overhead.
+
+32. **MapHash improved**: `_1 ^ (_2 << _1)` → `_1 ^ (_2 + 0x9e3779b9 + (_1 << 6) + (_1 >> 2))` (boost::hash_combine), reducing collision bias for similar strings.
+
 ---
 
 ## Logging

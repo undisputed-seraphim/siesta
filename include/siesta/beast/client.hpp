@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include <boost/asio/async_result.hpp>
 #include <boost/asio/compose.hpp>
-#include <boost/asio/dispatch.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/strand.hpp>
@@ -46,7 +44,6 @@ public:
 	void start(const ::boost::asio::ip::address&, uint16_t);
 	void start(const protocol::endpoint&);
 
-	// Get the io_context reference for running async operations synchronously
 	::boost::asio::io_context& context() { return _ctx; }
 
 	void stop() {
@@ -64,6 +61,8 @@ protected:
 	request_type _request;
 	response_type _response;
 
+	std::string _host_value;
+
 	std::array<unsigned char, 1024 + 256 + 128> _json_buffer;
 
 	void on_resolve(const error_type&, protocol::resolver::results_type);
@@ -77,29 +76,28 @@ protected:
 		t = T(json::value_to<T>(json::parse(resp.body(), &json_rsc)));
 	}
 
-	enum { send, recv, done } _state{send};
-
 	template <::boost::asio::completion_token_for<void(outcome_type)> CompletionToken>
 	auto async_submit_request(request_type req, CompletionToken&& token) {
 		_request = std::move(req);
+		_request.set(::boost::beast::http::field::host, _host_value);
 		return ::boost::asio::async_compose<CompletionToken, void(outcome_type)>(
-			[this, lifetime = shared_from_this()](
-				auto& self, ::boost::system::error_code error = {}, std::size_t bytes = 0) -> void {
+			[this, lifetime = shared_from_this(), state = 0](
+				auto& self, ::boost::system::error_code error = {}, std::size_t bytes = 0) mutable -> void {
 				namespace http = ::boost::beast::http;
 				if (error) {
 					self.complete(std::basic_outcome_failure_exception_from_error(error));
 					return;
 				}
-				switch (_state) {
-				case send: {
-					_state = recv;
+				switch (state) {
+				case 0: { // send
+					state = 1;
 					_stream.expires_after(_conf.write_timeout);
 					http::async_write(_stream, _request, std::move(self));
 					return;
 				}
-				case recv: {
+				case 1: { // recv
 					_response = {};
-					_state = done;
+					state = 2;
 					_stream.expires_after(_conf.read_timeout);
 					http::async_read(_stream, _buffer, _response, std::move(self));
 					return;
@@ -113,49 +111,9 @@ protected:
 				} else {
 					self.complete(std::make_error_code(http_status_code));
 				}
-				_state = send;
+				state = 0;
 			},
 			token);
-	}
-
-	template <::boost::asio::completion_token_for<void(outcome_type)> CompletionToken>
-	auto async_result(CompletionToken&& token) {
-		namespace asio = ::boost::asio;
-		namespace http = ::boost::beast::http;
-		return http::async_read(
-			_stream,
-			_buffer,
-			_response,
-			[self = shared_from_this(),
-			 token = std::forward<CompletionToken>(token)](error_type error, std::size_t bytes) mutable {
-				if (error) {
-					asio::dispatch(std::bind(token, std::basic_outcome_failure_exception_from_error(error)));
-				}
-				const auto http_status_code = self->_response.result();
-				if (http::to_status_class(http_status_code) != http::status_class::successful) {
-					asio::dispatch(std::bind(token, std::make_error_code(http_status_code)));
-				}
-				asio::dispatch(token, std::move(self->_response));
-			});
-	}
-
-	template <::boost::asio::completion_token_for<void(outcome_type)> CompletionToken>
-	auto async_request(CompletionToken&& token) {
-		namespace asio = ::boost::asio;
-		return ::boost::beast::http::async_write(
-			_stream,
-			_request,
-			[self = shared_from_this(),
-			 token = std::forward<CompletionToken>(token)](error_type error, std::size_t bytes) mutable {
-				if (error) {
-					asio::dispatch(std::bind(token, std::basic_outcome_failure_exception_from_error(error)));
-				}
-				auto initiate = [self =
-									 std::move(self)](asio::completion_handler_for<void(outcome_type)> auto&& handler) {
-					self->async_result<CompletionToken>(handler);
-				};
-				return asio::async_initiate<CompletionToken, void(outcome_type)>(initiate, token);
-			});
 	}
 };
 

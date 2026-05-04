@@ -102,7 +102,7 @@ void ServerPythonGenerator::emitServerPy(std::ostream& out, const std::vector<En
 	out << "\t~PyServer() { ctx.stop(); }\n";
 	out << "\n";
 	out << "\tvoid listen(std::string host, uint16_t port) {\n";
-	out << "\t\topenapi::Server::start(ctx, boost::asio::ip::make_address(host), port);\n";
+	out << "\t\topenapi::Server::start(boost::asio::ip::make_address(host), port);\n";
 	out << "\t\tctx.run();\n";
 	out << "\t}\n";
 	out << "\tvoid shutdown() {\n";

@@ -12,15 +12,20 @@ static void fail(std::string_view facility, ::boost::system::error_code ec) {
 	std::cerr << facility << ": " << ec.to_string() << ' ' << ec.message() << std::endl;
 }
 
-ServerBase::ServerBase(asio::io_context& ctx, Config config)
-	: _conf(std::move(config))
+ServerBase::ServerBase(asio::io_context& ctx)
+	: _ctx(&ctx)
 	, _acceptor(asio::make_strand(ctx)) {}
 
-void ServerBase::start(asio::io_context& ctx, const asio::ip::address address, uint16_t port) {
-	start(ctx, protocol::endpoint(address, port));
+ServerBase::ServerBase(asio::io_context& ctx, Config config)
+	: _conf(std::move(config))
+	, _ctx(&ctx)
+	, _acceptor(asio::make_strand(ctx)) {}
+
+void ServerBase::start(const asio::ip::address address, uint16_t port) {
+	start(protocol::endpoint(address, port));
 }
 
-void ServerBase::start(asio::io_context& ctx, const protocol::endpoint& endpoint) {
+void ServerBase::start(const protocol::endpoint& endpoint) {
 	auto ec = ec_t{};
 	_acceptor.open(endpoint.protocol(), ec);
 	if (ec) {
@@ -35,18 +40,18 @@ void ServerBase::start(asio::io_context& ctx, const protocol::endpoint& endpoint
 	if (ec) {
 		return fail("acceptor::listen", ec);
 	}
-	_acceptor.async_accept(asio::make_strand(ctx), [this, &ctx](const ec_t& ec, protocol::socket socket) {
-		on_accept(ctx, ec, std::move(socket));
+	_acceptor.async_accept(asio::make_strand(*_ctx), [this](const ec_t& ec, protocol::socket socket) {
+		on_accept(ec, std::move(socket));
 	});
 }
 
-void ServerBase::on_accept(asio::io_context& ctx, const ec_t& ec, protocol::socket socket) {
+void ServerBase::on_accept(const ec_t& ec, protocol::socket socket) {
 	if (ec) {
 		return fail("on_accept", ec);
 	}
 	std::make_shared<Session>(*this, std::move(socket), _conf, _client_id++)->run();
-	_acceptor.async_accept(asio::make_strand(ctx), [this, &ctx](const ec_t& ec, protocol::socket socket) {
-		on_accept(ctx, ec, std::move(socket));
+	_acceptor.async_accept(asio::make_strand(*_ctx), [this](const ec_t& ec, protocol::socket socket) {
+		on_accept(ec, std::move(socket));
 	});
 }
 
@@ -61,19 +66,25 @@ ServerBase::Session::Session(ServerBase& parent, protocol::socket socket, Config
 ServerBase::Session::~Session() noexcept { do_close(); }
 
 void ServerBase::Session::run() {
-	asio::dispatch(_stream.get_executor(), std::bind_front(&Session::do_read, shared_from_this()));
+	asio::post(_stream.get_executor(), [self = shared_from_this()] {
+		self->do_read();
+	});
 }
 
 void ServerBase::Session::write() {
 	_response.prepare_payload();
-	http::async_write(_stream, _response, std::bind_front(&ServerBase::Session::on_write, shared_from_this()));
+	_stream.expires_after(_config.write_timeout);
+	http::async_write(_stream, _response, [self = shared_from_this()](ec_t ec, std::size_t bytes) {
+		self->on_write(ec, bytes);
+	});
 }
 
 void ServerBase::Session::do_read() {
 	_request = {};
-	_stream.expires_after(std::chrono::hours{1});
-	http::async_read(
-		_stream, _buffer, _request, std::bind_front(&Session::on_read, shared_from_this()));
+	_stream.expires_after(_config.read_timeout);
+	http::async_read(_stream, _buffer, _request, [self = shared_from_this()](ec_t ec, std::size_t bytes) {
+		self->on_read(ec, bytes);
+	});
 }
 
 void ServerBase::Session::on_read(ec_t ec, std::size_t bytes) {
@@ -102,7 +113,7 @@ namespace __detail {
 std::size_t MapHash::operator()(const std::pair<std::string_view, boost::beast::http::verb>& v) const {
 	const std::size_t _1 = std::hash<std::string_view>{}(v.first);
 	const std::size_t _2 = std::hash<boost::beast::http::verb>{}(v.second);
-	return _1 ^ (_2 << _1);
+	return _1 ^ (_2 + 0x9e3779b9 + (_1 << 6) + (_1 >> 2));
 }
 } // namespace __detail
 

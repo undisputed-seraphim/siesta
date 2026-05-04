@@ -2,10 +2,10 @@
 #pragma once
 
 #include <array>
-#include <boost/asio/dispatch.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/address.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/post.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/system_timer.hpp>
 #include <boost/beast/core.hpp>
@@ -24,7 +24,10 @@ public:
 	using protocol = ::boost::asio::ip::tcp;
 	using ec_t = ::boost::system::error_code;
 
-	struct Config {};
+	struct Config {
+		std::chrono::milliseconds read_timeout{std::chrono::hours{1}};
+		std::chrono::milliseconds write_timeout{std::chrono::seconds{30}};
+	};
 
 	class Session : public std::enable_shared_from_this<Session> {
 	public:
@@ -55,19 +58,21 @@ public:
 		void do_close();
 	};
 
-	ServerBase(boost::asio::io_context&, Config = {});
+	ServerBase(boost::asio::io_context&);
+	ServerBase(boost::asio::io_context&, Config);
 
-	void start(boost::asio::io_context&, const ::boost::asio::ip::address, uint16_t);
-	void start(boost::asio::io_context&, const protocol::endpoint&);
+	void start(const ::boost::asio::ip::address, uint16_t);
+	void start(const protocol::endpoint&);
 
 	virtual void handle_request(const request, Session::Ptr) = 0;
 
 protected:
 	Config _conf;
+	boost::asio::io_context* _ctx{nullptr};
 	protocol::acceptor _acceptor;
 	std::atomic<uint64_t> _client_id{0};
 
-	void on_accept(boost::asio::io_context&, const ec_t&, protocol::socket);
+	void on_accept(const ec_t&, protocol::socket);
 };
 
 namespace __detail {
