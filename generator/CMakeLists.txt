@@ -11,4 +11,5 @@ target_link_libraries(siesta-generator PRIVATE
 	Boost::system
 )
 
-install(TARGETS siesta-generator COMPONENT generator)
+include(GNUInstallDirs)
+install(TARGETS siesta-generator EXPORT ${PROJECT_NAME}_Targets RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

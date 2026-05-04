@@ -1,3 +1,8 @@
 @PACKAGE_INIT@
 
+include(CMakeFindDependencyMacro)
+find_dependency(Boost 1.83 COMPONENTS system json)
+set(Boost_USE_STATIC_LIBS ON)
+
 include("${CMAKE_CURRENT_LIST_DIR}/@PROJECT_NAME@Targets.cmake")
+include("${CMAKE_CURRENT_LIST_DIR}/SiestaGenerate.cmake")

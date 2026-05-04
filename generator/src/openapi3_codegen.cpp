@@ -119,7 +119,7 @@ static schema::NormalizedAST buildAST(const openapi::v3::OpenAPIv3& spec) {
 	return ast;
 }
 
-bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path) {
+bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path, GenMode mode, bool python) {
 	// Load OpenAPI spec using the base loader
 	openapi::OpenAPI file;
 	if (!file.Load(input_path.string())) {
@@ -184,6 +184,8 @@ bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path
 	std::string module_name = sanitize(std::string_view(title));
 	if (module_name.empty()) module_name = "siesta_bindings";
 	std::string server_module = module_name + "_server";
+	std::string client_mod = module_name;
+	std::string server_mod = server_module;
 
 	::codegen::CodegenArgs args{ast, order, &spec, std::move(module_name)};
 
@@ -193,29 +195,44 @@ bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path
 		gen(args, output_path);
 	}
 
-	{
+	bool gen_client = (mode == GenMode::client || mode == GenMode::both);
+	bool gen_server = (mode == GenMode::server || mode == GenMode::both);
+
+	if (gen_client) {
 		::codegen::ClientGenerator gen;
 		std::cout << "  Generating client.hpp\n";
 		gen(args, output_path);
 	}
 
-	{
+	if (python && gen_client) {
 		::codegen::PythonGenerator gen;
 		std::cout << "  Generating py_module.cpp\n";
 		gen(args, output_path);
 	}
 
-	{
+	if (gen_server) {
 		::codegen::ServerGenerator gen;
 		std::cout << "  Generating server.hpp/cpp\n";
 		gen(args, output_path);
 	}
 
-	{
+	if (python && gen_server) {
 		::codegen::CodegenArgs server_args{ast, order, &spec, std::move(server_module)};
 		::codegen::ServerPythonGenerator gen;
 		std::cout << "  Generating server_py.cpp\n";
 		gen(server_args, output_path);
+	}
+
+	// Write CMake info fragment for consumers
+	{
+		auto cmake_path = output_path / "siesta_info.cmake";
+		std::ofstream cmf(cmake_path);
+		if (cmf) {
+			if (python && gen_client)
+				cmf << "set(SIESTA_CLIENT_MODULE \"" << client_mod << "\")\n";
+			if (python && gen_server)
+				cmf << "set(SIESTA_SERVER_MODULE \"" << server_mod << "\")\n";
+		}
 	}
 
 	std::cout << "Code generation complete!\n";
