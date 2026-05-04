@@ -185,35 +185,20 @@ bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path
 
 	::codegen::CodegenArgs args{ast, order, &spec, std::move(module_name), &endpoints};
 
-	{
-		::codegen::DefsGenerator gen;
-		std::cout << "  Generating openapi_defs.hpp/cpp\n";
-		gen(args, output_path);
-	}
+	::codegen::DefsGenerator{}(args, output_path);
 
-	if (gen_client) {
-		::codegen::ClientGenerator gen;
-		std::cout << "  Generating client.hpp\n";
-		gen(args, output_path);
-	}
+	if (gen_client)
+		::codegen::ClientGenerator{}(args, output_path);
 
-	if (python && gen_client) {
-		::codegen::PythonGenerator gen;
-		std::cout << "  Generating py_module.cpp\n";
-		gen(args, output_path);
-	}
+	if (python && gen_client)
+		::codegen::PythonGenerator{}(args, output_path);
 
-	if (gen_server) {
-		::codegen::ServerGenerator gen;
-		std::cout << "  Generating server.hpp/cpp\n";
-		gen(args, output_path);
-	}
+	if (gen_server)
+		::codegen::ServerGenerator{}(args, output_path);
 
 	if (python && gen_server) {
 		::codegen::CodegenArgs server_args{ast, order, &spec, std::move(server_module), &endpoints};
-		::codegen::ServerPythonGenerator gen;
-		std::cout << "  Generating server_py.cpp\n";
-		gen(server_args, output_path);
+		::codegen::ServerPythonGenerator{}(server_args, output_path);
 	}
 
 	// Write CMake info fragment for consumers
