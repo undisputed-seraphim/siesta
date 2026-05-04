@@ -101,6 +101,109 @@ void ClientGenerator::emitMethodSignature(std::ostream& out, const Endpoint& ep)
 	out << ")";
 }
 
+void ClientGenerator::emitPathParams(std::ostream& out, const std::vector<const ClientParam*>& path_params) {
+	for (const auto* p : path_params) {
+		bool is_string = p->cpp_type.find("string") != std::string::npos;
+		if (p->required) {
+			if (is_string) {
+				out << "\t\tif (auto _p = target_path.find(\"{}\"); _p != std::string::npos) target_path.replace(_p, 2, "
+					<< p->name << ");\n";
+			} else {
+				out << "\t\tif (auto _p = target_path.find(\"{}\"); _p != std::string::npos) target_path.replace(_p, 2, std::to_string("
+					<< p->name << "));\n";
+			}
+		} else {
+			out << "\t\tif (" << p->name << ".has_value()) {\n";
+			if (is_string) {
+				out << "\t\t\tif (auto _p = target_path.find(\"{}\"); _p != std::string::npos) target_path.replace(_p, 2, *("
+					<< p->name << "));\n";
+			} else {
+				out << "\t\t\tif (auto _p = target_path.find(\"{}\"); _p != std::string::npos) target_path.replace(_p, 2, std::to_string(*("
+					<< p->name << ")));\n";
+			}
+			out << "\t\t}\n";
+		}
+	}
+}
+
+void ClientGenerator::emitRequiredQueryParams(std::ostream& out, const std::vector<const ClientParam*>& required) {
+	if (required.empty()) return;
+	for (const auto* p : required) {
+		bool is_vector = p->cpp_type.find("vector") != std::string::npos;
+		bool is_string = p->cpp_type.find("string") != std::string::npos;
+		if (is_vector) {
+			if (is_string) {
+				out << "\t\tfor (size_t _i = 0; _i < (" << p->name << ").size(); ++_i) {\n";
+				out << "\t\t\tif (_i > 0 || target_has_query) target_path += \"&\";\n";
+				out << "\t\t\telse target_path += \"?\"; target_has_query = true;\n";
+				out << "\t\t\ttarget_path += \"" << p->wire_name << "=\" + url_encode((" << p->name << ")[_i]);\n";
+				out << "\t\t}\n";
+			} else {
+				out << "\t\tfor (size_t _i = 0; _i < (" << p->name << ").size(); ++_i) {\n";
+				out << "\t\t\tif (_i > 0 || target_has_query) target_path += \"&\";\n";
+				out << "\t\t\telse target_path += \"?\"; target_has_query = true;\n";
+				out << "\t\t\ttarget_path += \"" << p->wire_name << "=\" + query_value((" << p->name << ")[_i]);\n";
+				out << "\t\t}\n";
+			}
+		} else if (is_string) {
+			out << "\t\tif (target_has_query) target_path += \"&\"; else target_path += \"?\"; target_has_query = true;\n";
+			out << "\t\ttarget_path += \"" << p->wire_name << "=\" + url_encode(" << p->name << ");\n";
+		} else {
+			out << "\t\tif (target_has_query) target_path += \"&\"; else target_path += \"?\"; target_has_query = true;\n";
+			out << "\t\ttarget_path += \"" << p->wire_name << "=\" + query_value(" << p->name << ");\n";
+		}
+	}
+}
+
+void ClientGenerator::emitOptionalQueryParams(std::ostream& out, const std::vector<const ClientParam*>& optional) {
+	if (optional.empty()) return;
+	out << "\t\tstd::string query_params;\n";
+	for (const auto* p : optional) {
+		bool is_vector = p->cpp_type.find("vector") != std::string::npos;
+		bool is_string = p->cpp_type.find("string") != std::string::npos;
+		bool is_vector_string = is_vector && is_string;
+		out << "\t\tif (" << p->name << ".has_value()) {\n";
+		if (is_vector_string) {
+			out << "\t\t\tfor (size_t _i = 0; _i < (*(" << p->name << ")).size(); ++_i) {\n";
+			out << "\t\t\t\tif (_i > 0) query_params += \"&\";\n";
+			out << "\t\t\t\tquery_params += \"" << p->wire_name << "=\" + url_encode((*(" << p->name << "))[_i]);\n";
+			out << "\t\t\t}\n";
+		} else if (is_vector) {
+			out << "\t\t\tfor (size_t _i = 0; _i < (*(" << p->name << ")).size(); ++_i) {\n";
+			out << "\t\t\t\tif (_i > 0) query_params += \"&\";\n";
+			out << "\t\t\t\tquery_params += \"" << p->wire_name << "=\" + query_value((*(" << p->name << "))[_i]);\n";
+			out << "\t\t\t}\n";
+		} else if (is_string) {
+			out << "\t\t\tif (!query_params.empty()) query_params += \"&\";\n";
+			out << "\t\t\tquery_params += \"" << p->wire_name << "=\" + url_encode(*(" << p->name << "));\n";
+		} else {
+			out << "\t\t\tif (!query_params.empty()) query_params += \"&\";\n";
+			out << "\t\t\tquery_params += \"" << p->wire_name << "=\" + query_value(*(" << p->name << "));\n";
+		}
+		out << "\t\t}\n";
+	}
+	out << "\t\tif (!query_params.empty()) {\n";
+	out << "\t\t\tif (target_has_query) target_path += \"&\" + query_params;\n";
+	out << "\t\t\telse target_path += \"?\" + query_params;\n";
+	out << "\t\t}\n";
+}
+
+void ClientGenerator::emitRequestBody(std::ostream& out, const Endpoint& ep) {
+	if (!ep.has_request_body) return;
+	out << "\t\treq.body() = boost::json::serialize(boost::json::value_from(body));\n";
+	out << "\t\treq.set(::boost::beast::http::field::content_type, \"" << ep.body_content_type << "\");\n";
+	out << "\t\treq.prepare_payload();\n";
+}
+
+void ClientGenerator::emitHeaderParams(std::ostream& out, const std::vector<const ClientParam*>& header_params) {
+	for (const auto* p : header_params) {
+		if (p->required)
+			out << "\t\treq.set(\"" << p->wire_name << "\", " << p->name << ");\n";
+		else
+			out << "\t\tif (" << p->name << ".has_value()) req.set(\"" << p->wire_name << "\", *(" << p->name << "));\n";
+	}
+}
+
 void ClientGenerator::emitMethodBody(std::ostream& out, const Endpoint& ep) {
 	out << "\t\tconstexpr std::string_view path = \"" << escapeCppString(ep.path_template) << "\";\n";
 	out << "\t\trequest_type req;\n";
@@ -109,120 +212,32 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const Endpoint& ep) {
 	std::vector<const ClientParam*> query_params;
 
 	for (const auto& p : ep.params) {
-		if (p.location == "path") {
-			path_params.push_back(&p);
-		} else if (p.location == "query") {
-			query_params.push_back(&p);
-		}
+		if (p.location == "path")       path_params.push_back(&p);
+		else if (p.location == "query") query_params.push_back(&p);
 	}
 
-	bool has_format_args = !path_params.empty() || !query_params.empty();
-
-	if (has_format_args) {
+	if (!path_params.empty() || !query_params.empty()) {
 		out << "\t\tstd::string target_path(static_cast<std::string_view>(path));\n";
-		for (const auto* p : path_params) {
-			bool is_string = p->cpp_type.find("string") != std::string::npos;
-			if (p->required) {
-				if (is_string) {
-					out << "\t\tif (auto _p = target_path.find(\"{}\"); _p != std::string::npos) target_path.replace(_p, 2, "
-						<< p->name << ");\n";
-				} else {
-					out << "\t\tif (auto _p = target_path.find(\"{}\"); _p != std::string::npos) target_path.replace(_p, 2, std::to_string("
-						<< p->name << "));\n";
-				}
-			} else {
-				out << "\t\tif (" << p->name << ".has_value()) {\n";
-				if (is_string) {
-					out << "\t\t\tif (auto _p = target_path.find(\"{}\"); _p != std::string::npos) target_path.replace(_p, 2, *("
-						<< p->name << "));\n";
-				} else {
-					out << "\t\t\tif (auto _p = target_path.find(\"{}\"); _p != std::string::npos) target_path.replace(_p, 2, std::to_string(*("
-						<< p->name << ")));\n";
-				}
-				out << "\t\t}\n";
-			}
-		}
-		std::vector<const ClientParam*> required_query;
-		std::vector<const ClientParam*> optional_query;
+		emitPathParams(out, path_params);
+
+		std::vector<const ClientParam*> required_query, optional_query;
 		for (const auto* p : query_params) {
-			if (p->required) {
-				required_query.push_back(p);
-			} else {
-				optional_query.push_back(p);
-			}
+			if (p->required) required_query.push_back(p);
+			else             optional_query.push_back(p);
 		}
 
-		if (!required_query.empty() || !optional_query.empty()) {
+		if (!required_query.empty() || !optional_query.empty())
 			out << "\t\tbool target_has_query = false;\n";
-		}
-		for (const auto* p : required_query) {
-			bool is_vector = p->cpp_type.find("vector") != std::string::npos;
-			bool is_string = p->cpp_type.find("string") != std::string::npos;
-			if (is_vector) {
-				if (is_string) {
-					out << "\t\tfor (size_t _i = 0; _i < (" << p->name << ").size(); ++_i) {\n";
-					out << "\t\t\tif (_i > 0 || target_has_query) target_path += \"&\";\n";
-					out << "\t\t\telse target_path += \"?\"; target_has_query = true;\n";
-					out << "\t\t\ttarget_path += \"" << p->wire_name << "=\" + url_encode((" << p->name << ")[_i]);\n";
-					out << "\t\t}\n";
-				} else {
-					out << "\t\tfor (size_t _i = 0; _i < (" << p->name << ").size(); ++_i) {\n";
-					out << "\t\t\tif (_i > 0 || target_has_query) target_path += \"&\";\n";
-					out << "\t\t\telse target_path += \"?\"; target_has_query = true;\n";
-					out << "\t\t\ttarget_path += \"" << p->wire_name << "=\" + query_value((" << p->name << ")[_i]);\n";
-					out << "\t\t}\n";
-				}
-			} else if (is_string) {
-				out << "\t\tif (target_has_query) target_path += \"&\"; else target_path += \"?\"; target_has_query = true;\n";
-				out << "\t\ttarget_path += \"" << p->wire_name << "=\" + url_encode(" << p->name << ");\n";
-			} else {
-				out << "\t\tif (target_has_query) target_path += \"&\"; else target_path += \"?\"; target_has_query = true;\n";
-				out << "\t\ttarget_path += \"" << p->wire_name << "=\" + query_value(" << p->name << ");\n";
-			}
-		}
 
-		if (!optional_query.empty()) {
-			out << "\t\tstd::string query_params;\n";
-			for (const auto* p : optional_query) {
-				bool is_vector = p->cpp_type.find("vector") != std::string::npos;
-				bool is_string = p->cpp_type.find("string") != std::string::npos;
-				bool is_vector_string = is_vector && is_string;
-				out << "\t\tif (" << p->name << ".has_value()) {\n";
-				if (is_vector_string) {
-					out << "\t\t\tfor (size_t _i = 0; _i < (*(" << p->name << ")).size(); ++_i) {\n";
-					out << "\t\t\t\tif (_i > 0) query_params += \"&\";\n";
-					out << "\t\t\t\tquery_params += \"" << p->wire_name << "=\" + url_encode((*(" << p->name << "))[_i]);\n";
-					out << "\t\t\t}\n";
-				} else if (is_vector) {
-					out << "\t\t\tfor (size_t _i = 0; _i < (*(" << p->name << ")).size(); ++_i) {\n";
-					out << "\t\t\t\tif (_i > 0) query_params += \"&\";\n";
-					out << "\t\t\t\tquery_params += \"" << p->wire_name << "=\" + query_value((*(" << p->name
-						<< "))[_i]);\n";
-					out << "\t\t\t}\n";
-				} else if (is_string) {
-					out << "\t\t\tif (!query_params.empty()) query_params += \"&\";\n";
-					out << "\t\t\tquery_params += \"" << p->wire_name << "=\" + url_encode(*(" << p->name << "));\n";
-				} else {
-					out << "\t\t\tif (!query_params.empty()) query_params += \"&\";\n";
-					out << "\t\t\tquery_params += \"" << p->wire_name << "=\" + query_value(*(" << p->name << "));\n";
-				}
-				out << "\t\t}\n";
-			}
-			out << "\t\tif (!query_params.empty()) {\n";
-			out << "\t\t\tif (target_has_query) target_path += \"&\" + query_params;\n";
-			out << "\t\t\telse target_path += \"?\" + query_params;\n";
-			out << "\t\t}\n";
-		}
+		emitRequiredQueryParams(out, required_query);
+		emitOptionalQueryParams(out, optional_query);
+
 		out << "\t\treq.target(target_path);\n";
 	} else {
 		out << "\t\treq.target(path);\n";
 	}
 
-	if (ep.has_request_body) {
-		out << "\t\treq.body() = boost::json::serialize(boost::json::value_from(body));\n";
-		out << "\t\treq.set(::boost::beast::http::field::content_type, \"" << ep.body_content_type << "\");\n";
-		out << "\t\treq.prepare_payload();\n";
-	}
+	emitRequestBody(out, ep);
 
 	std::string verb = ep.method == "delete" ? "delete_" : ep.method;
 	out << "\t\treq.method(::boost::beast::http::verb::" << verb << ");\n";
@@ -233,15 +248,11 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const Endpoint& ep) {
 		out << "\t\treq.set(\"" << ep.auth_header_name << "\", \"Bearer \" + " << auth_member_name_ << ");\n";
 	}
 
+	std::vector<const ClientParam*> header_params;
 	for (const auto& p : ep.params) {
-		if (p.location == "header") {
-			if (p.required) {
-				out << "\t\treq.set(\"" << p.wire_name << "\", " << p.name << ");\n";
-			} else {
-				out << "\t\tif (" << p.name << ".has_value()) req.set(\"" << p.wire_name << "\", *(" << p.name << "));\n";
-			}
-		}
+		if (p.location == "header") header_params.push_back(&p);
 	}
+	emitHeaderParams(out, header_params);
 
 	out << "\t\treturn this->async_submit_request(std::move(req), token);\n";
 }
