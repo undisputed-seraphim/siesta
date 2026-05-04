@@ -3,7 +3,7 @@
 // Usage: ./test_server [host] [port]
 // Default: ./test_server 127.0.0.1 9900
 
-#include "../server.hpp"
+#include "server.hpp"
 
 #include <boost/asio.hpp>
 #include <boost/beast/http.hpp>

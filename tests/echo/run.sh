@@ -1,23 +1,23 @@
 #!/bin/bash
 # SPDX-License-Identifier: Apache-2.0
-# Test harness for the echo sample project.
+# Test harness for the echo integration test.
 #
 # Usage:
-#   ./test/run.sh           # build + run all tests
-#   ./test/run.sh --quick   # run only (assumes already built)
-#   ./test/run.sh --server  # start server in foreground (for manual testing)
+#   ./run.sh              # build + run all tests
+#   ./run.sh --quick      # run only (assumes already built)
+#   ./run.sh --server     # start server in foreground (for manual testing)
 #
 # Environment:
 #   HOST, PORT       — override the listen address (default 127.0.0.1:9910)
-#   SIESTA_PREFIX    — path to siesta install (default: ../build)
+#   SIESTA_PREFIX    — path to siesta install (default: ../../build)
 
 set -euo pipefail
 
-ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+ROOT="$(cd "$(dirname "$0")" && pwd)"
 BUILD="$ROOT/build"
 SERVE="${HOST:-127.0.0.1}"
 PORT="${PORT:-9910}"
-SIESTA_PREFIX="${SIESTA_PREFIX:-"$ROOT/../build"}"
+SIESTA_PREFIX="${SIESTA_PREFIX:-"$ROOT/../../build"}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -29,7 +29,7 @@ fail() { echo -e "${RED}FAIL${NC} $*"; }
 
 ensure_build() {
 	if [[ ! -d "$BUILD" ]] || [[ ! -f "$BUILD/build.ninja" ]]; then
-		log "building echo project (${BUILD})"
+		log "building echo project"
 		mkdir -p "$BUILD"
 		cmake -S "$ROOT" -B "$BUILD" \
 			-DCMAKE_PREFIX_PATH="$SIESTA_PREFIX" \
@@ -63,7 +63,7 @@ run_tests() {
 
 	log "running Python client tests"
 	local out rc=0
-	out=$(HOST="$SERVE" PORT="$PORT" python3 "$ROOT/test/test_client.py" 2>&1) || rc=$?
+	out=$(HOST="$SERVE" PORT="$PORT" python3 "$ROOT/test_client.py" 2>&1) || rc=$?
 
 	echo "$out"
 
@@ -81,7 +81,7 @@ run_tests() {
 
 case "${1:-}" in
 	--quick)
-		python3 "$ROOT/test/test_client.py"
+		python3 "$ROOT/test_client.py"
 		;;
 	--server)
 		ensure_build
