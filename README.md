@@ -86,7 +86,7 @@ cd build && ninja siesta-generator
 cd out && cmake -B build -DSIESTA_ROOT=.. -GNinja && ninja -C build
 
 # Run the echo integration tests (reference)
-cd echo && ./test/run.sh
+cd tests/echo && ./run.sh
 ```
 
 The `echo/` directory is the reference test project. It has a single `GET

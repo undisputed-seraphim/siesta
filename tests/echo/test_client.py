@@ -47,7 +47,7 @@ def main():
     host = os.environ.get("HOST", "127.0.0.1")
     port = int(os.environ.get("PORT", "9910"))
 
-    build_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "build")
+    build_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "build")
     sys.path.insert(0, build_dir)
 
     try:

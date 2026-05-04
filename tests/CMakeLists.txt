@@ -20,22 +20,3 @@ target_link_libraries(siesta_test
 )
 
 catch_discover_tests(siesta_test)
-
-add_custom_command(
-OUTPUT
-	${CMAKE_BINARY_DIR}/test_echo/echo_client.hpp
-	${CMAKE_BINARY_DIR}/test_echo/echo_defs.cpp
-	${CMAKE_BINARY_DIR}/test_echo/echo_defs.hpp
-	${CMAKE_BINARY_DIR}/test_echo/echo_server.cpp
-	${CMAKE_BINARY_DIR}/test_echo/echo_server.hpp
-COMMAND
-	${CMAKE_BINARY_DIR}/generator/siesta-generator -i ${CMAKE_CURRENT_SOURCE_DIR}/tests/echo.json -o ${CMAKE_BINARY_DIR}/test_echo/
-DEPENDS
-	siesta-generator
-)
-
-#file(GLOB_RECURSE samplesrc "${CMAKE_CURRENT_SOURCE_DIR}/binance/*")
-#if (samplesrc)
-#	add_library(samples SHARED ${samplesrc})
-#	target_link_libraries(samples PUBLIC siesta Boost::boost)
-#endif()
