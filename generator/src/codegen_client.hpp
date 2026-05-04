@@ -29,13 +29,13 @@ private:
 	void generateClientHpp(std::ostream& out, const std::vector<Endpoint>& endpoints);
 
 	void emitPathParams(std::ostream& out, const std::vector<const ClientParam*>& path_params);
-	void emitRequiredQueryParams(std::ostream& out, const std::vector<const ClientParam*>& required);
-	void emitOptionalQueryParams(std::ostream& out, const std::vector<const ClientParam*>& optional);
+	void emitQueryParams(std::ostream& out, const std::vector<const ClientParam*>& params);
 	void emitRequestBody(std::ostream& out, const Endpoint& ep);
 	void emitHeaderParams(std::ostream& out, const std::vector<const ClientParam*>& params);
 
 	AuthType auth_type_ = AuthType::None;
 	std::string auth_member_name_;
+	std::string auth_value_member_;
 	std::string auth_param_name_;
 };
 

@@ -145,6 +145,7 @@ std::vector<Endpoint> parseEndpoints(const openapi::v3::OpenAPIv3& spec) {
 		Endpoint ep;
 		ep.method = method;
 		ep.path = co.path;
+		ep.cpp_verb = method == "delete" ? "delete_" : method;
 		if (!co.summary.empty()) ep.summary = co.summary;
 		if (!co.description.empty()) ep.description = co.description;
 		ep.function_name = generateFunctionName(method, co.path);

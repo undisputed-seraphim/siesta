@@ -37,6 +37,7 @@ struct Endpoint {
 	std::string function_name;
 	std::string summary;
 	std::string description;
+	std::string cpp_verb;
 	std::vector<ClientParam> params;
 	bool has_request_body = false;
 	std::string body_type;
