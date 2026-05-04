@@ -14,15 +14,14 @@ void ClientGenerator::operator()(const CodegenArgs& args, const std::filesystem:
 
 	const auto& endpoints = *args.endpoints;
 
-	// Determine class-wide auth config from the first secured endpoint
 	for (const auto& ep : endpoints) {
 		if (ep.auth_type != AuthType::None) {
 			auth_type_ = ep.auth_type;
-			if (auth_type_ == AuthType::ApiKey) {
-				auth_member_name_ = "_api_key";
-				auth_param_name_ = "api_key";
-			} else if (auth_type_ == AuthType::HttpBearer) {
+			auth_member_name_ = "_api_key";
+			auth_param_name_ = "api_key";
+			if (auth_type_ == AuthType::HttpBearer) {
 				auth_member_name_ = "_bearer_token";
+				auth_value_member_ = "_auth_header";
 				auth_param_name_ = "bearer_token";
 			}
 			break;
@@ -42,13 +41,20 @@ void ClientGenerator::emitClassHeader(std::ostream& out) {
 	out << "class Client : public ::siesta::beast::ClientBase {\n";
 	if (auth_type_ != AuthType::None) {
 		out << "\tstd::string " << auth_member_name_ << ";\n";
+		if (auth_type_ == AuthType::HttpBearer) {
+			out << "\tstd::string " << auth_value_member_ << ";\n";
+		}
 	}
 	out << "public:\n";
 	if (auth_type_ != AuthType::None) {
 		out << "\tClient(::boost::asio::io_context& ctx, std::string " << auth_param_name_
 			<< ", Config conf = Config())\n";
 		out << "\t\t: ClientBase(ctx, conf)\n";
-		out << "\t\t, " << auth_member_name_ << "(std::move(" << auth_param_name_ << ")) {}\n";
+		out << "\t\t, " << auth_member_name_ << "(std::move(" << auth_param_name_ << "))";
+		if (auth_type_ == AuthType::HttpBearer) {
+			out << "\n\t\t, " << auth_value_member_ << "(\"Bearer \" + " << auth_member_name_ << ")";
+		}
+		out << " {}\n";
 	} else {
 		out << "\tusing ::siesta::beast::ClientBase::ClientBase;\n";
 	}
@@ -115,77 +121,55 @@ void ClientGenerator::emitPathParams(std::ostream& out, const std::vector<const 
 		} else {
 			out << "\t\tif (" << p->name << ".has_value()) {\n";
 			if (is_string) {
-				out << "\t\t\tif (auto _p = target_path.find(\"{}\"); _p != std::string::npos) target_path.replace(_p, 2, *("
-					<< p->name << "));\n";
+				out << "\t\t\tif (auto _p = target_path.find(\"{}\"); _p != std::string::npos) target_path.replace(_p, 2, *"
+					<< p->name << ");\n";
 			} else {
-				out << "\t\t\tif (auto _p = target_path.find(\"{}\"); _p != std::string::npos) target_path.replace(_p, 2, std::to_string(*("
-					<< p->name << ")));\n";
+				out << "\t\t\tif (auto _p = target_path.find(\"{}\"); _p != std::string::npos) target_path.replace(_p, 2, std::to_string(*"
+					<< p->name << "));\n";
 			}
 			out << "\t\t}\n";
 		}
 	}
 }
 
-void ClientGenerator::emitRequiredQueryParams(std::ostream& out, const std::vector<const ClientParam*>& required) {
-	if (required.empty()) return;
-	for (const auto* p : required) {
-		bool is_vector = p->cpp_type.find("vector") != std::string::npos;
-		bool is_string = p->cpp_type.find("string") != std::string::npos;
-		if (is_vector) {
-			if (is_string) {
-				out << "\t\tfor (size_t _i = 0; _i < (" << p->name << ").size(); ++_i) {\n";
-				out << "\t\t\tif (_i > 0 || target_has_query) target_path += \"&\";\n";
-				out << "\t\t\telse target_path += \"?\"; target_has_query = true;\n";
-				out << "\t\t\ttarget_path += \"" << p->wire_name << "=\" + url_encode((" << p->name << ")[_i]);\n";
-				out << "\t\t}\n";
-			} else {
-				out << "\t\tfor (size_t _i = 0; _i < (" << p->name << ").size(); ++_i) {\n";
-				out << "\t\t\tif (_i > 0 || target_has_query) target_path += \"&\";\n";
-				out << "\t\t\telse target_path += \"?\"; target_has_query = true;\n";
-				out << "\t\t\ttarget_path += \"" << p->wire_name << "=\" + query_value((" << p->name << ")[_i]);\n";
-				out << "\t\t}\n";
-			}
-		} else if (is_string) {
-			out << "\t\tif (target_has_query) target_path += \"&\"; else target_path += \"?\"; target_has_query = true;\n";
-			out << "\t\ttarget_path += \"" << p->wire_name << "=\" + url_encode(" << p->name << ");\n";
-		} else {
-			out << "\t\tif (target_has_query) target_path += \"&\"; else target_path += \"?\"; target_has_query = true;\n";
-			out << "\t\ttarget_path += \"" << p->wire_name << "=\" + query_value(" << p->name << ");\n";
-		}
-	}
-}
-
-void ClientGenerator::emitOptionalQueryParams(std::ostream& out, const std::vector<const ClientParam*>& optional) {
-	if (optional.empty()) return;
-	out << "\t\tstd::string query_params;\n";
-	for (const auto* p : optional) {
+void ClientGenerator::emitQueryParams(std::ostream& out, const std::vector<const ClientParam*>& params) {
+	for (const auto* p : params) {
 		bool is_vector = p->cpp_type.find("vector") != std::string::npos;
 		bool is_string = p->cpp_type.find("string") != std::string::npos;
 		bool is_vector_string = is_vector && is_string;
-		out << "\t\tif (" << p->name << ".has_value()) {\n";
-		if (is_vector_string) {
-			out << "\t\t\tfor (size_t _i = 0; _i < (*(" << p->name << ")).size(); ++_i) {\n";
-			out << "\t\t\t\tif (_i > 0) query_params += \"&\";\n";
-			out << "\t\t\t\tquery_params += \"" << p->wire_name << "=\" + url_encode((*(" << p->name << "))[_i]);\n";
-			out << "\t\t\t}\n";
-		} else if (is_vector) {
-			out << "\t\t\tfor (size_t _i = 0; _i < (*(" << p->name << ")).size(); ++_i) {\n";
-			out << "\t\t\t\tif (_i > 0) query_params += \"&\";\n";
-			out << "\t\t\t\tquery_params += \"" << p->wire_name << "=\" + query_value((*(" << p->name << "))[_i]);\n";
-			out << "\t\t\t}\n";
-		} else if (is_string) {
-			out << "\t\t\tif (!query_params.empty()) query_params += \"&\";\n";
-			out << "\t\t\tquery_params += \"" << p->wire_name << "=\" + url_encode(*(" << p->name << "));\n";
+
+		if (p->required) {
+			if (is_vector_string) {
+				out << "\t\tfor (size_t _i = 0; _i < " << p->name << ".size(); ++_i) {\n";
+				out << "\t\t\t_sep(); query += \"" << p->wire_name << "=\" + url_encode(" << p->name << "[_i]);\n";
+				out << "\t\t}\n";
+			} else if (is_vector) {
+				out << "\t\tfor (size_t _i = 0; _i < " << p->name << ".size(); ++_i) {\n";
+				out << "\t\t\t_sep(); query += \"" << p->wire_name << "=\" + query_value(" << p->name << "[_i]);\n";
+				out << "\t\t}\n";
+			} else if (is_string) {
+				out << "\t\t_sep(); query += \"" << p->wire_name << "=\" + url_encode(" << p->name << ");\n";
+			} else {
+				out << "\t\t_sep(); query += \"" << p->wire_name << "=\" + query_value(" << p->name << ");\n";
+			}
 		} else {
-			out << "\t\t\tif (!query_params.empty()) query_params += \"&\";\n";
-			out << "\t\t\tquery_params += \"" << p->wire_name << "=\" + query_value(*(" << p->name << "));\n";
+			out << "\t\tif (" << p->name << ".has_value()) {\n";
+			if (is_vector_string) {
+				out << "\t\t\tfor (size_t _i = 0; _i < " << p->name << "->size(); ++_i) {\n";
+				out << "\t\t\t\t_sep(); query += \"" << p->wire_name << "=\" + url_encode((*" << p->name << ")[_i]);\n";
+				out << "\t\t\t}\n";
+			} else if (is_vector) {
+				out << "\t\t\tfor (size_t _i = 0; _i < " << p->name << "->size(); ++_i) {\n";
+				out << "\t\t\t\t_sep(); query += \"" << p->wire_name << "=\" + query_value((*" << p->name << ")[_i]);\n";
+				out << "\t\t\t}\n";
+			} else if (is_string) {
+				out << "\t\t\t_sep(); query += \"" << p->wire_name << "=\" + url_encode(*" << p->name << ");\n";
+			} else {
+				out << "\t\t\t_sep(); query += \"" << p->wire_name << "=\" + query_value(*" << p->name << ");\n";
+			}
+			out << "\t\t}\n";
 		}
-		out << "\t\t}\n";
 	}
-	out << "\t\tif (!query_params.empty()) {\n";
-	out << "\t\t\tif (target_has_query) target_path += \"&\" + query_params;\n";
-	out << "\t\t\telse target_path += \"?\" + query_params;\n";
-	out << "\t\t}\n";
 }
 
 void ClientGenerator::emitRequestBody(std::ostream& out, const Endpoint& ep) {
@@ -200,7 +184,7 @@ void ClientGenerator::emitHeaderParams(std::ostream& out, const std::vector<cons
 		if (p->required)
 			out << "\t\treq.set(\"" << p->wire_name << "\", " << p->name << ");\n";
 		else
-			out << "\t\tif (" << p->name << ".has_value()) req.set(\"" << p->wire_name << "\", *(" << p->name << "));\n";
+			out << "\t\tif (" << p->name << ".has_value()) req.set(\"" << p->wire_name << "\", *" << p->name << ");\n";
 	}
 }
 
@@ -216,36 +200,47 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const Endpoint& ep) {
 		else if (p.location == "query") query_params.push_back(&p);
 	}
 
-	if (!path_params.empty() || !query_params.empty()) {
-		out << "\t\tstd::string target_path(static_cast<std::string_view>(path));\n";
+	bool has_path = !path_params.empty();
+	bool has_query = !query_params.empty();
+
+	if (!has_path && !has_query) {
+		out << "\t\treq.target(path);\n";
+	} else if (!has_path && has_query) {
+		// Only query params — build query first, allocate target_path
+		// only if at least one value was supplied
+		out << "\t\tstd::string query;\n";
+		out << "\t\tauto _sep = [&]{ if (!query.empty()) query += '&'; };\n";
+		emitQueryParams(out, query_params);
+		out << "\t\tif (!query.empty()) {\n";
+		out << "\t\t\tstd::string target_path(path);\n";
+		out << "\t\t\ttarget_path += '?';\n";
+		out << "\t\t\ttarget_path += query;\n";
+		out << "\t\t\treq.target(target_path);\n";
+		out << "\t\t} else {\n";
+		out << "\t\t\treq.target(path);\n";
+		out << "\t\t}\n";
+	} else if (has_path && !has_query) {
+		out << "\t\tstd::string target_path(path);\n";
 		emitPathParams(out, path_params);
-
-		std::vector<const ClientParam*> required_query, optional_query;
-		for (const auto* p : query_params) {
-			if (p->required) required_query.push_back(p);
-			else             optional_query.push_back(p);
-		}
-
-		if (!required_query.empty() || !optional_query.empty())
-			out << "\t\tbool target_has_query = false;\n";
-
-		emitRequiredQueryParams(out, required_query);
-		emitOptionalQueryParams(out, optional_query);
-
 		out << "\t\treq.target(target_path);\n";
 	} else {
-		out << "\t\treq.target(path);\n";
+		out << "\t\tstd::string target_path(path);\n";
+		emitPathParams(out, path_params);
+		out << "\t\tstd::string query;\n";
+		out << "\t\tauto _sep = [&]{ if (!query.empty()) query += '&'; };\n";
+		emitQueryParams(out, query_params);
+		out << "\t\tif (!query.empty()) { target_path += '?'; target_path += query; }\n";
+		out << "\t\treq.target(target_path);\n";
 	}
 
 	emitRequestBody(out, ep);
 
-	std::string verb = ep.method == "delete" ? "delete_" : ep.method;
-	out << "\t\treq.method(::boost::beast::http::verb::" << verb << ");\n";
+	out << "\t\treq.method(::boost::beast::http::verb::" << ep.cpp_verb << ");\n";
 
 	if (ep.auth_type == AuthType::ApiKey) {
 		out << "\t\treq.set(\"" << ep.auth_header_name << "\", " << auth_member_name_ << ");\n";
 	} else if (ep.auth_type == AuthType::HttpBearer) {
-		out << "\t\treq.set(\"" << ep.auth_header_name << "\", \"Bearer \" + " << auth_member_name_ << ");\n";
+		out << "\t\treq.set(\"" << ep.auth_header_name << "\", " << auth_value_member_ << ");\n";
 	}
 
 	std::vector<const ClientParam*> header_params;
@@ -291,9 +286,18 @@ void ClientGenerator::generateClientHpp(std::ostream& out, const std::vector<End
 	out << "\treturn result;\n";
 	out << "}\n\n";
 
+	out << "inline std::string query_value(int32_t v)  { return std::to_string(v); }\n";
+	out << "inline std::string query_value(int64_t v)  { return std::to_string(v); }\n";
+	out << "inline std::string query_value(uint32_t v) { return std::to_string(v); }\n";
+	out << "inline std::string query_value(uint64_t v) { return std::to_string(v); }\n";
+	out << "inline std::string query_value(double v)   { return std::to_string(v); }\n";
+	out << "inline std::string query_value(float v)    { return std::to_string(v); }\n";
+	out << "inline std::string query_value(bool v)     { return v ? \"true\" : \"false\"; }\n";
+	out << "inline std::string query_value(const std::string& v) { return url_encode(v); }\n";
 	out << "inline std::string query_value(const auto& val) {\n";
 	out << "    return boost::json::value_to<std::string>(boost::json::value_from(val));\n";
-	out << "}\n\n";
+	out << "}\n";
+	out << "\n";
 
 	emitClassHeader(out);
 

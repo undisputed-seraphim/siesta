@@ -80,7 +80,7 @@ void ServerGenerator::emitServerCpp(std::ostream& out, const std::vector<Endpoin
 	out << "#include <utility>\n";
 	out << "\n";
 	out << "namespace http = ::boost::beast::http;\n";
-	out << "using namespace std::literals;\n";
+	out << "using std::literals::string_view_literals::operator\"\"sv;\n";
 	out << "\n";
 	out << "namespace openapi {\n";
 	out << "namespace {\n";
@@ -102,8 +102,7 @@ void ServerGenerator::emitServerCpp(std::ostream& out, const std::vector<Endpoin
 		out << "const std::unordered_map<std::pair<std::string_view, http::verb>, Server::fnptr_t,\n";
 		out << "    ::siesta::beast::__detail::MapHash> STATIC_PATHS = {\n";
 		for (const auto* ep : static_eps) {
-			std::string verb = ep->method == "delete" ? "delete_" : ep->method;
-			out << "\t{{\"" << escapeCppString(ep->path) << "\"sv, http::verb::" << verb
+			out << "\t{{\"" << escapeCppString(ep->path) << "\"sv, http::verb::" << ep->cpp_verb
 				<< "}, &Server::" << ep->function_name << "},\n";
 		}
 		out << "};\n\n";
@@ -131,8 +130,7 @@ void ServerGenerator::emitServerCpp(std::ostream& out, const std::vector<Endpoin
 	if (!param_eps.empty()) {
 		out << "const std::pair<std::string_view, std::pair<http::verb, fnptr_t>> PARAM_PATHS[] = {\n";
 		for (const auto* ep : param_eps) {
-			std::string verb = ep->method == "delete" ? "delete_" : ep->method;
-			out << "\t{\"" << escapeCppString(ep->path_template) << "\"sv, {http::verb::" << verb
+			out << "\t{\"" << escapeCppString(ep->path_template) << "\"sv, {http::verb::" << ep->cpp_verb
 				<< ", &Server::" << ep->function_name << "}},\n";
 		}
 		out << "};\n\n";
@@ -142,7 +140,7 @@ void ServerGenerator::emitServerCpp(std::ostream& out, const std::vector<Endpoin
 	out << "\n";
 
 	out << "void Server::handle_request(const request req, Session::Ptr session) {\n";
-	out << "\tstd::string_view target = std::string_view(req.target());\n";
+	out << "\tauto target = std::string_view(req.target());\n";
 	out << "\tif (auto q = target.find('?'); q != std::string_view::npos) target = target.substr(0, q);\n";
 	out << "\tconst auto method = req.method();\n";
 	out << "\n";

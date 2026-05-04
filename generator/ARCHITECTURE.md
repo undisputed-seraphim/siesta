@@ -304,6 +304,12 @@ Recent structural improvements (committed in atomic steps with verification):
 16. **Decompose `schema_parser`**: 513-line header-only file split into declarations (`.hpp`) + implementations (`.cpp`). `parseSchema` (was 255-line switch) decomposed into `parseObjectSchema`, `parseArraySchema`, `parsePrimitiveSchema`, `parseUnknownSchema` — top-level dispatch now ~20 lines.
 17. **Decompose `emitMethodBody`**: 143-line client method body split into 5 focused functions: `emitPathParams`, `emitRequiredQueryParams`, `emitOptionalQueryParams`, `emitRequestBody`, `emitHeaderParams`. Orchestrator now ~40 lines.
 18. **Table-drive `sanitize`**: Reserved C++ keywords moved from `constexpr std::array` + `std::any_of` (O(n) linear scan over 71 entries) to `static const std::unordered_set<std::string_view>` (O(1) average lookup).
+19. **Unified query-string building**: `emitRequiredQueryParams` + `emitOptionalQueryParams` merged into `emitQueryParams`. Single `query` buffer with `_sep` lambda replaces the dual-path (required-direct-to-target / optional-buffer-then-merge) pattern. Eliminates redundant `target_has_query` bool and N surface-level ternaries.
+20. **Pre-computed auth header**: `HttpBearer` `"Bearer " + token` is constructed in the Client constructor under `_auth_header`. Per-endpoint methods use the stored string instead of allocating a temporary each call.
+21. **Type-specialized `query_value`**: Explicit overloads for `int32_t`–`bool` use `std::to_string()` / literal `"true"`/`"false"` instead of round-trip `value_from`→`value_to<string>`. A generic `const auto&` template remains as a fallback for complex types like `boost::json::value`.
+22. **Centralized `delete_` conversion**: `Endpoint::cpp_verb` field, populated once during `parseEndpoints()`, replaces repeated `ep.method == "delete" ? "delete_"` checks in client, server (static paths), and server (param paths) emitters.
+23. **Shared `siesta/beast/python_util.hpp`**: `json_to_python` and `extract_response_json` (~90 lines) moved from per-schema inline emission into a single siesta runtime header, included by all generated `py_module.cpp` files.
+24. **Generated code quality**: Removed unnecessary `static_cast<std::string_view>(path)`, `std::move` on NRVO returns, `std::string_view(req.target())` redundant constructor; replaced `using namespace std::literals` with targeted `using std::literals::string_view_literals::operator""sv`.
 
 ---
 

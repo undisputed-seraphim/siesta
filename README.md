@@ -39,6 +39,26 @@ details in `generator/ARCHITECTURE.md`.
 
 ## Generated output
 
+All generated `.hpp`/`.cpp` files follow consistent conventions:
+
+- **No `std::regex` dependency** in generated headers — path parameter substitution uses
+  `std::string::find` + `replace` instead.
+- **Unified query-string building** — a single `query` buffer with a `_sep` lambda
+  eliminates the old dual-path (required-direct / optional-buffer) pattern.
+- **Type-specialized `query_value`** — overloads for `int{32,64}_t`, `uint{32,64}_t`,
+  `float`, `double`, `bool`, `std::string` avoid round-trip JSON serialization.
+  A generic `const auto&` template fallback handles complex types.
+- **Pre-computed auth headers** — `Bearer <token>` (for `HttpBearer`) is
+  constructed in the constructor so each endpoint method avoids a per-call allocation.
+- **Targeted literals** — `using std::literals::string_view_literals::operator""sv`
+  instead of the bulk `using namespace std::literals`.
+- **No superfluous casts** — `std::string_view(req.target())` → `auto target = ...`,
+  `static_cast<std::string_view>(path)` → just `path`.
+- **No `std::move` on NRVO returns** — `return py_list;` not `return std::move(py_list);`.
+- **Shared `siesta/beast/python_util.hpp`** — `json_to_python` and
+  `extract_response_json` live in the siesta runtime header, not duplicated in
+  every generated py_module.cpp.
+
 ### Type definitions (`openapi_defs.hpp` / `.cpp`)
 
 Structs, variants (`std::variant`), enums, and map/array aliases for every type
