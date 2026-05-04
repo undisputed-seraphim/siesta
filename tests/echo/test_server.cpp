@@ -71,7 +71,7 @@ int main(int argc, char* argv[]) {
 
 	asio::io_context ctx;
 	EchoServer server(ctx);
-	server.start(ctx, asio::ip::make_address(host), port);
+	server.start(asio::ip::make_address(host), port);
 	std::cout << "echo-server listening on " << host << ":" << port << std::endl;
 	ctx.run();
 	return 0;

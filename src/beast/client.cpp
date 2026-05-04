@@ -22,7 +22,10 @@ void ClientBase::start(const ::boost::asio::ip::address& address, uint16_t port)
 	start(protocol::endpoint(address, port));
 }
 void ClientBase::start(const protocol::endpoint& endpoint) {
-	_resolver.async_resolve(endpoint, std::bind_front(&ClientBase::on_resolve, shared_from_this()));
+	_host_value = endpoint.address().to_string() + ":" + std::to_string(endpoint.port());
+	_resolver.async_resolve(endpoint, [self = shared_from_this()](const error_type& ec, protocol::resolver::results_type results) {
+		self->on_resolve(ec, results);
+	});
 }
 
 void ClientBase::on_resolve(const error_type& ec, protocol::resolver::results_type results) {
@@ -30,7 +33,9 @@ void ClientBase::on_resolve(const error_type& ec, protocol::resolver::results_ty
 		return fail("on_resolve", ec);
 	}
 	_stream.expires_after(_conf.connect_timeout);
-	_stream.async_connect(results, std::bind_front(&ClientBase::on_connect, shared_from_this()));
+	_stream.async_connect(results, [self = shared_from_this()](const error_type& ec, protocol::resolver::endpoint_type endpoint) {
+		self->on_connect(ec, endpoint);
+	});
 }
 
 void ClientBase::on_connect(const error_type& ec, protocol::resolver::endpoint_type endpoint) {
