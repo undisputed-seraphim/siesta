@@ -3,23 +3,13 @@ project(echo LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-set(SIESTA_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." CACHE PATH "")
-find_package(Boost 1.83 REQUIRED COMPONENTS system json)
-find_package(Python 3.10 REQUIRED COMPONENTS Interpreter Development)
-find_package(nanobind 2.12 REQUIRED)
-add_library(siesta STATIC IMPORTED)
-set_target_properties(siesta PROPERTIES IMPORTED_LOCATION "${SIESTA_ROOT}/build/libsiesta.a")
-add_library(echo_defs STATIC openapi_defs.cpp)
-target_include_directories(echo_defs PUBLIC . "${SIESTA_ROOT}/include" "${SIESTA_ROOT}/generator/src")
-target_link_libraries(echo_defs PUBLIC Boost::json Boost::system siesta)
-nanobind_add_module(Echo_API py_module.cpp)
-target_compile_definitions(Echo_API PRIVATE NB_DOMAIN=siesta)
-target_include_directories(Echo_API PRIVATE . "${SIESTA_ROOT}/include" "${SIESTA_ROOT}/generator/src")
-target_link_libraries(Echo_API PRIVATE echo_defs Boost::json Boost::system siesta)
-nanobind_add_module(Echo_API_server server_py.cpp server.cpp)
-target_compile_definitions(Echo_API_server PRIVATE NB_DOMAIN=siesta)
-target_include_directories(Echo_API_server PRIVATE . "${SIESTA_ROOT}/include" "${SIESTA_ROOT}/generator/src")
-target_link_libraries(Echo_API_server PRIVATE echo_defs Boost::json Boost::system siesta)
-add_executable(test_server test/test_server.cpp server.cpp)
-target_include_directories(test_server PRIVATE . "${SIESTA_ROOT}/include" "${SIESTA_ROOT}/generator/src")
-target_link_libraries(test_server PRIVATE Boost::json Boost::system siesta)
+
+find_package(siesta REQUIRED)
+
+add_executable(echo_server test/test_server.cpp)
+
+siesta_generate(
+	TARGET echo_server
+	SCHEMA ${CMAKE_CURRENT_SOURCE_DIR}/../tests/echo_v3.json
+	MODE BOTH
+)
