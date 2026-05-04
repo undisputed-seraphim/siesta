@@ -19,8 +19,7 @@ namespace codegen {
 
 class ServerPythonGenerator : public ICodeGenerator {
 public:
-	explicit ServerPythonGenerator(std::string module_name)
-		: module_name_(std::move(module_name)) {}
+	explicit ServerPythonGenerator() = default;
 
 	void operator()(const CodegenArgs& args, const std::filesystem::path& output_dir) override;
 

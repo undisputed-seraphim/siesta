@@ -13,6 +13,7 @@ void ServerPythonGenerator::operator()(const CodegenArgs& args, const std::files
 		return;
 	}
 
+	module_name_ = args.module_name;
 	auto endpoints = parseEndpoints(*args.spec);
 
 	std::filesystem::create_directories(output_dir);

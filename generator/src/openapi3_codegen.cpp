@@ -180,7 +180,12 @@ bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path
 
 	std::cout << "Phase 4: Generating C++ code...\n";
 
-	::codegen::CodegenArgs args{ast, order, &spec};
+	std::string title = std::string(spec.info().title());
+	std::string module_name = sanitize(std::string_view(title));
+	if (module_name.empty()) module_name = "siesta_bindings";
+	std::string server_module = module_name + "_server";
+
+	::codegen::CodegenArgs args{ast, order, &spec, std::move(module_name)};
 
 	{
 		::codegen::DefsGenerator gen;
@@ -195,7 +200,7 @@ bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path
 	}
 
 	{
-		::codegen::PythonGenerator gen("siesta_bindings");
+		::codegen::PythonGenerator gen;
 		std::cout << "  Generating py_module.cpp\n";
 		gen(args, output_path);
 	}
@@ -207,9 +212,10 @@ bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path
 	}
 
 	{
-		::codegen::ServerPythonGenerator gen("siesta_bindings");
+		::codegen::CodegenArgs server_args{ast, order, &spec, std::move(server_module)};
+		::codegen::ServerPythonGenerator gen;
 		std::cout << "  Generating server_py.cpp\n";
-		gen(args, output_path);
+		gen(server_args, output_path);
 	}
 
 	std::cout << "Code generation complete!\n";
