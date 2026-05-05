@@ -304,14 +304,12 @@ void DefsGenerator::generateDefsCpp(std::ostream& out,
 					emitEnumSerialization(out, t);
 					cpp_enums++;
 				} else if constexpr (std::is_same_v<T, schema::PrimitiveType>) {
-					// Primitives with enum values are now enum classes - emit serialization
 					if (!t.enum_values.empty()) {
 						emitEnumFromPrimitiveSerialization(out, name, t);
 					}
 				}
 			},
 			*type);
-		out << "\n";
 	}
 
 	LOG_EMIT(

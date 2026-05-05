@@ -297,7 +297,6 @@ void ClientGenerator::generateClientHpp(std::ostream& out, const std::vector<End
 	out << "inline std::string query_value(const auto& val) {\n";
 	out << "    return boost::json::value_to<std::string>(boost::json::value_from(val));\n";
 	out << "}\n";
-	out << "\n";
 
 	emitClassHeader(out);
 
@@ -306,7 +305,6 @@ void ClientGenerator::generateClientHpp(std::ostream& out, const std::vector<End
 	}
 
 	out << "}; // class Client\n";
-	out << "\n";
 	out << "} // namespace " << ns << "\n";
 }
 
