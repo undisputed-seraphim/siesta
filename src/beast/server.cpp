@@ -106,7 +106,7 @@ void ServerBase::Session::on_write(ec_t ec, std::size_t bytes) {
 
 void ServerBase::Session::do_close() {
 	ec_t ec;
-	_stream.socket().shutdown(protocol::socket::shutdown_send, ec);
+	_stream.close();
 }
 
 namespace __detail {

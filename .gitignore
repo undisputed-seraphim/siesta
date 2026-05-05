@@ -35,3 +35,4 @@
 .vscode/
 .cache/
 tests/echo/load_test/profiles/
+tests/echo/load_test/perf_data/
