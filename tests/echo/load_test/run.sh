@@ -3,16 +3,17 @@
 # Load-test + profile orchestrator for the siesta echo server.
 #
 # Usage:
-#   ./run.sh                    # full: build, profile, load-test, report
-#   ./run.sh --no-profile       # skip CPU profiling (just load test)
-#   ./run.sh --heap             # add heap profiling via tcmalloc
-#   ./run.sh --quick            # shorter test for quick iteration
+#   ./run.sh                      # full: profile build, load-test, report
+#   ./run.sh --bench              # benchmark build (max perf flags)
+#   ./run.sh --no-profile         # skip CPU profiling (just load test)
+#   ./run.sh --quick              # shorter test for quick iteration
+#   ./run.sh --keepalive N        # pipeline N requests per connection
 #
 # Environment:
 #   HOST, PORT          — server listen address (default 127.0.0.1:9910)
 #   SIESTA_PREFIX       — path to siesta install (default: ../../build/install)
-#   REQUESTS            — number of requests (default: 10000)
-#   CONCURRENCY         — concurrent workers (default: 50)
+#   REQUESTS            — number of requests (default: see below)
+#   CONCURRENCY         — concurrent workers (default: see below)
 
 set -euo pipefail
 
@@ -24,8 +25,9 @@ SIESTA_PREFIX="${SIESTA_PREFIX:-"$ROOT/../../build/install"}"
 REQUESTS="${REQUESTS:-10000}"
 CONCURRENCY="${CONCURRENCY:-50}"
 PROFILE=1
-HEAP=0
+BENCH=0
 QUICK=0
+KEEPALIVE=0
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; CYAN='\033[0;36m'; NC='\033[0m'
 log()  { echo -e "[$(date +%H:%M:%S)] $*"; }
@@ -35,8 +37,9 @@ info() { echo -e "${CYAN}INFO${NC} $*"; }
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --no-profile) PROFILE=0; shift ;;
-        --heap)       HEAP=1; shift ;;
+        --bench)      BENCH=1; PROFILE=0; shift ;;
         --quick)      QUICK=1; shift ;;
+        --keepalive)  KEEPALIVE="$2"; shift 2 ;;
         *) echo "Unknown flag: $1"; exit 2 ;;
     esac
 done
@@ -44,23 +47,31 @@ done
 if [[ "$QUICK" -eq 1 ]]; then
     REQUESTS=2000
     CONCURRENCY=20
-elif [[ "$PROFILE" -eq 1 ]] || [[ "$HEAP" -eq 1 ]]; then
+elif [[ "$PROFILE" -eq 1 ]]; then
     REQUESTS=50000
     CONCURRENCY=100
+elif [[ "$BENCH" -eq 1 ]]; then
+    REQUESTS=100000
+    CONCURRENCY=200
 fi
 
 # ── Build ────────────────────────────────────────────────────
 
 ensure_build() {
-    if [[ "$PROFILE" -eq 1 ]] || [[ "$HEAP" -eq 1 ]]; then
-        local build_type=RelWithDebInfo
-        local server_target=echo_server_prof
+    local build_type
+    local server_target
+    if [[ "$PROFILE" -eq 1 ]]; then
+        build_type=Debug
+        server_target=echo_server_prof
+    elif [[ "$BENCH" -eq 1 ]]; then
+        build_type=Release
+        server_target=echo_server_bench
     else
-        local build_type=Release
-        local server_target=echo_server
+        build_type=RelWithDebInfo
+        server_target=echo_server
     fi
     if [[ ! -d "$BUILD" ]] || [[ ! -f "$BUILD/build.ninja" ]]; then
-        log "building echo project (CMAKE_BUILD_TYPE=$build_type)"
+        log "building echo project ($build_type → $server_target)"
         mkdir -p "$BUILD"
         cmake -S "$ROOT" -B "$BUILD" \
             -DCMAKE_PREFIX_PATH="$SIESTA_PREFIX" \
@@ -100,26 +111,24 @@ kill_server() {
 
 start_server() {
     local env_vars=()
+    local server_bin
 
     if [[ "$PROFILE" -eq 1 ]]; then
         env_vars+=(CPUPROFILE="$PROF_DIR/cpu.prof"
                    CPUPROFILE_FREQUENCY=500)
-        SERVER_BIN="$BUILD/echo_server_prof"
+        server_bin="$BUILD/echo_server_prof"
+    elif [[ "$BENCH" -eq 1 ]]; then
+        server_bin="$BUILD/echo_server_bench"
     else
-        SERVER_BIN="$BUILD/echo_server"
-    fi
-
-    if [[ "$HEAP" -eq 1 ]]; then
-        env_vars+=(HEAPPROFILE="$PROF_DIR/heap.prof"
-                   HEAP_PROFILE_ALLOCATION_INTERVAL=1048576)
+        server_bin="$BUILD/echo_server"
     fi
 
     log "starting echo server on ${SERVE}:${PORT}" >&2
 
     if [[ ${#env_vars[@]} -gt 0 ]]; then
-        env "${env_vars[@]}" "$SERVER_BIN" "$SERVE" "$PORT" >/dev/null 2>&1 &
+        env "${env_vars[@]}" "$server_bin" "$SERVE" "$PORT" >/dev/null 2>&1 &
     else
-        "$SERVER_BIN" "$SERVE" "$PORT" >/dev/null 2>&1 &
+        "$server_bin" "$SERVE" "$PORT" >/dev/null 2>&1 &
     fi
     local pid=$!
     echo "$pid"
@@ -130,7 +139,7 @@ start_server() {
         fi
         sleep 0.3
     done
-    echo ""  # signal failure on stdout
+    echo ""
     return 1
 }
 
@@ -138,52 +147,41 @@ start_server() {
 
 run_load() {
     local py="$ROOT/load_test/load_test.py"
+    local extra_args=()
+    if [[ "$KEEPALIVE" -gt 0 ]]; then
+        extra_args+=(--keepalive "$KEEPALIVE")
+    fi
     info "running load test ($REQUESTS req, $CONCURRENCY concurrent)"
     python3 "$py" \
         --host "$SERVE" --port "$PORT" \
         --requests "$REQUESTS" --concurrency "$CONCURRENCY" \
-        --warmup 50
+        --warmup 50 \
+        "${extra_args[@]}"
 }
 
 # ── Profile reports ───────────────────────────────────────────
 
 generate_reports() {
+    if [[ "$PROFILE" -ne 1 ]]; then
+        return
+    fi
     local binary="$BUILD/echo_server_prof"
-
-    if [[ "$PROFILE" -eq 1 ]] && [[ -f "$PROF_DIR/cpu.prof" ]]; then
-        log "generating CPU profile reports"
-
-        # Text report (top functions)
-        google-pprof --text --lines "$binary" "$PROF_DIR/cpu.prof" \
-            > "$PROF_DIR/cpu_text.txt" 2>/dev/null
-
-        # Call graph (dot format for graphviz)
-        google-pprof --dot "$binary" "$PROF_DIR/cpu.prof" \
-            > "$PROF_DIR/cpu_graph.dot" 2>/dev/null
-
-        # Cumulative (focus on hot paths)
-        google-pprof --text "$binary" "$PROF_DIR/cpu.prof" \
-            2>/dev/null | head -30 > "$PROF_DIR/cpu_top.txt"
-
-        echo ""
-        info "CPU profile — top 15 functions:"
-        head -16 "$PROF_DIR/cpu_top.txt"
-        echo ""
-        info "Full reports: $PROF_DIR/cpu_text.txt"
-        info "Dot graph:     $PROF_DIR/cpu_graph.dot"
-        info "(render with: dot -Tsvg $PROF_DIR/cpu_graph.dot > cpu.svg)"
+    if [[ ! -f "$PROF_DIR/cpu.prof" ]]; then
+        return
     fi
-
-    if [[ "$HEAP" -eq 1 ]]; then
-        log "generating heap profile report"
-        local latest
-        latest=$(ls -t "$PROF_DIR"/heap.prof.*.heap 2>/dev/null | head -1)
-        if [[ -n "$latest" ]]; then
-            google-pprof --text --lines "$binary" "$latest" \
-                > "$PROF_DIR/heap_text.txt" 2>/dev/null
-            info "Heap profile: $PROF_DIR/heap_text.txt"
-        fi
-    fi
+    log "generating CPU profile reports"
+    google-pprof --text --lines "$binary" "$PROF_DIR/cpu.prof" \
+        > "$PROF_DIR/cpu_text.txt" 2>/dev/null
+    google-pprof --dot "$binary" "$PROF_DIR/cpu.prof" \
+        > "$PROF_DIR/cpu_graph.dot" 2>/dev/null
+    google-pprof --text "$binary" "$PROF_DIR/cpu.prof" \
+        2>/dev/null | head -30 > "$PROF_DIR/cpu_top.txt"
+    echo ""
+    info "CPU profile — top 15 functions:"
+    head -16 "$PROF_DIR/cpu_top.txt"
+    echo ""
+    info "Full reports: $PROF_DIR/cpu_text.txt"
+    info "Dot graph:     $PROF_DIR/cpu_graph.dot"
 }
 
 # ── Main ──────────────────────────────────────────────────────
