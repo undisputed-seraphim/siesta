@@ -60,9 +60,14 @@ inline nb::object json_to_python(const boost::json::value& jv) {
 
 // Extract JSON body from an HTTP outcome and convert to Python
 inline nb::object extract_response_json(const ::siesta::beast::ClientBase::outcome_type& outcome) {
+	if (!outcome.has_value()) {
+		nb::dict err;
+		err["error"] = nb::str(outcome.error().message().c_str());
+		err["transient"] = nb::bool_(is_transient(outcome.error()));
+		return err;
+	}
 	try {
-		const auto& response = outcome.value();
-		const auto& body = response.body();
+		const auto& body = outcome.value().body();
 		if (body.empty()) {
 			return nb::dict();
 		}

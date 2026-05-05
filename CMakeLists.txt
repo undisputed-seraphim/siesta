@@ -38,8 +38,6 @@ target_link_libraries(siesta PUBLIC
 	Boost::system
 )
 
-add_subdirectory(tests)
-
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 

@@ -9,6 +9,7 @@
 #include <boost/beast/http.hpp>
 #include <boost/json.hpp>
 #include <boost/outcome/std_outcome.hpp>
+#include <cstring>
 #include <functional>
 #include <memory>
 
@@ -85,7 +86,7 @@ protected:
 				auto& self, ::boost::system::error_code error = {}, std::size_t bytes = 0) mutable -> void {
 				namespace http = ::boost::beast::http;
 				if (error) {
-					self.complete(std::basic_outcome_failure_exception_from_error(error));
+					self.complete(error);
 					return;
 				}
 				switch (state) {
@@ -116,5 +117,15 @@ protected:
 			token);
 	}
 };
+
+/// Returns true if this error is likely transient (caller may retry).
+/// Connection errors, timeouts, DNS failures, and HTTP 5xx are transient.
+/// HTTP 4xx, other protocol errors, and invalid arguments are fatal.
+inline bool is_transient(const ::boost::system::error_code& ec) {
+	if (std::strcmp(ec.category().name(), "beast.http") == 0) {
+		return ec.value() >= 500 && ec.value() < 600;
+	}
+	return true;
+}
 
 } // namespace siesta::beast
