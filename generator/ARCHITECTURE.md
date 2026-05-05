@@ -23,24 +23,34 @@ All five backends implement `ICodeGenerator` (`codegen_base.hpp`). Endpoints are
 
 ## File Index
 
+### Generator (`generator/src/`)
+
 | File | Role |
 |------|------|
-| `src/main.cpp` | CLI entry point, argument parsing |
-| `src/openapi3_codegen.cpp` / `.hpp` | Pipeline orchestrator — runs all phases sequentially |
-| `src/openapi.hpp` / `.cpp` | simdjson wrapper, base OpenAPI accessors, `ListAdaptor` / `MapAdaptor` |
-| `src/openapi3.hpp` / `.cpp` | OpenAPI v3-specific parsed types (schemas, paths, operations, components) |
-| `src/schema_ast.hpp` / `.cpp` | Normalized AST definitions (`StructType`, `VariantType`, `ArrayType`, etc.) + validation |
-| `src/schema_parser.hpp` / `.cpp` | `SchemaParser` — converts raw JsonSchema → AST nodes (split: declarations in header, implementations in cpp) |
-| `src/dependency_graph.hpp` / `.cpp` | `DependencyGraph` + Kahn's topological sort + cycle detection |
-| `src/codegen_base.hpp` | `CodegenArgs` struct + `ICodeGenerator` abstract interface |
-| `src/endpoint_ir.hpp` / `.cpp` | Shared endpoint IR: `Endpoint` struct, `ClientParam`, `AuthType`, plus `parseEndpoints()` — parsed once, consumed by all backends |
-| `src/codegen_defs.hpp` / `.cpp` | `DefsGenerator : ICodeGenerator` — emits type definitions + ser/des |
-| `src/codegen_client.hpp` / `.cpp` | `ClientGenerator : ICodeGenerator` — emits async client class |
-| `src/codegen_server.hpp` / `.cpp` | `ServerGenerator : ICodeGenerator` — emits abstract server class |
-| `src/codegen_python.hpp` / `.cpp` | `PythonGenerator : ICodeGenerator` — emits nanobind client module |
-| `src/codegen_server_python.hpp` / `.cpp` | `ServerPythonGenerator : ICodeGenerator` — emits nanobind server trampoline |
-| `src/util.hpp` / `.cpp` | Shared utilities: `sanitize` (with `static const unordered_set` reserved-keyword table), `escapeCppString`, `primitiveToCpp`, logging macros |
-| `CMakeLists.txt` | Builds `siesta-generator` — links simdjson, Boost (json, system, program_options) |
+| `main.cpp` | CLI entry point, argument parsing |
+| `openapi3_codegen.cpp` / `.hpp` | Pipeline orchestrator — runs all phases sequentially |
+| `openapi.hpp` / `.cpp` | simdjson wrapper, base OpenAPI accessors, `ListAdaptor` / `MapAdaptor` |
+| `openapi3.hpp` / `.cpp` | OpenAPI v3-specific parsed types (schemas, paths, operations, components) |
+| `schema_ast.hpp` / `.cpp` | Normalized AST definitions (`StructType`, `VariantType`, `ArrayType`, etc.) + validation |
+| `schema_parser.hpp` / `.cpp` | `SchemaParser` — converts raw JsonSchema → AST nodes. Top-level `parseSchema` dispatches to `parseObjectSchema`, `parseArraySchema`, `parsePrimitiveSchema`, `parseUnknownSchema` |
+| `dependency_graph.hpp` / `.cpp` | `DependencyGraph` + Kahn's topological sort + cycle detection |
+| `codegen_base.hpp` | `CodegenArgs` struct + `ICodeGenerator` abstract interface |
+| `endpoint_ir.hpp` / `.cpp` | Shared endpoint IR: `Endpoint` struct (includes `cpp_verb`), `ClientParam`, `AuthType`, plus `parseEndpoints()` — parsed once, consumed by all backends |
+| `codegen_defs.hpp` / `.cpp` | `DefsGenerator : ICodeGenerator` — emits type definitions + ser/des |
+| `codegen_client.hpp` / `.cpp` | `ClientGenerator : ICodeGenerator` — emits async client class |
+| `codegen_server.hpp` / `.cpp` | `ServerGenerator : ICodeGenerator` — emits abstract server class |
+| `codegen_python.hpp` / `.cpp` | `PythonGenerator : ICodeGenerator` — emits nanobind client module |
+| `codegen_server_python.hpp` / `.cpp` | `ServerPythonGenerator : ICodeGenerator` — emits nanobind server trampoline |
+| `util.hpp` / `.cpp` | Shared utilities: `sanitize` (O(1) keyword lookup via `unordered_set`), `escapeCppString`, `primitiveToCpp`, logging macros |
+
+### Runtime (`include/siesta/beast/`)
+
+| File | Role |
+|------|------|
+| `client.hpp/.cpp` | `ClientBase` — async HTTP/1.1 client with strand-serialized I/O, `async_submit_request` 3-state FSM, `_host_value` auto-populated from `start()` |
+| `server.hpp/.cpp` | `ServerBase` + `Session` — async TCP acceptor, per-connection request/response pipeline, configurable read/write timeouts |
+| `python_util.hpp` | Shared nanobind helpers: `json_to_python()` + `extract_response_json()` — included by all generated `py_module.cpp` |
+| `error.hpp` | Outcome/error_code adaptors |
 
 ---
 
@@ -139,7 +149,7 @@ Key behaviors:
 
 ### 3b. ClientGenerator → `client.hpp`
 
-Consumes the pre-parsed `Endpoint` IR. Generates `class Client : public ::siesta::beast::ClientBase` with one templated completion-token method per endpoint. Method body emission is decomposed into focused functions: `emitPathParams`, `emitRequiredQueryParams`, `emitOptionalQueryParams`, `emitRequestBody`, `emitHeaderParams`.
+Consumes the pre-parsed `Endpoint` IR. Generates `class Client : public ::siesta::beast::ClientBase` with one templated completion-token method per endpoint. Method body emission is decomposed into focused functions: `emitPathParams`, `emitQueryParams`, `emitRequestBody`, `emitHeaderParams`.
 
 ```cpp
 auto get__api_v3_ping(
@@ -150,10 +160,12 @@ auto get__api_v3_ping(
 ```
 
 Parameter handling:
-- **Path params**: `std::string::find` + `replace` of `{}` placeholders in a constructed `target_path`
-- **Query params**: string concatenation; non-primitive values serialized via `query_value()` (uses `boost::json::value_from`)
+- **Path params**: `std::string::find` + `replace` of `{}` placeholders in a `std::string target_path`
+- **Query params**: all params (required + optional) built into a single `std::string query` buffer via a `_sep` lambda (`[&]{ if (!query.empty()) query += '&'; }`). Required params emit unconditionally; optional params emit inside `if (param.has_value())`. The `?` prefix and append to `target_path` happens once at the end. No separate buffer for optional params, no `target_has_query` flag.
+- **`query_value`**: type-specialized overloads for `int32_t`–`bool` use `std::to_string()` / literal booleans; `const std::string&` delegates to `url_encode`; a generic `const auto&` template (round-trip `value_from`→`value_to<string>`) handles complex types like `boost::json::value`.
 - **Header params**: `req.set(name, value)`
-- **HTTP verb**: `delete` → `verb::delete_` (C++ keyword workaround)
+- **HTTP verb**: uses `ep.cpp_verb` from the endpoint IR (pre-computed during `parseEndpoints()` — `"delete"` → `"delete_"`)
+- **Auth**: `HttpBearer` token is pre-computed as `_auth_header("Bearer "+token)` in the constructor and reused per-endpoint as a stored `std::string` member rather than allocated per call. `ApiKey` uses the raw key member directly.
 - **Parameter sanitization**: C++ keyword names get `param_` prefix; brackets and special chars become `_`
 
 ### 3c. ServerGenerator → `server.hpp` + `server.cpp`
@@ -166,9 +178,8 @@ Consumes the pre-parsed `Endpoint` IR. Produces an abstract `openapi::Server` cl
 
 ### 3d. PythonGenerator → `py_module.cpp`
 
-Consumes the pre-parsed `Endpoint` IR (no longer duplicates ClientGenerator's endpoint parsing). Generates a nanobind module containing:
-- `json_to_python()`: recursive `boost::json::value` → Python dict / list / primitive
-- `extract_response_json()`: HTTP body → JSON parse → Python
+Consumes the pre-parsed `Endpoint` IR. Generates a nanobind module containing:
+- `#include <siesta/beast/python_util.hpp>` for `json_to_python()` and `extract_response_json()` — these live in the shared siesta runtime header rather than being duplicated in every generated module.
 - `ClientWrapper` struct: owns `openapi::Client` + `boost::asio::io_context`
 - `NB_MODULE(siesta_bindings, m)` with `nb::class_<ClientWrapper>` wrapping every endpoint
 
@@ -209,6 +220,35 @@ main.cpp
 
 ---
 
+## Siesta Runtime Library
+
+The generated code depends on `siesta::beast::{ClientBase,ServerBase,Session}` in `include/siesta/beast/`. These provide the async I/O layer.
+
+### ClientBase
+
+- **Ownership**: `ClientBase` holds an `io_context&` reference (does not own). The caller provides lifetime. `enable_shared_from_this` is used as a lifetime guard in all async callbacks — clients must be heap-allocated in a `shared_ptr`.
+- **I/O model**: A single `strand` wraps both resolver and TCP stream. All I/O is serialized through the strand even if multiple threads run the io_context.
+- **`start(address, port)`**: initiates DNS resolution → TCP connect. Stores the connected host as `_host_value` (used later as the `Host` header).
+- **`async_submit_request(req, token)`**: the sole public async entry point. Uses `asio::async_compose` with a 3-state FSM (send → recv → done) that is local to the compose lambda (no shared mutable state on the class). Sets `Host` header from `_host_value` before sending. Completes with `outcome_type` (either the HTTP response or an error).
+- **Config**: `connect_timeout`, `write_timeout`, `read_timeout` (default 1000 ms each).
+
+### ServerBase
+
+- **Ownership**: stores `io_context* _ctx` (pointer, not reference — stored in constructor, used in `start()`). No `shared_from_this` requirement at this level.
+- **`start(address, port)`**: opens, binds, and listens on the acceptor. Takes no `io_context&` parameter — uses the stored `*_ctx`. Starts the `async_accept` loop with strand-serialized completion handlers.
+- **`handle_request(const request, Session::Ptr)`**: pure virtual. Derived classes implement request dispatch.
+- **Config**: `read_timeout` (default 1 hour) and `write_timeout` (default 30 seconds).
+
+### Session
+
+- **Lifecycle**: per-connection, always heap-allocated (`make_shared`). Inherits `enable_shared_from_this<Session>`.
+- **Request pipeline**: `do_read()` → `on_read()` calls `parent.handle_request(move(request), shared_from_this())` → handler fills `get_response()` → calls `write()` → `on_write()` loops back to `do_read()`. `shared_from_this()` keeps the session alive while the handler holds the shared pointer.
+- **I/O**: runs on the socket's native executor (no explicit strand). `run()` uses `asio::post` for guaranteed deferred dispatch. All async callbacks use lambdas with `[self = shared_from_this()]` capture.
+- **Timeouts**: read timeout and write timeout are applied before `async_read`/`async_write` respectively. Configured via `ServerBase::Config`.
+- **Close**: `do_close()` performs `shutdown(send)` on the socket. The destructor calls `do_close()` via RAII.
+
+---
+
 ## Design Decisions
 
 ### 1. allOf → C++ Inheritance
@@ -239,7 +279,7 @@ Names matching GCC/Clang predefined macros (`unix`, `linux`, `x86_64`, `__unix__
 Path templates use `std::string::find` + `replace` instead of `std::format`. This avoids requiring `<format>` (and `<regex>`) in generated client headers, keeping the generated code compatible with older standard library implementations.
 
 ### 10. ICodeGenerator Interface
-All three backends share a single abstract interface. Constructors receive only per-backend configuration (`PythonGenerator` takes a module name; the other two take nothing). All data needed for generation flows in through `operator()(const CodegenArgs&, const fs::path&)`. This separates configuration from execution and lets the pipeline call every generator through the same polymorphic pattern.
+All five backends share a single abstract interface. Constructors receive only per-backend configuration (`PythonGenerator` takes a module name; the other four take nothing). All data needed for generation flows in through `operator()(const CodegenArgs&, const fs::path&)`. This separates configuration from execution and lets the pipeline call every generator through the same polymorphic pattern.
 
 ### 11. Namespace Organization
 Utility functions live in `namespace codegen` (moved from the global namespace during refactoring). File-local callers in non-`codegen` TUs use `using codegen::fn;` at file scope. The `endpoint_ir.hpp` header declares the shared endpoint IR and `parseEndpoints()` in `namespace codegen` — the implementation lives in `endpoint_ir.cpp` for clean compilation-unit separation.
@@ -279,55 +319,6 @@ Utility functions live in `namespace codegen` (moved from the global namespace d
 7. **Response type generation**: All endpoints return `siesta::beast::ClientBase::outcome_type` (a `boost::system::result` of the HTTP response). Structured response types from the schema are not generated or validated.
 8. **Query parameter arrays of non-string types**: Multi-valued query params for non-primitive arrays use `query_value()` which serializes each element as JSON — this may not match all server expectations.
 9. **simdjson single-pass ranges**: simdjson's `dom::object` / `dom::array` iterators are single-pass — re-entering `begin()` on an already-consumed range triggers a debug assertion (`tape.usable()`). The fix is pre-fetching all component data (parameters, request bodies, security schemes) and endpoint data into C++ containers before iterating paths. The `endpoint_ir.cpp` `parseEndpoints()` iterates paths exactly once, materialising all extracted data before returning.
-
----
-
-## Refactoring History
-
-Recent structural improvements (committed in atomic steps with verification):
-
-1. **Bugfix**: simdjson on-demand re-iteration crash — pre-fetched components before path loops
-2. **Bugfix**: `ListAdaptor::front()` dangling reference — returns `T` by value
-3. **Remove `using namespace std::literals` from headers** — kept only in `util.cpp`
-4. **`std::regex_replace` → `find`+`replace`** in generated code — removes `<regex>` dependency from generated headers
-5. **Dead code removal**: `transform_url_to_function_signature`, `QUERY_VALUE_HELPER`, `ltrim`, `rtrim`, `trim`, `compare_ignore_case`, `decompose_http_query`
-6. **DRY endpoint parsing** → shared `endpoint_util.hpp` (73 new shared lines, 117 duplicated deleted)
-7. **Move utility functions into `namespace codegen`** — avoids global namespace pollution
-8. **Move `dependency_graph.hpp` heavy methods to `.cpp`** — 225 lines out of the header
-9. **Fix full `unordered_map` copy per endpoint** — replaced with `op_overrides` + reference lookup
-10. **`constexpr` annotations**: `isSyntheticCppType()`, `component_path()`; `noexcept` on `getType()` accessors
-11. **`validate()`/`validateType()` moved** from `schema_ast.hpp` to `schema_ast.cpp`
-12. **Cleanups**: `std::endl` → `'\n'`, `escapeCppString` pre-allocation with `reserve()`, remove unused `#include <siesta/asio/queue.hpp>`
-13. **`buildAST()` split**: `parseSchemas()` + `parsePaths()` — two focused functions from one 85-line monolith
-14. **`ICodeGenerator` interface**: All backends inherit from a common abstract base — single `operator()` call per generator, constructors receive only per-backend config
-15. **Shared endpoint IR** (`endpoint_ir.hpp/cpp`): Unified `Endpoint` struct, `parseEndpoints()`, `resolveParameter()`, `schemaToCppType()` extracted from duplicated backend code. Endpoints parsed once, consumed by all five backends. Removed `endpoint_util.hpp`. Net -414 lines across backends.
-16. **Decompose `schema_parser`**: 513-line header-only file split into declarations (`.hpp`) + implementations (`.cpp`). `parseSchema` (was 255-line switch) decomposed into `parseObjectSchema`, `parseArraySchema`, `parsePrimitiveSchema`, `parseUnknownSchema` — top-level dispatch now ~20 lines.
-17. **Decompose `emitMethodBody`**: 143-line client method body split into 5 focused functions: `emitPathParams`, `emitRequiredQueryParams`, `emitOptionalQueryParams`, `emitRequestBody`, `emitHeaderParams`. Orchestrator now ~40 lines.
-18. **Table-drive `sanitize`**: Reserved C++ keywords moved from `constexpr std::array` + `std::any_of` (O(n) linear scan over 71 entries) to `static const std::unordered_set<std::string_view>` (O(1) average lookup).
-19. **Unified query-string building**: `emitRequiredQueryParams` + `emitOptionalQueryParams` merged into `emitQueryParams`. Single `query` buffer with `_sep` lambda replaces the dual-path (required-direct-to-target / optional-buffer-then-merge) pattern. Eliminates redundant `target_has_query` bool and N surface-level ternaries.
-20. **Pre-computed auth header**: `HttpBearer` `"Bearer " + token` is constructed in the Client constructor under `_auth_header`. Per-endpoint methods use the stored string instead of allocating a temporary each call.
-21. **Type-specialized `query_value`**: Explicit overloads for `int32_t`–`bool` use `std::to_string()` / literal `"true"`/`"false"` instead of round-trip `value_from`→`value_to<string>`. A generic `const auto&` template remains as a fallback for complex types like `boost::json::value`.
-22. **Centralized `delete_` conversion**: `Endpoint::cpp_verb` field, populated once during `parseEndpoints()`, replaces repeated `ep.method == "delete" ? "delete_"` checks in client, server (static paths), and server (param paths) emitters.
-23. **Shared `siesta/beast/python_util.hpp`**: `json_to_python` and `extract_response_json` (~90 lines) moved from per-schema inline emission into a single siesta runtime header, included by all generated `py_module.cpp` files.
-24. **Generated code quality**: Removed unnecessary `static_cast<std::string_view>(path)`, `std::move` on NRVO returns, `std::string_view(req.target())` redundant constructor; replaced `using namespace std::literals` with targeted `using std::literals::string_view_literals::operator""sv`.
-
-## Siesta Runtime Refactors
-
-25. **Removed legacy `async_result`/`async_request`**: Dead code (40 lines) superseded by `async_submit_request`; removed `#include <boost/asio/async_result.hpp>`.
-
-26. **Host header**: `ClientBase` now stores `_host_value` (address:port) from `start()` and sets `http::field::host` in `async_submit_request` — Beast requires explicit Host for HTTP/1.1 clients.
-
-27. **`_state` moved into compose lambda**: Eliminates shared mutable state on `ClientBase` between composed-operation invocations. No more `enum { send, recv, done }` member.
-
-28. **ServerBase API cleanup**: `io_context* _ctx` stored as member; `start(address, port)` no longer requires an `io_context&` parameter. Eliminated fragile `[&ctx]` dangling-reference captures in `start()` and `on_accept()`.
-
-29. **ServerBase Config**: `read_timeout` (default 1h) and `write_timeout` (default 30s) added to the previously-empty `Config` struct. `Session::do_read()` and `Session::write()` now use config values instead of hardcoded constants.
-
-30. **`asio::dispatch` → `asio::post`**: `Session::run()` now uses `post` to guarantee deferred execution, avoiding potential deep recursion.
-
-31. **`std::bind_front` → lambdas**: All 4 async callback sites (client resolve/connect, session do_read/write) replaced with explicit lambdas — better inlining, no binder overhead.
-
-32. **MapHash improved**: `_1 ^ (_2 << _1)` → `_1 ^ (_2 + 0x9e3779b9 + (_1 << 6) + (_1 >> 2))` (boost::hash_combine), reducing collision bias for similar strings.
 
 ---
 
