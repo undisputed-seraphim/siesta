@@ -104,11 +104,28 @@ cd build && ninja siesta-generator
 
 # Build the generated project
 cd out && cmake -B build -DSIESTA_ROOT=.. -GNinja && ninja -C build
+```
 
-# Run the echo integration tests (reference)
+## Testing
+
+The `tests/echo.json` spec drives all testing — sanity, integration, profiling,
+and benchmarking. A single `tests/CMakeLists.txt` defines every test target
+with flag-set buckets for release, profiling, and max-performance builds.
+
+```bash
+# Full sanity check (C++ + Python tests)
 cd tests/echo && ./run.sh
 
-The `tests/echo/` directory is the reference test project. It has a single `GET
-/echo?message=` endpoint and includes a C++ test server binary, a Python
-client test suite, and a shell orchestrator. Use it to verify that generator
-changes haven't broken anything.
+# Build specific targets
+cmake -S tests -B tests/build -DCMAKE_PREFIX_PATH=build/install -GNinja
+ninja -C tests/build echo_server Echo_API echo_test_client
+
+# Benchmark
+./run.sh --bench
+
+# CPU profiling
+./run.sh --profile
+```
+
+See `tests/README.md` and `tests/echo/README.md` for the full target matrix
+and flag-set documentation.
