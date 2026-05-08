@@ -17,6 +17,7 @@ int main(int argc, char* argv[]) try {
 	fs::path input_json;
 	fs::path output_dir;
 	std::string mode_str = "both";
+	std::string backend = "beast";
 	bool python = true;
 	bool no_python = false;
 	bool print_module_names = false;
@@ -27,6 +28,8 @@ int main(int argc, char* argv[]) try {
 	opts("output,o", po::value<fs::path>(&output_dir), "Path to output directory.");
 	opts("mode,m", po::value<std::string>(&mode_str)->default_value("both"),
 		 "Generation mode: client, server, or both (default).");
+	opts("backend,b", po::value<std::string>(&backend)->default_value("beast"),
+		 "HTTP backend to target (default: beast).");
 	opts("no-python", po::bool_switch(&no_python),
 		 "Skip generating Python nanobind modules.");
 	opts("print-module-names", po::bool_switch(&print_module_names),
@@ -94,7 +97,7 @@ int main(int argc, char* argv[]) try {
 		std::cout << "Writing to " << output_dir.string() << '\n';
 	}
 
-	if (!openapi::v3::codegen::generateFromOpenAPI(input_json, output_dir, gen_mode, python)) {
+	if (!openapi::v3::codegen::generateFromOpenAPI(input_json, output_dir, gen_mode, python, backend)) {
 		return -1;
 	}
 

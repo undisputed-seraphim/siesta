@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include "codegen_client.hpp"
+#include "beast/codegen_client.hpp"
 #include "openapi.hpp"
 #include "openapi3.hpp"
 #include <fstream>
@@ -7,7 +7,7 @@
 
 namespace codegen {
 
-void ClientGenerator::operator()(const CodegenArgs& args, const std::filesystem::path& output_dir) {
+void BeastClientGenerator::operator()(const CodegenArgs& args, const std::filesystem::path& output_dir) {
 	if (!args.spec || !args.endpoints || args.endpoints->empty()) {
 		return;
 	}
@@ -36,7 +36,7 @@ void ClientGenerator::operator()(const CodegenArgs& args, const std::filesystem:
 	}
 }
 
-void ClientGenerator::emitClassHeader(std::ostream& out) {
+void BeastClientGenerator::emitClassHeader(std::ostream& out) {
 	out << "\n";
 	out << "class Client : public ::siesta::beast::ClientBase {\n";
 	if (auth_type_ != AuthType::None) {
@@ -63,7 +63,7 @@ void ClientGenerator::emitClassHeader(std::ostream& out) {
 	out << "\n";
 }
 
-void ClientGenerator::emitEndpoint(std::ostream& out, const Endpoint& ep) {
+void BeastClientGenerator::emitEndpoint(std::ostream& out, const Endpoint& ep) {
 	std::string text = ep.description.empty() ? ep.summary : ep.description;
 	if (!text.empty()) {
 		write_multiline_comment(out, text, "\t");
@@ -76,7 +76,7 @@ void ClientGenerator::emitEndpoint(std::ostream& out, const Endpoint& ep) {
 	out << "\n";
 }
 
-void ClientGenerator::emitMethodSignature(std::ostream& out, const Endpoint& ep) {
+void BeastClientGenerator::emitMethodSignature(std::ostream& out, const Endpoint& ep) {
 	out << "\tauto " << ep.function_name << "(";
 
 	bool has_previous = false;
@@ -107,7 +107,7 @@ void ClientGenerator::emitMethodSignature(std::ostream& out, const Endpoint& ep)
 	out << ")";
 }
 
-void ClientGenerator::emitPathParams(std::ostream& out, const std::vector<const ClientParam*>& path_params) {
+void BeastClientGenerator::emitPathParams(std::ostream& out, const std::vector<const ClientParam*>& path_params) {
 	for (const auto* p : path_params) {
 		bool is_string = p->cpp_type.find("string") != std::string::npos;
 		if (p->required) {
@@ -132,7 +132,7 @@ void ClientGenerator::emitPathParams(std::ostream& out, const std::vector<const 
 	}
 }
 
-void ClientGenerator::emitQueryParams(std::ostream& out, const std::vector<const ClientParam*>& params) {
+void BeastClientGenerator::emitQueryParams(std::ostream& out, const std::vector<const ClientParam*>& params) {
 	for (const auto* p : params) {
 		bool is_vector = p->cpp_type.find("vector") != std::string::npos;
 		bool is_string = p->cpp_type.find("string") != std::string::npos;
@@ -172,14 +172,14 @@ void ClientGenerator::emitQueryParams(std::ostream& out, const std::vector<const
 	}
 }
 
-void ClientGenerator::emitRequestBody(std::ostream& out, const Endpoint& ep) {
+void BeastClientGenerator::emitRequestBody(std::ostream& out, const Endpoint& ep) {
 	if (!ep.has_request_body) return;
 	out << "\t\treq.body() = boost::json::serialize(boost::json::value_from(body));\n";
 	out << "\t\treq.set(::boost::beast::http::field::content_type, \"" << ep.body_content_type << "\");\n";
 	out << "\t\treq.prepare_payload();\n";
 }
 
-void ClientGenerator::emitHeaderParams(std::ostream& out, const std::vector<const ClientParam*>& header_params) {
+void BeastClientGenerator::emitHeaderParams(std::ostream& out, const std::vector<const ClientParam*>& header_params) {
 	for (const auto* p : header_params) {
 		if (p->required)
 			out << "\t\treq.set(\"" << p->wire_name << "\", " << p->name << ");\n";
@@ -188,7 +188,7 @@ void ClientGenerator::emitHeaderParams(std::ostream& out, const std::vector<cons
 	}
 }
 
-void ClientGenerator::emitMethodBody(std::ostream& out, const Endpoint& ep) {
+void BeastClientGenerator::emitMethodBody(std::ostream& out, const Endpoint& ep) {
 	out << "\t\tconstexpr std::string_view path = \"" << escapeCppString(ep.path_template) << "\";\n";
 	out << "\t\trequest_type req;\n";
 
@@ -252,7 +252,7 @@ void ClientGenerator::emitMethodBody(std::ostream& out, const Endpoint& ep) {
 	out << "\t\treturn this->async_submit_request(std::move(req), token);\n";
 }
 
-void ClientGenerator::generateClientHpp(std::ostream& out, const std::vector<Endpoint>& endpoints) {
+void BeastClientGenerator::generateClientHpp(std::ostream& out, const std::vector<Endpoint>& endpoints) {
 	out << "#pragma once\n";
 	out << "#include <boost/asio.hpp>\n";
 	out << "#include <boost/asio/ip/tcp.hpp>\n";

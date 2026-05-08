@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "openapi3_codegen.hpp"
 #include "codegen_base.hpp"
-#include "codegen_client.hpp"
+#include "beast/codegen_client.hpp"
 #include "codegen_defs.hpp"
-#include "codegen_python.hpp"
-#include "codegen_server.hpp"
-#include "codegen_server_python.hpp"
+#include "beast/codegen_python.hpp"
+#include "beast/codegen_server.hpp"
+#include "beast/codegen_server_python.hpp"
 #include "endpoint_ir.hpp"
 
 using codegen::sanitize;
@@ -111,7 +111,11 @@ static schema::NormalizedAST buildAST(const openapi::v3::OpenAPIv3& spec) {
 	return ast;
 }
 
-bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path, GenMode mode, bool python) {
+bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path, GenMode mode, bool python, const std::string& backend) {
+	if (backend != "beast") {
+		std::cerr << "Unsupported backend '" << backend << "'. Only 'beast' is available.\n";
+		return false;
+	}
 	openapi::OpenAPI file;
 	if (!file.Load(input_path.string())) {
 		std::cerr << "Failed to load " << input_path << "\n";
@@ -188,17 +192,17 @@ bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path
 	::codegen::DefsGenerator{}(args, output_path);
 
 	if (gen_client)
-		::codegen::ClientGenerator{}(args, output_path);
+		::codegen::BeastClientGenerator{}(args, output_path);
 
 	if (python && gen_client)
-		::codegen::PythonGenerator{}(args, output_path);
+		::codegen::BeastPythonGenerator{}(args, output_path);
 
 	if (gen_server)
-		::codegen::ServerGenerator{}(args, output_path);
+		::codegen::BeastServerGenerator{}(args, output_path);
 
 	if (python && gen_server) {
 		::codegen::CodegenArgs server_args{ast, order, &spec, std::move(server_module), &endpoints};
-		::codegen::ServerPythonGenerator{}(server_args, output_path);
+		::codegen::BeastServerPythonGenerator{}(server_args, output_path);
 	}
 
 	// Write CMake info fragment for consumers
