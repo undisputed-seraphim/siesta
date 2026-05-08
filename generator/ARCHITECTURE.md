@@ -341,23 +341,20 @@ Tags: `PARSE`, `DEP`, `SORT`, `EMIT`
 # Build generator
 cd build && ninja siesta-generator
 
-# Generate from a spec
-./build/generator/siesta-generator --input tests/binance.json --output binance/
+# Setup test build
+cmake -S tests -B tests/build -DCMAKE_PREFIX_PATH=build/install -GNinja
 
-# Compile generated code
-cd binance/build && cmake .. -DSIESTA_ROOT=/path/to/siesta && ninja -j$(nproc)
+# Generate + compile echo sanity targets
+ninja -C tests/build echo_server Echo_API echo_test_client
 
-# Test Python import
-python3 -c "import sys; sys.path.insert(0,'binance/build'); import siesta_bindings; print('OK')"
-
-# Run C++ unit tests
-./build/tests/siesta_test
+# Run C++ + Python integration tests
+cd tests/echo && ./run.sh
 ```
 
 ### Quick Sanity Check
 
 ```bash
-./build/generator/siesta-generator --input tests/binance.json --output /tmp/test/ 2>&1 | grep -E '(AST summary|Path endpoints|types present|WARNING|cycle)'
+./build/generator/siesta-generator --input tests/echo.json --output /tmp/test/ 2>&1 | grep -E '(AST summary|Path endpoints|types present|WARNING|cycle)'
 ```
 
 ### Debugging Compilation Errors

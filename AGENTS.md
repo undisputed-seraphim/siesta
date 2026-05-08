@@ -49,8 +49,7 @@ Endpoints are parsed once via `endpoint_ir.hpp/cpp` → `parseEndpoints()` and p
 - `server.hpp/cpp` generation with static-path + parameterised-path dispatch
 - `py_module.cpp` generation with nanobind Python bindings
 - `server_py.cpp` generation with nanobind trampoline server subclassing
-- Binance schema: 339 endpoints, compiles successfully
-- OpenAI schema: 243 endpoints, compiles successfully
+- Echo integration test harness with C++ (Catch2) and Python test drivers
 
 ### Known Limitations
 1. **Cyclic dependencies**: Not supported — generator fails with clear error
@@ -65,25 +64,23 @@ Endpoints are parsed once via `endpoint_ir.hpp/cpp` → `parseEndpoints()` and p
 # Build generator
 cd build && ninja siesta-generator
 
-# Generate + compile (Binance)
-./build/generator/siesta-generator --input tests/binance.json --output binance/
-cd binance/build && cmake .. -DSIESTA_ROOT=/home/shurelia/siesta && make -j$(nproc)
+# Setup test build
+cmake -S tests -B tests/build -DCMAKE_PREFIX_PATH=build/install -GNinja
 
-# Generate + compile (OpenAI — takes ~2-3 min)
-./build/generator/siesta-generator --input openai.json --output openai/
-cd openai/build && cmake .. -DSIESTA_ROOT=/home/shurelia/siesta && make -j$(nproc)
+# Generate + compile echo sanity targets
+ninja -C tests/build echo_server Echo_API echo_test_client
 
-# Test Python import
-python3 -c "import sys; sys.path.insert(0, 'binance/build'); import _siesta_binance; print('OK')"
+# Run C++ + Python integration tests
+cd tests/echo && ./run.sh
 ```
 
 ### Debugging
 ```bash
 # Check for warnings / missing types
-./build/generator/siesta-generator --input tests/binance.json --output /tmp/test/ 2>&1 | grep -i 'warning\|cycle\|missing'
+./build/generator/siesta-generator --input tests/echo.json --output /tmp/test/ 2>&1 | grep -i 'warning\|cycle\|missing'
 
 # Filter log output by phase (PARSE, DEP, EMIT, SORT)
-./build/generator/siesta-generator --input tests/binance.json --output /tmp/test/ 2>&1 | grep '\[EMIT\]'
+./build/generator/siesta-generator --input tests/echo.json --output /tmp/test/ 2>&1 | grep '\[EMIT\]'
 ```
 
 <!-- codebase-memory-mcp:start -->
