@@ -96,16 +96,21 @@ void ServerPythonGenerator::emitServerPy(std::ostream& out, const std::vector<En
 
 	out << "struct PyServer : _siesta_detail::ServerCtx, openapi::Server {\n";
 	out << "\tNB_TRAMPOLINE(Server, " << endpoints.size() << ");\n";
+	out << "\tstd::thread _thread;\n";
 	out << "\n";
 	out << "\tPyServer() : openapi::Server(ctx) {}\n";
-	out << "\t~PyServer() { ctx.stop(); }\n";
+	out << "\t~PyServer() {\n";
+	out << "\t\tctx.stop();\n";
+	out << "\t\tif (_thread.joinable()) _thread.join();\n";
+	out << "\t}\n";
 	out << "\n";
 	out << "\tvoid listen(std::string host, uint16_t port) {\n";
 	out << "\t\topenapi::Server::start(boost::asio::ip::make_address(host), port);\n";
-	out << "\t\tctx.run();\n";
+	out << "\t\t_thread = std::thread([this] { ctx.run(); });\n";
 	out << "\t}\n";
 	out << "\tvoid shutdown() {\n";
 	out << "\t\tctx.stop();\n";
+	out << "\t\tif (_thread.joinable()) _thread.join();\n";
 	out << "\t}\n";
 	out << "\n";
 
@@ -115,10 +120,20 @@ void ServerPythonGenerator::emitServerPy(std::ostream& out, const std::vector<En
 		}
 		out << "\tvoid " << ep.function_name << "(const request req, Session::Ptr session) override {\n";
 		out << "\t\t{\n";
+		out << "\t\t\tnb::gil_scoped_acquire gil;\n";
 		out << "\t\t\tnb::detail::ticket nb_ticket(nb_trampoline, \"" << ep.function_name << "\", false);\n";
 		out << "\t\t\tif (nb_ticket.key.is_valid()) {\n";
-		out << "\t\t\t\tnb::object result = nb_trampoline.base().attr(nb_ticket.key)(request_to_dict(req));\n";
-		out << "\t\t\t\twrite_json_response(session, std::move(result));\n";
+		out << "\t\t\t\ttry {\n";
+		out << "\t\t\t\t\tnb::object result = nb_trampoline.base().attr(nb_ticket.key)(request_to_dict(req));\n";
+		out << "\t\t\t\t\twrite_json_response(session, std::move(result));\n";
+		out << "\t\t\t\t} catch (const std::exception& e) {\n";
+		out << "\t\t\t\t\tauto& resp = session->get_response();\n";
+		out << "\t\t\t\t\tresp.result(http::status::internal_server_error);\n";
+		out << "\t\t\t\t\tresp.body() = std::string(\"{\\\"error\\\":\\\"\") + e.what() + \"\\\"}\";\n";
+		out << "\t\t\t\t\tresp.set(http::field::content_type, \"application/json\");\n";
+		out << "\t\t\t\t\tresp.prepare_payload();\n";
+		out << "\t\t\t\t\tsession->write();\n";
+		out << "\t\t\t\t}\n";
 		out << "\t\t\t\treturn;\n";
 		out << "\t\t\t}\n";
 		out << "\t\t}\n";
