@@ -17,13 +17,18 @@ class OpenAPIv3;
 
 namespace codegen {
 
-class ServerGenerator : public ICodeGenerator {
+class BeastPythonGenerator : public ICodeGenerator {
 public:
+	explicit BeastPythonGenerator() = default;
+
 	void operator()(const CodegenArgs& args, const std::filesystem::path& output_dir) override;
 
 private:
-	void emitServerHpp(std::ostream& out, const std::vector<Endpoint>& endpoints);
-	void emitServerCpp(std::ostream& out, const std::vector<Endpoint>& endpoints);
+	void emitModulePreamble(std::ostream& out, const std::string& module_name);
+	void emitModuleBody(std::ostream& out, const std::vector<Endpoint>& endpoints);
+	void emitEndpointWrapper(std::ostream& out, const Endpoint& ep, bool is_last);
+
+	std::string module_name_;
 };
 
 } // namespace codegen

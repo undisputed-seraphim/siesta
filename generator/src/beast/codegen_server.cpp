@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include "codegen_server.hpp"
+#include "beast/codegen_server.hpp"
 #include "openapi.hpp"
 #include "openapi3.hpp"
 #include <algorithm>
@@ -7,7 +7,7 @@
 
 namespace codegen {
 
-void ServerGenerator::operator()(const CodegenArgs& args, const std::filesystem::path& output_dir) {
+void BeastServerGenerator::operator()(const CodegenArgs& args, const std::filesystem::path& output_dir) {
 	if (!args.spec || !args.endpoints || args.endpoints->empty()) {
 		return;
 	}
@@ -31,7 +31,7 @@ void ServerGenerator::operator()(const CodegenArgs& args, const std::filesystem:
 	}
 }
 
-void ServerGenerator::emitServerHpp(std::ostream& out, const std::vector<Endpoint>& endpoints) {
+void BeastServerGenerator::emitServerHpp(std::ostream& out, const std::vector<Endpoint>& endpoints) {
 	out << "#pragma once\n";
 	out << "#include <boost/asio.hpp>\n";
 	out << "#include <boost/asio/ip/tcp.hpp>\n";
@@ -72,7 +72,7 @@ void ServerGenerator::emitServerHpp(std::ostream& out, const std::vector<Endpoin
 	out << "} // namespace openapi\n";
 }
 
-void ServerGenerator::emitServerCpp(std::ostream& out, const std::vector<Endpoint>& endpoints) {
+void BeastServerGenerator::emitServerCpp(std::ostream& out, const std::vector<Endpoint>& endpoints) {
 	out << "#include \"server.hpp\"\n";
 	out << "\n";
 	out << "#include <string_view>\n";

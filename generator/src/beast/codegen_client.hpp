@@ -17,7 +17,7 @@ class OpenAPIv3;
 
 namespace codegen {
 
-class ClientGenerator : public ICodeGenerator {
+class BeastClientGenerator : public ICodeGenerator {
 public:
 	void operator()(const CodegenArgs& args, const std::filesystem::path& output_dir) override;
 
