@@ -90,8 +90,7 @@ returns a Python dict parsed from the JSON response body.
 
 A nanobind trampoline class that lets you subclass the server in Python.
 Override the virtual methods to handle requests, then call `listen()` to
-start the event loop. Status: functional but with a known GIL-interaction
-issue — use the C++ server binary for integration testing until resolved.
+start the event loop.
 
 ## Quick start
 
