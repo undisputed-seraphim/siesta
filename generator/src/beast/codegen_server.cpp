@@ -54,8 +54,6 @@ void BeastServerGenerator::emitServerHpp(std::ostream& out, const std::vector<En
 	out << "\tusing ::siesta::beast::ServerBase::Session;\n";
 	out << "\tusing request = ::siesta::beast::ServerBase::request;\n";
 	out << "\n";
-	out << "\tusing fnptr_t = void (Server::*)(const request, Session::Ptr);\n";
-	out << "\n";
 	out << "\tvoid handle_request(const request, Session::Ptr) final;\n";
 	out << "\n";
 
@@ -85,7 +83,7 @@ void BeastServerGenerator::emitServerCpp(std::ostream& out, const std::vector<En
 	out << "namespace openapi {\n";
 	out << "namespace {\n";
 	out << "\n";
-	out << "using fnptr_t = Server::fnptr_t;\n";
+	out << "using fnptr_t = void (Server::*)(const Server::request, Server::Session::Ptr);\n";
 	out << "\n";
 
 	std::vector<const Endpoint*> static_eps;
@@ -99,7 +97,7 @@ void BeastServerGenerator::emitServerCpp(std::ostream& out, const std::vector<En
 	}
 
 	if (!static_eps.empty()) {
-		out << "const std::unordered_map<std::pair<std::string_view, http::verb>, Server::fnptr_t,\n";
+		out << "const std::unordered_map<std::pair<std::string_view, http::verb>, fnptr_t,\n";
 		out << "    ::siesta::beast::__detail::MapHash> STATIC_PATHS = {\n";
 		for (const auto* ep : static_eps) {
 			out << "\t{{\"" << escapeCppString(ep->path) << "\"sv, http::verb::" << ep->cpp_verb

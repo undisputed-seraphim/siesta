@@ -202,23 +202,32 @@ void BeastClientGenerator::emitMethodBody(std::ostream& out, const Endpoint& ep)
 
 	bool has_path = !path_params.empty();
 	bool has_query = !query_params.empty();
+	bool all_query_required = has_query;
+	for (const auto* q : query_params) {
+		if (!q->required) { all_query_required = false; break; }
+	}
 
 	if (!has_path && !has_query) {
 		out << "\t\treq.target(path);\n";
 	} else if (!has_path && has_query) {
-		// Only query params — build query first, allocate target_path
-		// only if at least one value was supplied
 		out << "\t\tstd::string query;\n";
-		out << "\t\tauto _sep = [&]{ if (!query.empty()) query += '&'; };\n";
+		out << "\t\tauto _sep = [&query]{ if (!query.empty()) query += '&'; };\n";
 		emitQueryParams(out, query_params);
-		out << "\t\tif (!query.empty()) {\n";
-		out << "\t\t\tstd::string target_path(path);\n";
-		out << "\t\t\ttarget_path += '?';\n";
-		out << "\t\t\ttarget_path += query;\n";
-		out << "\t\t\treq.target(target_path);\n";
-		out << "\t\t} else {\n";
-		out << "\t\t\treq.target(path);\n";
-		out << "\t\t}\n";
+		if (all_query_required) {
+			out << "\t\tstd::string target_path(path);\n";
+			out << "\t\ttarget_path += '?';\n";
+			out << "\t\ttarget_path += query;\n";
+			out << "\t\treq.target(target_path);\n";
+		} else {
+			out << "\t\tif (!query.empty()) {\n";
+			out << "\t\t\tstd::string target_path(path);\n";
+			out << "\t\t\ttarget_path += '?';\n";
+			out << "\t\t\ttarget_path += query;\n";
+			out << "\t\t\treq.target(target_path);\n";
+			out << "\t\t} else {\n";
+			out << "\t\t\treq.target(path);\n";
+			out << "\t\t}\n";
+		}
 	} else if (has_path && !has_query) {
 		out << "\t\tstd::string target_path(path);\n";
 		emitPathParams(out, path_params);
@@ -227,7 +236,7 @@ void BeastClientGenerator::emitMethodBody(std::ostream& out, const Endpoint& ep)
 		out << "\t\tstd::string target_path(path);\n";
 		emitPathParams(out, path_params);
 		out << "\t\tstd::string query;\n";
-		out << "\t\tauto _sep = [&]{ if (!query.empty()) query += '&'; };\n";
+		out << "\t\tauto _sep = [&query]{ if (!query.empty()) query += '&'; };\n";
 		emitQueryParams(out, query_params);
 		out << "\t\tif (!query.empty()) { target_path += '?'; target_path += query; }\n";
 		out << "\t\treq.target(target_path);\n";
