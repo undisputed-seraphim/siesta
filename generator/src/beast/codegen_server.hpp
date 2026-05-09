@@ -24,6 +24,8 @@ public:
 private:
 	void emitServerHpp(std::ostream& out, const std::vector<Endpoint>& endpoints);
 	void emitServerCpp(std::ostream& out, const std::vector<Endpoint>& endpoints);
+
+	std::string ns_;
 };
 
 } // namespace codegen

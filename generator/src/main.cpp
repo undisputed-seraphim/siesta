@@ -18,6 +18,7 @@ int main(int argc, char* argv[]) try {
 	fs::path output_dir;
 	std::string mode_str = "both";
 	std::string backend = "beast";
+	std::string ns;
 	bool python = true;
 	bool no_python = false;
 	bool print_module_names = false;
@@ -30,6 +31,8 @@ int main(int argc, char* argv[]) try {
 		 "Generation mode: client, server, or both (default).");
 	opts("backend,b", po::value<std::string>(&backend)->default_value("beast"),
 		 "HTTP backend to target (default: beast).");
+	opts("namespace,n", po::value<std::string>(&ns)->default_value(""),
+		 "C++ namespace for all generated code (default: derived from spec title).");
 	opts("no-python", po::bool_switch(&no_python),
 		 "Skip generating Python nanobind modules.");
 	opts("print-module-names", po::bool_switch(&print_module_names),
@@ -97,7 +100,7 @@ int main(int argc, char* argv[]) try {
 		std::cout << "Writing to " << output_dir.string() << '\n';
 	}
 
-	if (!openapi::v3::codegen::generateFromOpenAPI(input_json, output_dir, gen_mode, python, backend)) {
+	if (!openapi::v3::codegen::generateFromOpenAPI(input_json, output_dir, gen_mode, python, backend, ns)) {
 		return -1;
 	}
 

@@ -27,6 +27,7 @@ private:
 	void emitServerPy(std::ostream& out, const std::vector<Endpoint>& endpoints);
 
 	std::string module_name_;
+	std::string ns_;
 };
 
 } // namespace codegen

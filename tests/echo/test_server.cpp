@@ -45,8 +45,8 @@ static std::string url_decode(std::string_view sv) {
 	return result;
 }
 
-struct EchoServer : openapi::Server {
-	using openapi::Server::Server;
+struct EchoServer : Echo_API::Server {
+	using Echo_API::Server::Server;
 
 	void get__echo(const request req, Session::Ptr session) override {
 		std::string_view target = req.target();

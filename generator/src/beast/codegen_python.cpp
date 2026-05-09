@@ -13,6 +13,7 @@ void BeastPythonGenerator::operator()(const CodegenArgs& args, const std::filesy
 	}
 
 	module_name_ = args.module_name;
+	ns_ = args.ns;
 
 	std::filesystem::create_directories(output_dir);
 	auto py_path = output_dir / filenames::PY_MODULE;
@@ -181,14 +182,14 @@ void BeastPythonGenerator::emitModuleBody(std::ostream& out, const std::vector<E
 
 	out << "struct ClientWrapper {\n";
 	out << "\tboost::asio::io_context ctx;\n";
-	out << "\tstd::shared_ptr<openapi::Client> client;\n";
+	out << "\tstd::shared_ptr<" << ns_ << "::Client> client;\n";
 	if (auth_type != AuthType::None) {
 		out << "\tClientWrapper(std::string host = \"localhost\", uint16_t port = 443, std::string " << auth_param_name
 			<< " = \"\")\n";
-		out << "\t\t: client(std::make_shared<openapi::Client>(ctx, std::move(" << auth_param_name << "))) {\n";
+		out << "\t\t: client(std::make_shared<" << ns_ << "::Client>(ctx, std::move(" << auth_param_name << "))) {\n";
 	} else {
 		out << "\tClientWrapper(std::string host = \"localhost\", uint16_t port = 443)\n";
-		out << "\t\t: client(std::make_shared<openapi::Client>(ctx)) {\n";
+		out << "\t\t: client(std::make_shared<" << ns_ << "::Client>(ctx)) {\n";
 	}
 	out << "\t\tclient->start(boost::asio::ip::make_address(host), port);\n";
 	out << "\t\tctx.run();\n";

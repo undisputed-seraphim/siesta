@@ -29,6 +29,7 @@ private:
 	void emitEndpointWrapper(std::ostream& out, const Endpoint& ep, bool is_last);
 
 	std::string module_name_;
+	std::string ns_;
 };
 
 } // namespace codegen

@@ -111,7 +111,7 @@ static schema::NormalizedAST buildAST(const openapi::v3::OpenAPIv3& spec) {
 	return ast;
 }
 
-bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path, GenMode mode, bool python, const std::string& backend) {
+bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path, GenMode mode, bool python, const std::string& backend, const std::string& ns_override) {
 	if (backend != "beast") {
 		std::cerr << "Unsupported backend '" << backend << "'. Only 'beast' is available.\n";
 		return false;
@@ -183,11 +183,12 @@ bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path
 	std::string title = std::string(spec.info().title());
 	std::string module_name = sanitize(std::string_view(title));
 	if (module_name.empty()) module_name = "siesta_bindings";
+	std::string ns = ns_override.empty() ? module_name : ns_override;
 	std::string server_module = module_name + "_server";
 	std::string client_mod = module_name;
 	std::string server_mod = server_module;
 
-	::codegen::CodegenArgs args{ast, order, &spec, std::move(module_name), &endpoints};
+	::codegen::CodegenArgs args{ast, order, &spec, std::move(module_name), std::move(ns), &endpoints};
 
 	::codegen::DefsGenerator{}(args, output_path);
 
@@ -201,7 +202,7 @@ bool generateFromOpenAPI(const fs::path& input_path, const fs::path& output_path
 		::codegen::BeastServerGenerator{}(args, output_path);
 
 	if (python && gen_server) {
-		::codegen::CodegenArgs server_args{ast, order, &spec, std::move(server_module), &endpoints};
+		::codegen::CodegenArgs server_args{ast, order, &spec, std::move(server_module), ns, &endpoints};
 		::codegen::BeastServerPythonGenerator{}(server_args, output_path);
 	}
 
