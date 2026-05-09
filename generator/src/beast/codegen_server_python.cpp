@@ -16,7 +16,7 @@ void BeastServerPythonGenerator::operator()(const CodegenArgs& args, const std::
 	const auto& endpoints = *args.endpoints;
 
 	std::filesystem::create_directories(output_dir);
-	auto py_path = output_dir / "server_py.cpp";
+	auto py_path = output_dir / filenames::SERVER_PY;
 	std::ofstream out(py_path);
 	if (out) {
 		emitServerPy(out, endpoints);

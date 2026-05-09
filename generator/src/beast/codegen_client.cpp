@@ -14,22 +14,18 @@ void BeastClientGenerator::operator()(const CodegenArgs& args, const std::filesy
 
 	const auto& endpoints = *args.endpoints;
 
-	for (const auto& ep : endpoints) {
-		if (ep.auth_type != AuthType::None) {
-			auth_type_ = ep.auth_type;
-			auth_member_name_ = "_api_key";
-			auth_param_name_ = "api_key";
-			if (auth_type_ == AuthType::HttpBearer) {
-				auth_member_name_ = "_bearer_token";
-				auth_value_member_ = "_auth_header";
-				auth_param_name_ = "bearer_token";
-			}
-			break;
+	auto auth = detectAuth(endpoints);
+	if (auth.type != AuthType::None) {
+		auth_type_ = auth.type;
+		auth_member_name_ = "_" + auth.name;
+		auth_param_name_ = auth.name;
+		if (auth.type == AuthType::HttpBearer) {
+			auth_value_member_ = "_auth_header";
 		}
 	}
 
 	std::filesystem::create_directories(output_dir);
-	auto client_path = output_dir / "client.hpp";
+	auto client_path = output_dir / filenames::CLIENT_HPP;
 	std::ofstream out(client_path);
 	if (out) {
 		generateClientHpp(out, endpoints);
@@ -109,7 +105,7 @@ void BeastClientGenerator::emitMethodSignature(std::ostream& out, const Endpoint
 
 void BeastClientGenerator::emitPathParams(std::ostream& out, const std::vector<const ClientParam*>& path_params) {
 	for (const auto* p : path_params) {
-		bool is_string = p->cpp_type.find("string") != std::string::npos;
+		bool is_string = p->is_string_type;
 		if (p->required) {
 			if (is_string) {
 				out << "\t\tif (auto _p = target_path.find(\"{}\"); _p != std::string::npos) target_path.replace(_p, 2, "
@@ -134,9 +130,9 @@ void BeastClientGenerator::emitPathParams(std::ostream& out, const std::vector<c
 
 void BeastClientGenerator::emitQueryParams(std::ostream& out, const std::vector<const ClientParam*>& params) {
 	for (const auto* p : params) {
-		bool is_vector = p->cpp_type.find("vector") != std::string::npos;
-		bool is_string = p->cpp_type.find("string") != std::string::npos;
-		bool is_vector_string = is_vector && is_string;
+		bool is_vector = p->is_vector_type;
+		bool is_string = p->is_string_type;
+		bool is_vector_string = p->is_vector_string_type;
 
 		if (p->required) {
 			if (is_vector_string) {

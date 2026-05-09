@@ -10,6 +10,17 @@
 
 namespace codegen {
 
+struct DefsEmitState {
+	std::unordered_map<std::string, std::string> variant_signatures;
+	std::unordered_map<std::string, std::string> typedef_chain;
+	struct Preprocessed {
+		std::vector<schema::TypeRef> alternatives;
+		bool should_collapse = false;
+		std::string signature;
+	};
+	std::unordered_map<std::string, Preprocessed> preprocessed;
+};
+
 class DefsGenerator : public ICodeGenerator {
 public:
 	void operator()(const CodegenArgs& args, const std::filesystem::path& output_dir) override;
@@ -24,8 +35,8 @@ private:
 
 	void emitStruct(std::ostream& out, const schema::StructType& s);
 	void emitStructSerialization(std::ostream& out, const schema::StructType& s);
-	void emitVariant(std::ostream& out, const schema::VariantType& v, const schema::NormalizedAST& ast);
-	void emitVariantSerialization(std::ostream& out, const schema::VariantType& v, const schema::NormalizedAST& ast);
+	void emitVariant(std::ostream& out, const schema::VariantType& v, const schema::NormalizedAST& ast, DefsEmitState&);
+	void emitVariantSerialization(std::ostream& out, const schema::VariantType& v, const schema::NormalizedAST& ast, const DefsEmitState&);
 	void emitEnum(std::ostream& out, const schema::EnumType& e);
 	void emitEnumSerialization(std::ostream& out, const schema::EnumType& e);
 	void emitPrimitiveTypedef(std::ostream& out, const std::string& name, const schema::PrimitiveType& p);
@@ -36,9 +47,6 @@ private:
 
 	std::string cppTypeName(const schema::TypeRef& ref) const;
 	std::string cppTypeName(const schema::SchemaType& type) const;
-
-	mutable std::unordered_map<std::string, std::string> emitted_variant_signatures_;
-	mutable std::unordered_map<std::string, std::string> typedef_chain_;
 };
 
 // Implementation

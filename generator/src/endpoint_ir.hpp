@@ -22,11 +22,19 @@ struct ClientParam {
 	std::string location;
 	std::string schema_type;
 	std::string format;
+	bool is_string_type = false;
+	bool is_vector_type = false;
+	bool is_vector_string_type = false;
 };
 
 // --- Auth type, shared between client and python generators ---
 
 enum class AuthType { None, ApiKey, HttpBearer };
+
+struct AuthInfo {
+	AuthType type = AuthType::None;
+	std::string name;
+};
 
 // --- Unified endpoint IR consumed by all backends ---
 
@@ -47,6 +55,18 @@ struct Endpoint {
 };
 
 // --- Shared helpers used during endpoint parsing ---
+
+inline AuthInfo detectAuth(const std::vector<Endpoint>& endpoints) {
+	AuthInfo info;
+	for (const auto& ep : endpoints) {
+		if (ep.auth_type != AuthType::None) {
+			info.type = ep.auth_type;
+			info.name = (ep.auth_type == AuthType::HttpBearer) ? "bearer_token" : "api_key";
+			break;
+		}
+	}
+	return info;
+}
 
 inline std::string refComponentName(std::string_view ref) {
 	size_t pos = ref.rfind('/');
@@ -153,6 +173,9 @@ inline ClientParam resolveParameter(const openapi::v3::Parameter& raw_param,
 		cp.schema_type = std::string(schema.type());
 		if (!schema.format().empty()) cp.format = std::string(schema.format());
 		cp.cpp_type = schemaToCppType(schema);
+		cp.is_string_type       = cp.cpp_type.find("string") != std::string::npos;
+		cp.is_vector_type       = cp.cpp_type.find("vector") != std::string::npos;
+		cp.is_vector_string_type = cp.is_vector_type && cp.is_string_type;
 	} catch (...) {}
 	cp.location = std::string(raw_param.in());
 	try { cp.required = raw_param.required(); } catch (...) {}
