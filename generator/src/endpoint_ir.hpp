@@ -75,7 +75,7 @@ inline std::string refComponentName(std::string_view ref) {
 }
 
 inline std::string resolveRefName(std::string_view ref) {
-	return "api::" + refComponentName(ref);
+	return refComponentName(ref);
 }
 
 inline std::string sanitizeParamName(std::string name) {

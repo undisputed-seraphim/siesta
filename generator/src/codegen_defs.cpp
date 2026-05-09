@@ -131,6 +131,7 @@ static std::pair<std::vector<schema::TypeRef>, bool> processVariantAlternatives(
 void DefsGenerator::operator()(const CodegenArgs& args, const std::filesystem::path& output_dir) {
 	const auto& ast = args.ast;
 	const auto& order = args.order;
+	ns_ = args.ns;
 
 	std::filesystem::create_directories(output_dir);
 
@@ -141,7 +142,6 @@ void DefsGenerator::operator()(const CodegenArgs& args, const std::filesystem::p
 			generateDefsHpp(out, order, ast);
 		}
 	}
-
 	{
 		auto path = output_dir / filenames::DEFS_CPP;
 		std::ofstream out(path);
@@ -198,10 +198,13 @@ void DefsGenerator::generateDefsHpp(std::ostream& out,
 		if (need_cstdint)  out << "#include <cstdint>\n";
 	}
 
-	out << "#include <boost/json.hpp>\n\n";
+	out << "#include <boost/json.hpp>\n";
+	out << "#include <siesta/encoding.hpp>\n\n";
 
 	// Namespace
-	out << "namespace api {\n\n";
+	out << "namespace " << ns_ << " {\n";
+	out << "using siesta::url_encode;\n";
+	out << "using siesta::query_value;\n\n";
 
 	// Forward declarations for all types
 	out << "// Forward declarations\n";
@@ -309,7 +312,41 @@ void DefsGenerator::generateDefsHpp(std::ostream& out,
 			*type);
 	}
 
-	out << "\n} // namespace api\n";
+	// Enum query_value overloads — zero-overhead, in namespace api (ADL-visible)
+	for (const auto& name : order.ordered_types) {
+		const auto* type = ast.getType(name);
+		if (!type) continue;
+		std::visit(
+			[&](const auto& t) {
+				using T = std::decay_t<decltype(t)>;
+				if constexpr (std::is_same_v<T, schema::EnumType>) {
+					out << "inline std::string query_value(" << name << " val) {\n";
+					out << "\tswitch (val) {\n";
+					for (const auto& ev : t.values) {
+						out << "\t\tcase " << name << "::" << sanitize_enum_identifier(ev.name)
+						    << ": return \"" << escapeCppString(ev.value) << "\";\n";
+					}
+					out << "\t\tdefault: return \"\";\n";
+					out << "\t}\n";
+					out << "}\n";
+				} else if constexpr (std::is_same_v<T, schema::PrimitiveType>) {
+					if (!t.enum_values.empty()) {
+						out << "inline std::string query_value(" << name << " val) {\n";
+						out << "\tswitch (val) {\n";
+						for (const auto& ev : t.enum_values) {
+							out << "\t\tcase " << name << "::" << sanitize_enum_identifier(ev)
+							    << ": return \"" << escapeCppString(ev) << "\";\n";
+						}
+						out << "\t\tdefault: return \"\";\n";
+						out << "\t}\n";
+						out << "}\n";
+					}
+				}
+			},
+			*type);
+	}
+
+	out << "\n} // namespace " << ns_ << "\n";
 }
 
 void DefsGenerator::generateDefsCpp(std::ostream& out,
@@ -317,7 +354,7 @@ void DefsGenerator::generateDefsCpp(std::ostream& out,
                                      const schema::NormalizedAST& ast) {
 	DefsEmitState state;
 	out << "#include \"openapi_defs.hpp\"\n";
-	out << "namespace api {\n\n";
+	out << "namespace " << ns_ << " {\n\n";
 
 	int cpp_structs = 0, cpp_variants = 0, cpp_enums = 0;
 	for (const auto& name : order.ordered_types) {
@@ -607,9 +644,11 @@ void DefsGenerator::emitStructSerialization(std::ostream& out, const schema::Str
 
 	// Deserialize fields
 	for (const auto& field : s.fields) {
-		out << "    if (jv.if_object()->contains(\"" << field.name << "\")) {\n";
-		out << "        obj." << field.name << " = boost::json::value_to<" << cppTypeName(field.type)
-			<< ">(jv.as_object().at(\"" << field.name << "\"));\n";
+		out << "    if (auto* _obj = jv.if_object()) {\n";
+		out << "        if (auto* _fld = _obj->if_contains(\"" << field.name << "\")) {\n";
+		out << "            obj." << field.name << " = boost::json::value_to<" << cppTypeName(field.type)
+			<< ">(*_fld);\n";
+		out << "        }\n";
 		out << "    }\n";
 	}
 

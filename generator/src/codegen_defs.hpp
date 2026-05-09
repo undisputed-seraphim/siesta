@@ -47,6 +47,8 @@ private:
 
 	std::string cppTypeName(const schema::TypeRef& ref) const;
 	std::string cppTypeName(const schema::SchemaType& type) const;
+
+	std::string ns_;
 };
 
 // Implementation

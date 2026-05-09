@@ -13,6 +13,7 @@ void BeastServerPythonGenerator::operator()(const CodegenArgs& args, const std::
 	}
 
 	module_name_ = args.module_name;
+	ns_ = args.ns;
 	const auto& endpoints = *args.endpoints;
 
 	std::filesystem::create_directories(output_dir);
@@ -48,7 +49,7 @@ void BeastServerPythonGenerator::emitServerPy(std::ostream& out, const std::vect
 	out << "namespace {\n";
 	out << "\n";
 	out << "// Convert an HTTP request to a Python dict\n";
-	out << "nb::dict request_to_dict(const openapi::Server::request& req) {\n";
+	out << "nb::dict request_to_dict(const " << ns_ << "::Server::request& req) {\n";
 	out << "\tnb::dict d;\n";
 	out << "\t{\n";
 	out << "\t\tstd::string tmp = std::string(req.method_string());\n";
@@ -70,7 +71,7 @@ void BeastServerPythonGenerator::emitServerPy(std::ostream& out, const std::vect
 	out << "}\n";
 	out << "\n";
 	out << "// Write a Python object as a JSON HTTP response\n";
-	out << "void write_json_response(const openapi::Server::Session::Ptr& session, const nb::object& result) {\n";
+	out << "void write_json_response(const " << ns_ << "::Server::Session::Ptr& session, const nb::object& result) {\n";
 	out << "\tauto& resp = session->get_response();\n";
 	out << "\ttry {\n";
 	out << "\t\tnb::object json_mod = nb::module_::import_(\"json\");\n";
@@ -94,18 +95,18 @@ void BeastServerPythonGenerator::emitServerPy(std::ostream& out, const std::vect
 	out << "namespace _siesta_detail { struct ServerCtx { boost::asio::io_context ctx; }; }\n";
 	out << "\n";
 
-	out << "struct PyServer : _siesta_detail::ServerCtx, openapi::Server {\n";
+	out << "struct PyServer : _siesta_detail::ServerCtx, " << ns_ << "::Server {\n";
 	out << "\tNB_TRAMPOLINE(Server, " << endpoints.size() << ");\n";
 	out << "\tstd::thread _thread;\n";
 	out << "\n";
-	out << "\tPyServer() : openapi::Server(ctx) {}\n";
+	out << "\tPyServer() : " << ns_ << "::Server(ctx) {}\n";
 	out << "\t~PyServer() {\n";
 	out << "\t\tctx.stop();\n";
 	out << "\t\tif (_thread.joinable()) _thread.join();\n";
 	out << "\t}\n";
 	out << "\n";
 	out << "\tvoid listen(std::string host, uint16_t port) {\n";
-	out << "\t\topenapi::Server::start(boost::asio::ip::make_address(host), port);\n";
+	out << "\t\t" << ns_ << "::Server::start(boost::asio::ip::make_address(host), port);\n";
 	out << "\t\t_thread = std::thread([this] { ctx.run(); });\n";
 	out << "\t}\n";
 	out << "\tvoid shutdown() {\n";
@@ -149,12 +150,12 @@ void BeastServerPythonGenerator::emitServerPy(std::ostream& out, const std::vect
 
 	out << "NB_MODULE(" << module_name_ << ", m) {\n";
 	out << "\tm.doc() = \"Siesta-generated Python server bindings\";\n";
-	out << "\tnb::class_<openapi::Server, PyServer>(m, \"Server\")\n";
+	out << "\tnb::class_<" << ns_ << "::Server, PyServer>(m, \"Server\")\n";
 	out << "\t\t.def(nb::init<>())\n";
-	out << "\t\t.def(\"listen\", [](openapi::Server& s, std::string host, uint16_t port) {\n";
+	out << "\t\t.def(\"listen\", [](" << ns_ << "::Server& s, std::string host, uint16_t port) {\n";
 	out << "\t\t\tstatic_cast<PyServer&>(s).listen(std::move(host), port);\n";
 	out << "\t\t}, nb::arg(\"host\") = std::string(\"localhost\"), nb::arg(\"port\") = 443)\n";
-	out << "\t\t.def(\"shutdown\", [](openapi::Server& s) { static_cast<PyServer&>(s).shutdown(); });\n";
+	out << "\t\t.def(\"shutdown\", [](" << ns_ << "::Server& s) { static_cast<PyServer&>(s).shutdown(); });\n";
 	out << "}\n";
 }
 

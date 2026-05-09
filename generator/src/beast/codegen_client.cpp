@@ -13,6 +13,7 @@ void BeastClientGenerator::operator()(const CodegenArgs& args, const std::filesy
 	}
 
 	const auto& endpoints = *args.endpoints;
+	ns_ = args.ns;
 
 	auto auth = detectAuth(endpoints);
 	if (auth.type != AuthType::None) {
@@ -28,7 +29,7 @@ void BeastClientGenerator::operator()(const CodegenArgs& args, const std::filesy
 	auto client_path = output_dir / filenames::CLIENT_HPP;
 	std::ofstream out(client_path);
 	if (out) {
-		generateClientHpp(out, endpoints, args.ast);
+		generateClientHpp(out, endpoints);
 	}
 }
 
@@ -257,8 +258,7 @@ void BeastClientGenerator::emitMethodBody(std::ostream& out, const Endpoint& ep)
 	out << "\t\treturn this->async_submit_request(std::move(req), token);\n";
 }
 
-void BeastClientGenerator::generateClientHpp(std::ostream& out, const std::vector<Endpoint>& endpoints,
-                                               const schema::NormalizedAST& ast) {
+void BeastClientGenerator::generateClientHpp(std::ostream& out, const std::vector<Endpoint>& endpoints) {
 	out << "#pragma once\n";
 	out << "#include <boost/asio.hpp>\n";
 	out << "#include <boost/asio/ip/tcp.hpp>\n";
@@ -271,77 +271,13 @@ void BeastClientGenerator::generateClientHpp(std::ostream& out, const std::vecto
 	out << "#include <string_view>\n";
 	out << "\n";
 
-	std::string ns = "openapi";
-	out << "#include \"" << ns << "_defs.hpp\"\n";
+	out << "#include \"" << filenames::DEFS_HPP << "\"\n";
 	out << "#include <siesta/beast/client.hpp>\n";
 	out << "\n";
-	out << "namespace " << ns << " {\n";
-
-	out << "inline std::string url_encode(std::string_view sv) {\n";
-	out << "\tstd::string result;\n";
-	out << "\tresult.reserve(sv.size() * 3);\n";
-	out << "\tfor (unsigned char c : sv) {\n";
-	out << "\t\tif ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '.' || c == '~') {\n";
-	out << "\t\t\tresult += c;\n";
-	out << "\t\t} else {\n";
-	out << "\t\t\tresult += '%';\n";
-	out << "\t\t\tresult += \"0123456789ABCDEF\"[c >> 4];\n";
-	out << "\t\t\tresult += \"0123456789ABCDEF\"[c & 15];\n";
-	out << "\t\t}\n";
-	out << "\t}\n";
-	out << "\treturn result;\n";
-	out << "}\n\n";
-
-	out << "inline std::string query_value(int32_t v)  { return std::to_string(v); }\n";
-	out << "inline std::string query_value(int64_t v)  { return std::to_string(v); }\n";
-	out << "inline std::string query_value(uint32_t v) { return std::to_string(v); }\n";
-	out << "inline std::string query_value(uint64_t v) { return std::to_string(v); }\n";
-	out << "inline std::string query_value(double v)   { return std::to_string(v); }\n";
-	out << "inline std::string query_value(float v)    { return std::to_string(v); }\n";
-	out << "inline std::string query_value(bool v)     { return v ? \"true\" : \"false\"; }\n";
-	out << "inline std::string query_value(const std::string& v) { return url_encode(v); }\n";
-
-	// Enum overloads — zero-overhead, fail at compile time for unknown types
-	for (const auto& [name, _] : ast.getTypes()) {
-		const auto* type = ast.getType(name);
-		if (!type) continue;
-		std::visit(
-			[&](const auto& t) {
-				using T = std::decay_t<decltype(t)>;
-				if constexpr (std::is_same_v<T, schema::EnumType>) {
-					out << "inline std::string query_value(api::" << name << " val) {\n";
-					out << "\tswitch (val) {\n";
-					for (const auto& ev : t.values) {
-						out << "\t\tcase api::" << name << "::" << sanitize_enum_identifier(ev.name)
-						    << ": return \"" << escapeCppString(ev.value) << "\";\n";
-					}
-					out << "\t\tdefault: return \"\";\n";
-					out << "\t}\n";
-					out << "}\n";
-				} else if constexpr (std::is_same_v<T, schema::PrimitiveType>) {
-					if (!t.enum_values.empty()) {
-						out << "inline std::string query_value(api::" << name << " val) {\n";
-						out << "\tswitch (val) {\n";
-						for (const auto& ev : t.enum_values) {
-							out << "\t\tcase api::" << name << "::" << sanitize_enum_identifier(ev)
-							    << ": return \"" << escapeCppString(ev) << "\";\n";
-						}
-						out << "\t\tdefault: return \"\";\n";
-						out << "\t}\n";
-						out << "}\n";
-					}
-				}
-			},
-			*type);
-	}
-
+	out << "namespace " << ns_ << " {\n";
+	out << "using siesta::url_encode;\n";
+	out << "using siesta::query_value;\n";
 	out << "\n";
-	out << "// Catch-all: fires a readable static_assert when no overload matches.\n";
-	out << "template <typename T>\n";
-	out << "inline std::string query_value(const T&) {\n";
-	out << "\tstatic_assert(sizeof(T) == 0, \"query_value: no overload for this type.\");\n";
-	out << "\treturn {};\n";
-	out << "}\n";
 
 	emitClassHeader(out);
 
@@ -350,7 +286,7 @@ void BeastClientGenerator::generateClientHpp(std::ostream& out, const std::vecto
 	}
 
 	out << "}; // class Client\n";
-	out << "} // namespace " << ns << "\n";
+	out << "} // namespace " << ns_ << "\n";
 }
 
 } // namespace codegen

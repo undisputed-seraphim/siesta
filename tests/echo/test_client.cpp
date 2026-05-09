@@ -19,7 +19,7 @@ uint16_t echo_port() {
 	return p ? static_cast<uint16_t>(std::stoi(p)) : 9910;
 }
 
-api::EchoResponse call_echo(std::shared_ptr<openapi::Client> client,
+Echo_API::EchoResponse call_echo(std::shared_ptr<Echo_API::Client> client,
                             boost::asio::io_context& ctx,
                             const std::string& msg,
                             std::optional<std::string> header = std::nullopt) {
@@ -29,14 +29,14 @@ api::EchoResponse call_echo(std::shared_ptr<openapi::Client> client,
 	auto outcome = future.get();
 	REQUIRE(outcome.has_value());
 	auto jv = boost::json::parse(outcome.value().body());
-	return boost::json::value_to<api::EchoResponse>(jv);
+	return boost::json::value_to<Echo_API::EchoResponse>(jv);
 }
 
 } // namespace
 
 TEST_CASE("echo basic", "[integration]") {
 	boost::asio::io_context ctx;
-	auto client = std::make_shared<openapi::Client>(ctx);
+	auto client = std::make_shared<Echo_API::Client>(ctx);
 	client->start(boost::asio::ip::make_address(echo_host()), echo_port());
 	ctx.run();
 	auto resp = call_echo(client, ctx, "hello");
@@ -45,7 +45,7 @@ TEST_CASE("echo basic", "[integration]") {
 
 TEST_CASE("echo empty message", "[integration]") {
 	boost::asio::io_context ctx;
-	auto client = std::make_shared<openapi::Client>(ctx);
+	auto client = std::make_shared<Echo_API::Client>(ctx);
 	client->start(boost::asio::ip::make_address(echo_host()), echo_port());
 	ctx.run();
 	auto resp = call_echo(client, ctx, "");
@@ -54,7 +54,7 @@ TEST_CASE("echo empty message", "[integration]") {
 
 TEST_CASE("echo special chars", "[integration]") {
 	boost::asio::io_context ctx;
-	auto client = std::make_shared<openapi::Client>(ctx);
+	auto client = std::make_shared<Echo_API::Client>(ctx);
 	client->start(boost::asio::ip::make_address(echo_host()), echo_port());
 	ctx.run();
 	auto resp = call_echo(client, ctx, "hello world");
@@ -63,7 +63,7 @@ TEST_CASE("echo special chars", "[integration]") {
 
 TEST_CASE("echo with header param", "[integration]") {
 	boost::asio::io_context ctx;
-	auto client = std::make_shared<openapi::Client>(ctx);
+	auto client = std::make_shared<Echo_API::Client>(ctx);
 	client->start(boost::asio::ip::make_address(echo_host()), echo_port());
 	ctx.run();
 	auto resp = call_echo(client, ctx, "test", std::string("custom-value"));

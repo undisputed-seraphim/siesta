@@ -13,6 +13,7 @@ void BeastServerGenerator::operator()(const CodegenArgs& args, const std::filesy
 	}
 
 	const auto& endpoints = *args.endpoints;
+	ns_ = args.ns;
 
 	std::filesystem::create_directories(output_dir);
 	{
@@ -42,10 +43,10 @@ void BeastServerGenerator::emitServerHpp(std::ostream& out, const std::vector<En
 	out << "#include <string>\n";
 	out << "#include <string_view>\n";
 	out << "\n";
-	out << "#include \"openapi_defs.hpp\"\n";
+	out << "#include \"" << filenames::DEFS_HPP << "\"\n";
 	out << "#include <siesta/beast/server.hpp>\n";
 	out << "\n";
-	out << "namespace openapi {\n";
+	out << "namespace " << ns_ << " {\n";
 	out << "\n";
 	out << "class Server : public ::siesta::beast::ServerBase {\n";
 	out << "public:\n";
@@ -67,7 +68,7 @@ void BeastServerGenerator::emitServerHpp(std::ostream& out, const std::vector<En
 
 	out << "}; // class Server\n";
 	out << "\n";
-	out << "} // namespace openapi\n";
+	out << "} // namespace " << ns_ << "\n";
 }
 
 void BeastServerGenerator::emitServerCpp(std::ostream& out, const std::vector<Endpoint>& endpoints) {
@@ -80,7 +81,7 @@ void BeastServerGenerator::emitServerCpp(std::ostream& out, const std::vector<En
 	out << "namespace http = ::boost::beast::http;\n";
 	out << "using std::literals::string_view_literals::operator\"\"sv;\n";
 	out << "\n";
-	out << "namespace openapi {\n";
+	out << "namespace " << ns_ << " {\n";
 	out << "namespace {\n";
 	out << "\n";
 	out << "using fnptr_t = void (Server::*)(const Server::request, Server::Session::Ptr);\n";
@@ -165,7 +166,7 @@ void BeastServerGenerator::emitServerCpp(std::ostream& out, const std::vector<En
 	out << "\tsession->write();\n";
 	out << "}\n";
 	out << "\n";
-	out << "} // namespace openapi\n";
+	out << "} // namespace " << ns_ << "\n";
 }
 
 } // namespace codegen
