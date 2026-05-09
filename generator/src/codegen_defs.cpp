@@ -157,13 +157,46 @@ void DefsGenerator::generateDefsHpp(std::ostream& out,
 	// Header guard
 	out << "#pragma once\n\n";
 
-	// Includes
+	// Includes — emit only those actually referenced by the schema
 	out << "#include <string>\n";
-	out << "#include <vector>\n";
-	out << "#include <map>\n";
-	out << "#include <variant>\n";
-	out << "#include <optional>\n";
-	out << "#include <cstdint>\n";
+
+	{
+		bool need_vector = false, need_map = false, need_variant = false, need_optional = false, need_cstdint = false;
+		for (const auto& name : order.ordered_types) {
+			const auto* type = ast.getType(name);
+			if (!type) continue;
+			std::visit(
+				[&](const auto& t) {
+					using T = std::decay_t<decltype(t)>;
+					if constexpr (std::is_same_v<T, schema::ArrayType>) {
+						need_vector = true;
+					} else if constexpr (std::is_same_v<T, schema::MapType>) {
+						need_map = true;
+					} else if constexpr (std::is_same_v<T, schema::VariantType>) {
+						need_variant = true;
+						if (t.is_nullable) need_optional = true;
+					} else if constexpr (std::is_same_v<T, schema::StructType>) {
+						for (const auto& f : t.fields) {
+							std::string tn = cppTypeName(f.type);
+							if (tn.find("vector<") != std::string::npos)    need_vector   = true;
+							if (tn.find("map<") != std::string::npos)       need_map      = true;
+							if (tn.find("variant<") != std::string::npos)   need_variant  = true;
+							if (tn.find("optional<") != std::string::npos)  need_optional = true;
+							if (tn.find("int") != std::string::npos)        need_cstdint  = true;
+						}
+					} else if constexpr (std::is_same_v<T, schema::PrimitiveType>) {
+						if (cppTypeName(t).find("int") != std::string::npos) need_cstdint = true;
+					}
+				},
+				*type);
+		}
+		if (need_vector)   out << "#include <vector>\n";
+		if (need_map)      out << "#include <map>\n";
+		if (need_variant)  out << "#include <variant>\n";
+		if (need_optional) out << "#include <optional>\n";
+		if (need_cstdint)  out << "#include <cstdint>\n";
+	}
+
 	out << "#include <boost/json.hpp>\n\n";
 
 	// Namespace
