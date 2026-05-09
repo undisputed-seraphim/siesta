@@ -16,14 +16,14 @@ void BeastServerGenerator::operator()(const CodegenArgs& args, const std::filesy
 
 	std::filesystem::create_directories(output_dir);
 	{
-		auto hpp_path = output_dir / "server.hpp";
+		auto hpp_path = output_dir / filenames::SERVER_HPP;
 		std::ofstream out(hpp_path);
 		if (out) {
 			emitServerHpp(out, endpoints);
 		}
 	}
 	{
-		auto cpp_path = output_dir / "server.cpp";
+		auto cpp_path = output_dir / filenames::SERVER_CPP;
 		std::ofstream out(cpp_path);
 		if (out) {
 			emitServerCpp(out, endpoints);

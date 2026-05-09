@@ -135,7 +135,7 @@ void DefsGenerator::operator()(const CodegenArgs& args, const std::filesystem::p
 	std::filesystem::create_directories(output_dir);
 
 	{
-		auto path = output_dir / "openapi_defs.hpp";
+		auto path = output_dir / filenames::DEFS_HPP;
 		std::ofstream out(path);
 		if (out) {
 			generateDefsHpp(out, order, ast);
@@ -143,7 +143,7 @@ void DefsGenerator::operator()(const CodegenArgs& args, const std::filesystem::p
 	}
 
 	{
-		auto path = output_dir / "openapi_defs.cpp";
+		auto path = output_dir / filenames::DEFS_CPP;
 		std::ofstream out(path);
 		if (out) {
 			generateDefsCpp(out, order, ast);
@@ -154,6 +154,7 @@ void DefsGenerator::operator()(const CodegenArgs& args, const std::filesystem::p
 void DefsGenerator::generateDefsHpp(std::ostream& out,
                                      const analysis::TopologicalOrder& order,
                                      const schema::NormalizedAST& ast) {
+	DefsEmitState state;
 	// Header guard
 	out << "#pragma once\n\n";
 
@@ -241,7 +242,7 @@ void DefsGenerator::generateDefsHpp(std::ostream& out,
 					emitStruct(out, t);
 					emitted_structs++;
 				} else if constexpr (std::is_same_v<T, schema::VariantType>) {
-					emitVariant(out, t, ast);
+					emitVariant(out, t, ast, state);
 					emitted_variants++;
 				} else if constexpr (std::is_same_v<T, schema::EnumType>) {
 					emitEnum(out, t);
@@ -314,6 +315,7 @@ void DefsGenerator::generateDefsHpp(std::ostream& out,
 void DefsGenerator::generateDefsCpp(std::ostream& out,
                                      const analysis::TopologicalOrder& order,
                                      const schema::NormalizedAST& ast) {
+	DefsEmitState state;
 	out << "#include \"openapi_defs.hpp\"\n";
 	out << "namespace api {\n\n";
 
@@ -331,7 +333,7 @@ void DefsGenerator::generateDefsCpp(std::ostream& out,
 					emitStructSerialization(out, t);
 					cpp_structs++;
 				} else if constexpr (std::is_same_v<T, schema::VariantType>) {
-					emitVariantSerialization(out, t, ast);
+					emitVariantSerialization(out, t, ast, state);
 					cpp_variants++;
 				} else if constexpr (std::is_same_v<T, schema::EnumType>) {
 					emitEnumSerialization(out, t);
@@ -388,7 +390,7 @@ void DefsGenerator::emitStruct(std::ostream& out, const schema::StructType& s) {
 	out << "};\n";
 }
 
-void DefsGenerator::emitVariant(std::ostream& out, const schema::VariantType& v, const schema::NormalizedAST& ast) {
+void DefsGenerator::emitVariant(std::ostream& out, const schema::VariantType& v, const schema::NormalizedAST& ast, DefsEmitState& state) {
 	// Documentation
 	if (!v.description.empty()) {
 		out << "/**\n * " << escapeCppString(v.description) << "\n */\n";
@@ -402,17 +404,23 @@ void DefsGenerator::emitVariant(std::ostream& out, const schema::VariantType& v,
 	}
 
 	// Process alternatives: deduplicate and check for collapse
-	auto [processed_alternatives, should_collapse] = processVariantAlternatives(ast, typedef_chain_, v);
+	auto [processed_alternatives, should_collapse] = processVariantAlternatives(ast, state.typedef_chain, v);
+	std::string sig = getVariantSignature(ast, state.typedef_chain, processed_alternatives);
+
+	// Cache for emitVariantSerialization (avoids recomputing)
+	auto& pp = state.preprocessed[v.name];
+	pp.alternatives = processed_alternatives;
+	pp.should_collapse = should_collapse;
+	pp.signature = sig;
 
 	// Check if this is a duplicate variant
-	std::string sig = getVariantSignature(ast, typedef_chain_, processed_alternatives);
-	auto [it, inserted] = emitted_variant_signatures_.emplace(sig, v.name);
+	auto [it, inserted] = state.variant_signatures.emplace(sig, v.name);
 	if (!inserted) {
 		// Duplicate! Emit as alias and track typedef chain
 		std::string target = it->second;
 		LOG_EMIT("emitVariant '%s': DUPLICATE sig='%s' -> alias to '%s'", v.name.c_str(), sig.c_str(), target.c_str());
 		out << "using " << v.name << " = " << target << ";\n";
-		typedef_chain_[v.name] = target;
+		state.typedef_chain[v.name] = target;
 		return;
 	}
 
@@ -421,7 +429,7 @@ void DefsGenerator::emitVariant(std::ostream& out, const schema::VariantType& v,
 		std::string target = cppTypeName(processed_alternatives[0]);
 		LOG_EMIT("emitVariant '%s': COLLAPSED to single alt '%s'", v.name.c_str(), target.c_str());
 		out << "using " << v.name << " = " << target << ";\n";
-		typedef_chain_[v.name] = target;
+		state.typedef_chain[v.name] = target;
 		return;
 	}
 
@@ -609,19 +617,29 @@ void DefsGenerator::emitStructSerialization(std::ostream& out, const schema::Str
 	out << "}\n\n";
 }
 
-void DefsGenerator::emitVariantSerialization(std::ostream& out, const schema::VariantType& v, const schema::NormalizedAST& ast) {
-	// Process alternatives to check if this is a duplicate or collapsed variant
-	auto [processed_alternatives, should_collapse] = processVariantAlternatives(ast, typedef_chain_, v);
-	std::string sig = getVariantSignature(ast, typedef_chain_, processed_alternatives);
+void DefsGenerator::emitVariantSerialization(std::ostream& out, const schema::VariantType& v, const schema::NormalizedAST& ast, const DefsEmitState& state) {
+	// Use cached preprocessed data from emitVariant if available
+	std::vector<schema::TypeRef> processed_alternatives;
+	bool should_collapse = false;
+	std::string sig;
+
+	auto cache_it = state.preprocessed.find(v.name);
+	if (cache_it != state.preprocessed.end()) {
+		processed_alternatives = cache_it->second.alternatives;
+		should_collapse = cache_it->second.should_collapse;
+		sig = cache_it->second.signature;
+	} else {
+		processed_alternatives = processVariantAlternatives(ast, state.typedef_chain, v).first;
+		should_collapse = processVariantAlternatives(ast, state.typedef_chain, v).second;
+		sig = getVariantSignature(ast, state.typedef_chain, processed_alternatives);
+	}
 
 	// Check if duplicate (already emitted signature exists)
-	auto it = emitted_variant_signatures_.find(sig);
-	if (it != emitted_variant_signatures_.end() && it->second != v.name) {
-		// Duplicate variant - skip serialization (it's just an alias)
+	auto it = state.variant_signatures.find(sig);
+	if (it != state.variant_signatures.end() && it->second != v.name) {
 		return;
 	}
 
-	// Skip serialization for collapsed variants (they're typedefs)
 	if (should_collapse) {
 		return;
 	}

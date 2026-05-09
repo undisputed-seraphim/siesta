@@ -15,7 +15,7 @@ void BeastPythonGenerator::operator()(const CodegenArgs& args, const std::filesy
 	module_name_ = args.module_name;
 
 	std::filesystem::create_directories(output_dir);
-	auto py_path = output_dir / "py_module.cpp";
+	auto py_path = output_dir / filenames::PY_MODULE;
 	std::ofstream out(py_path);
 	if (!out) {
 		return;
@@ -169,19 +169,11 @@ void BeastPythonGenerator::emitModuleBody(std::ostream& out, const std::vector<E
 	AuthType auth_type = AuthType::None;
 	std::string auth_member_name;
 	std::string auth_param_name;
-	for (const auto& ep : endpoints) {
-		if (ep.auth_type != AuthType::None) {
-			auth_type = ep.auth_type;
-			if (auth_type == AuthType::ApiKey) {
-				auth_member_name = "api_key";
-				auth_param_name = "api_key";
-			} else if (auth_type == AuthType::HttpBearer) {
-				auth_member_name = "bearer_token";
-				auth_param_name = "bearer_token";
-			}
-			break;
-		}
-	}
+
+	auto auth = detectAuth(endpoints);
+	auth_type = auth.type;
+	auth_member_name = auth.name;
+	auth_param_name = auth.name;
 
 	out << "// Python extension module definition\n";
 	out << "// The module name should match the shared library name (e.g., Echo_API.so -> Echo_API)\n";
