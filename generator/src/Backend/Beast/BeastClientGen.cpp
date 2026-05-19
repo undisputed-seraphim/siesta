@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: Apache-2.0
-#include "beast/codegen_client.hpp"
-#include "openapi.hpp"
-#include "openapi3.hpp"
+#include "Support/Filenames.hpp"
+#include "Backend/Beast/BeastClientGen.hpp"
+#include "Frontend/openapi.hpp"
+#include "Frontend/openapi3.hpp"
 #include <fstream>
 #include <unordered_set>
 

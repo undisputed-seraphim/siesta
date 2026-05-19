@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include "codegen_defs.hpp"
-#include "util.hpp"
+#include "Support/Filenames.hpp"
+#include "IR/DefsGenerator.hpp"
+#include "Support/Utils.hpp"
 #include <algorithm>
 #include <fstream>
 #include <sstream>

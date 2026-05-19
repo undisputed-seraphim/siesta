@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include "dependency_graph.hpp"
-#include "endpoint_ir.hpp"
-#include "schema_ast.hpp"
+#include "IR/DependencyGraph.hpp"
+#include "IR/EndpointIR.hpp"
+#include "Frontend/AST.hpp"
 #include <filesystem>
 
 namespace openapi::v3 {

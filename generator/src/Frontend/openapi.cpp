@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include "openapi.hpp"
-#include "util.hpp"
+#include "Frontend/openapi.hpp"
+#include "Support/Utils.hpp"
 
 using codegen::sanitize;
 

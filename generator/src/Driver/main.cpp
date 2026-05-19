@@ -3,10 +3,10 @@
 #include <filesystem>
 #include <iostream>
 
-#include "openapi3_codegen.hpp"
-#include "openapi.hpp"
-#include "openapi3.hpp"
-#include "util.hpp"
+#include "Driver/Driver.hpp"
+#include "Frontend/openapi.hpp"
+#include "Frontend/openapi3.hpp"
+#include "Support/Utils.hpp"
 
 namespace fs = std::filesystem;
 namespace po = ::boost::program_options;

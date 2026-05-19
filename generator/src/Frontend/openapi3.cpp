@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include "openapi3.hpp"
-#include "util.hpp"
+#include "Frontend/openapi3.hpp"
+#include "Support/Utils.hpp"
 
 using codegen::component_path;
 

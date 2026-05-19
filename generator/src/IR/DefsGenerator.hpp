@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include "codegen_base.hpp"
-#include "dependency_graph.hpp"
-#include "schema_ast.hpp"
-#include "util.hpp"
+#include "IR/CodegenArgs.hpp"
+#include "IR/DependencyGraph.hpp"
+#include "Frontend/AST.hpp"
+#include "Support/Utils.hpp"
 #include <ostream>
 #include <string>
 
