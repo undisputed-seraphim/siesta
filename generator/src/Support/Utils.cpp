@@ -2,9 +2,9 @@
 #include <algorithm>
 #include <unordered_set>
 
-#include "util.hpp"
+#include "Support/Utils.hpp"
 
-#include "schema_ast.hpp"
+#include "Frontend/AST.hpp"
 
 using namespace std::literals;
 

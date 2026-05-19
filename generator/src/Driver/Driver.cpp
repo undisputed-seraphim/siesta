@@ -1,20 +1,20 @@
 // SPDX-License-Identifier: Apache-2.0
-#include "openapi3_codegen.hpp"
-#include "codegen_base.hpp"
-#include "beast/codegen_client.hpp"
-#include "codegen_defs.hpp"
-#include "beast/codegen_python.hpp"
-#include "beast/codegen_server.hpp"
-#include "beast/codegen_server_python.hpp"
-#include "endpoint_ir.hpp"
+#include "Driver/Driver.hpp"
+#include "IR/CodegenArgs.hpp"
+#include "Backend/Beast/BeastClientGen.hpp"
+#include "IR/DefsGenerator.hpp"
+#include "Backend/Beast/BeastPythonGen.hpp"
+#include "Backend/Beast/BeastServerGen.hpp"
+#include "Backend/Beast/BeastServerPythonGen.hpp"
+#include "IR/EndpointIR.hpp"
 
 using codegen::sanitize;
-#include "dependency_graph.hpp"
-#include "openapi.hpp"
-#include "openapi3.hpp"
-#include "schema_ast.hpp"
-#include "schema_parser.hpp"
-#include "util.hpp"
+#include "IR/DependencyGraph.hpp"
+#include "Frontend/openapi.hpp"
+#include "Frontend/openapi3.hpp"
+#include "Frontend/AST.hpp"
+#include "Frontend/SchemaParser.hpp"
+#include "Support/Utils.hpp"
 #include <boost/json/serialize.hpp>
 #include <fstream>
 #include <iostream>

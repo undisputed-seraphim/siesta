@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
-#include "endpoint_ir.hpp"
-#include "openapi.hpp"
-#include "openapi3.hpp"
+#include "IR/EndpointIR.hpp"
+#include "Frontend/openapi.hpp"
+#include "Frontend/openapi3.hpp"
 #include <algorithm>
 
 namespace codegen {

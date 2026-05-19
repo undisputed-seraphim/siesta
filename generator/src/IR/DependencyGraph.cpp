@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: Apache-2.0
-#include "dependency_graph.hpp"
+#include "IR/DependencyGraph.hpp"
 #include <queue>
 
 namespace analysis {

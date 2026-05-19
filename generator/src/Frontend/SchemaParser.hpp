@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include "openapi3.hpp"
-#include "schema_ast.hpp"
-#include "util.hpp"
+#include "Frontend/openapi3.hpp"
+#include "Frontend/AST.hpp"
+#include "Support/Utils.hpp"
 #include <cctype>
 #include <optional>
 #include <string_view>

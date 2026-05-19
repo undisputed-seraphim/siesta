@@ -61,16 +61,6 @@ inline void log_to(std::string_view tag, const char* fmt, ...) {
 }
 } // namespace codegen
 
-namespace codegen::filenames {
-inline constexpr std::string_view SERVER_HPP = "server.hpp";
-inline constexpr std::string_view SERVER_CPP = "server.cpp";
-inline constexpr std::string_view CLIENT_HPP = "client.hpp";
-inline constexpr std::string_view DEFS_HPP   = "openapi_defs.hpp";
-inline constexpr std::string_view DEFS_CPP   = "openapi_defs.cpp";
-inline constexpr std::string_view PY_MODULE  = "py_module.cpp";
-inline constexpr std::string_view SERVER_PY  = "server_py.cpp";
-} // namespace codegen::filenames
-
 #define LOG_PARSE(...) ::codegen::log_to("PARSE", __VA_ARGS__)
 #define LOG_DEP(...) ::codegen::log_to("DEP", __VA_ARGS__)
 #define LOG_EMIT(...) ::codegen::log_to("EMIT", __VA_ARGS__)

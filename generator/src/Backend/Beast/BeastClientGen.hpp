@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #pragma once
 
-#include "codegen_base.hpp"
-#include "endpoint_ir.hpp"
-#include "openapi3.hpp"
-#include "schema_ast.hpp"
-#include "util.hpp"
+#include "IR/CodegenArgs.hpp"
+#include "IR/EndpointIR.hpp"
+#include "Frontend/openapi3.hpp"
+#include "Frontend/AST.hpp"
+#include "Support/Utils.hpp"
 #include <ostream>
 #include <string>
 #include <string_view>

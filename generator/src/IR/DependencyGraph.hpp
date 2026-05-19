@@ -1,7 +1,7 @@
 #pragma once
 
-#include "schema_ast.hpp"
-#include "util.hpp"
+#include "Frontend/AST.hpp"
+#include "Support/Utils.hpp"
 #include <queue>
 #include <string>
 #include <unordered_map>

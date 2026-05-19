@@ -5,7 +5,18 @@
 The siesta generator is a C++23 compiler-like tool that transforms OpenAPI v3 JSON schemas into production-grade C++ client code and Python extension modules. It uses simdjson for zero-copy parsing, boost::json for runtime JSON, boost::asio for async I/O, and nanobind for Python bindings.
 
 ```
-OpenAPI v3 JSON ──▶ Phase 1: AST ──▶ Phase 2: Dep Graph ──▶ Phase 3: Codegen ──▶ .hpp / .cpp / .py
+OpenAPI v3 JSON ──▶ Frontend ──▶ IR/Analysis ──▶ Backend ──▶ .hpp / .cpp / .py
+```
+
+### Compiler-like structure
+
+```
+generator/src/
+├── Driver/                Thin conductor — CLI entry + phase orchestration
+├── Frontend/              OpenAPI → AST (simdjson parsing, schema normalization)
+├── IR/                    Intermediate representation (types, endpoints, deps)
+├── Backend/Beast/         boost::beast code generation backends
+└── Support/               Shared utilities (sanitize, logging, filename constants)
 ```
 
 | Output File | Content |
@@ -17,7 +28,7 @@ OpenAPI v3 JSON ──▶ Phase 1: AST ──▶ Phase 2: Dep Graph ──▶ Ph
 | `py_module.cpp` | Nanobind Python extension module wrapping the C++ client synchronously via `boost::asio::use_future` |
 | `server_py.cpp` | Nanobind trampoline class for Python-side server subclassing |
 
-All five backends implement `ICodeGenerator` (`codegen_base.hpp`). Endpoints are parsed once by `endpoint_ir.hpp` → `parseEndpoints()` and passed to backends via `CodegenArgs::endpoints`. This eliminates ~500 lines of duplicated endpoint parsing.
+All backends implement `ICodeGenerator` (`IR/CodegenArgs.hpp`). Endpoints are parsed once by `IR/EndpointIR.hpp` → `parseEndpoints()` and passed to backends via `CodegenArgs::endpoints`.
 
 ---
 
@@ -25,38 +36,62 @@ All five backends implement `ICodeGenerator` (`codegen_base.hpp`). Endpoints are
 
 ### Generator (`generator/src/`)
 
-| File | Role |
-|------|------|
-| `main.cpp` | CLI entry point, argument parsing |
-| `openapi3_codegen.cpp` / `.hpp` | Pipeline orchestrator — runs all phases sequentially |
-| `openapi.hpp` / `.cpp` | simdjson wrapper, base OpenAPI accessors, `ListAdaptor` / `MapAdaptor` |
-| `openapi3.hpp` / `.cpp` | OpenAPI v3-specific parsed types (schemas, paths, operations, components) |
-| `schema_ast.hpp` / `.cpp` | Normalized AST definitions (`StructType`, `VariantType`, `ArrayType`, etc.) + validation |
-| `schema_parser.hpp` / `.cpp` | `SchemaParser` — converts raw JsonSchema → AST nodes. Top-level `parseSchema` dispatches to `parseObjectSchema`, `parseArraySchema`, `parsePrimitiveSchema`, `parseUnknownSchema` |
-| `dependency_graph.hpp` / `.cpp` | `DependencyGraph` + Kahn's topological sort + cycle detection |
-| `codegen_base.hpp` | `CodegenArgs` struct + `ICodeGenerator` abstract interface |
-| `endpoint_ir.hpp` / `.cpp` | Shared endpoint IR: `Endpoint` struct (includes `cpp_verb`), `ClientParam`, `AuthType`, plus `parseEndpoints()` — parsed once, consumed by all backends |
-| `codegen_defs.hpp` / `.cpp` | `DefsGenerator : ICodeGenerator` — emits type definitions + ser/des |
-| `codegen_client.hpp` / `.cpp` | `ClientGenerator : ICodeGenerator` — emits async client class |
-| `codegen_server.hpp` / `.cpp` | `ServerGenerator : ICodeGenerator` — emits abstract server class |
-| `codegen_python.hpp` / `.cpp` | `PythonGenerator : ICodeGenerator` — emits nanobind client module |
-| `codegen_server_python.hpp` / `.cpp` | `ServerPythonGenerator : ICodeGenerator` — emits nanobind server trampoline |
-| `util.hpp` / `.cpp` | Shared utilities: `sanitize` (O(1) keyword lookup via `unordered_set`), `escapeCppString`, `primitiveToCpp`, logging macros |
-
-### Runtime (`include/siesta/beast/`)
+#### Driver — Orchestration
 
 | File | Role |
 |------|------|
-| `client.hpp/.cpp` | `ClientBase` — async HTTP/1.1 client with strand-serialized I/O, `async_submit_request` 3-state FSM, `_host_value` auto-populated from `start()` |
-| `server.hpp/.cpp` | `ServerBase` + `Session` — async TCP acceptor, per-connection request/response pipeline, configurable read/write timeouts |
-| `python_util.hpp` | Shared nanobind helpers: `json_to_python()` + `extract_response_json()` — included by all generated `py_module.cpp` |
-| `error.hpp` | Outcome/error_code adaptors |
+| `Driver/main.cpp` | CLI entry point, argument parsing (`--input`, `--output`, `--mode`, `--backend`, `--namespace`, `--no-python`, `--print-module-names`) |
+| `Driver/Driver.hpp` / `.cpp` | Thin conductor — `generateFromOpenAPI()` invokes all phases sequentially |
+
+#### Frontend — OpenAPI → AST
+
+| File | Role |
+|------|------|
+| `Frontend/openapi.hpp` / `.cpp` | simdjson wrapper, base OpenAPI accessors, `ListAdaptor` / `MapAdaptor` |
+| `Frontend/openapi3.hpp` / `.cpp` | OpenAPI v3-specific parsed types (schemas, paths, operations, components) |
+| `Frontend/AST.hpp` / `.cpp` | Normalized AST definitions (`StructType`, `VariantType`, `ArrayType`, etc.) + validation |
+| `Frontend/SchemaParser.hpp` / `.cpp` | `SchemaParser` — converts raw JsonSchema → AST nodes. Top-level `parseSchema` dispatches to focused sub-parsers |
+
+#### IR — Intermediate Representation + Analysis
+
+| File | Role |
+|------|------|
+| `IR/DependencyGraph.hpp` / `.cpp` | `DependencyGraph` + Kahn's topological sort + cycle detection |
+| `IR/EndpointIR.hpp` / `.cpp` | Shared endpoint IR: `Endpoint` struct, `ClientParam`, `AuthType`, `AuthInfo`, plus `detectAuth()` and `parseEndpoints()` — parsed once, consumed by all backends |
+| `IR/CodegenArgs.hpp` | `CodegenArgs` struct + `ICodeGenerator` abstract interface |
+| `IR/DefsGenerator.hpp` / `.cpp` | `DefsGenerator : ICodeGenerator` — emits type definitions + ser/des (backend-independent, shared by all backends) |
+
+#### Backend — Per-library Code Generation
+
+| File | Role |
+|------|------|
+| `Backend/Beast/BeastClientGen.hpp` / `.cpp` | `BeastClientGenerator : ICodeGenerator` — emits async client class |
+| `Backend/Beast/BeastServerGen.hpp` / `.cpp` | `BeastServerGenerator : ICodeGenerator` — emits abstract server class |
+| `Backend/Beast/BeastPythonGen.hpp` / `.cpp` | `BeastPythonGenerator : ICodeGenerator` — emits nanobind client module |
+| `Backend/Beast/BeastServerPythonGen.hpp` / `.cpp` | `BeastServerPythonGenerator : ICodeGenerator` — emits nanobind server trampoline |
+
+#### Support — Shared Utilities
+
+| File | Role |
+|------|------|
+| `Support/Utils.hpp` / `.cpp` | Shared utilities: `sanitize` (O(1) keyword lookup via `unordered_set`), `escapeCppString`, `primitiveToCpp`, logging macros |
+| `Support/Filenames.hpp` | Output filename constants (`SERVER_HPP`, `CLIENT_HPP`, etc.) — `constexpr string_view` |
+
+### Runtime (`include/siesta/`)
+
+| File | Role |
+|------|------|
+| `encoding.hpp` | Shared `url_encode()` + `query_value()` overloads — included by every generated `openapi_defs.hpp` |
+| `beast/client.hpp/.cpp` | `ClientBase` — async HTTP/1.1 client with strand-serialized I/O, `async_submit_request` 3-state FSM, `_host_value` auto-populated from `start()`. `is_transient()` error classifier. |
+| `beast/server.hpp/.cpp` | `ServerBase` + `Session` — async TCP acceptor, per-connection request/response pipeline, configurable read/write timeouts |
+| `beast/python_util.hpp` | Shared nanobind helpers: `json_to_python()` + `extract_response_json()` — included by all generated `py_module.cpp` |
+| `beast/error.hpp` | Outcome/error_code adaptors |
 
 ---
 
 ## Phase 1: Frontend — Schema Normalization
 
-**Entry**: `openapi3_codegen.cpp::buildAST()` → `parseSchemas()` + `parsePaths()`
+**Entry**: `Driver/Driver.cpp::generateFromOpenAPI()` → `buildAST()` → `parseSchemas()` + `parsePaths()`
 
 1. `openapi::OpenAPI::Load()` reads the JSON file into simdjson's on-demand DOM
 2. `static_cast<const openapi::v3::OpenAPIv3&>` casts to a v3-specific typed view
@@ -114,7 +149,7 @@ Cyclic schemas are a hard error — value-semantic types cannot express cycles. 
 
 ## Phase 3: Backend — Code Generation
 
-Endpoints are parsed once into a shared `std::vector<Endpoint>` IR (`endpoint_ir.hpp/.cpp`), then passed to all backends via `CodegenArgs`. Backends consume the IR — they no longer re-parse the OpenAPI spec independently.
+Endpoints are parsed once into a shared `std::vector<Endpoint>` IR (`IR/EndpointIR.hpp/.cpp`), then passed to all backends via `CodegenArgs`. Backends consume the IR — they no longer re-parse the OpenAPI spec independently.
 
 ```cpp
 struct CodegenArgs {
@@ -122,6 +157,7 @@ struct CodegenArgs {
     const analysis::TopologicalOrder& order;
     const openapi::v3::OpenAPIv3* spec = nullptr;
     std::string module_name = "siesta_bindings";
+    std::string ns = "api";
     const std::vector<Endpoint>* endpoints = nullptr;  // pre-parsed endpoint IR
 };
 
@@ -147,7 +183,7 @@ Key behaviors:
 - Struct serialization merges base JSON objects before adding derived fields
 - Variant deserialization tries each alternative in order via try/catch
 
-### 3b. ClientGenerator → `client.hpp`
+### 3b. BeastClientGenerator → `client.hpp`
 
 Consumes the pre-parsed `Endpoint` IR. Generates `class Client : public ::siesta::beast::ClientBase` with one templated completion-token method per endpoint. Method body emission is decomposed into focused functions: `emitPathParams`, `emitQueryParams`, `emitRequestBody`, `emitHeaderParams`.
 
@@ -162,13 +198,13 @@ auto get__api_v3_ping(
 Parameter handling:
 - **Path params**: `std::string::find` + `replace` of `{}` placeholders in a `std::string target_path`
 - **Query params**: all params (required + optional) built into a single `std::string query` buffer via a `_sep` lambda (`[&]{ if (!query.empty()) query += '&'; }`). Required params emit unconditionally; optional params emit inside `if (param.has_value())`. The `?` prefix and append to `target_path` happens once at the end. No separate buffer for optional params, no `target_has_query` flag.
-- **`query_value`**: type-specialized overloads for `int32_t`–`bool` use `std::to_string()` / literal booleans; `const std::string&` delegates to `url_encode`; a generic `const auto&` template (round-trip `value_from`→`value_to<string>`) handles complex types like `boost::json::value`.
+- **`query_value`**: type-specialized overloads for `int32_t`–`bool` use `std::to_string()` / literal booleans; `const std::string&` delegates to `url_encode`. Enum types get per-type `query_value(EnumClass)` overloads emitted by the DefsGenerator. A catch-all template fires a `static_assert(sizeof(T)==0, ...)` at compile time for unsupported types rather than a silent JSON round-trip.
 - **Header params**: `req.set(name, value)`
 - **HTTP verb**: uses `ep.cpp_verb` from the endpoint IR (pre-computed during `parseEndpoints()` — `"delete"` → `"delete_"`)
 - **Auth**: `HttpBearer` token is pre-computed as `_auth_header("Bearer "+token)` in the constructor and reused per-endpoint as a stored `std::string` member rather than allocated per call. `ApiKey` uses the raw key member directly.
 - **Parameter sanitization**: C++ keyword names get `param_` prefix; brackets and special chars become `_`
 
-### 3c. ServerGenerator → `server.hpp` + `server.cpp`
+### 3c. BeastServerGenerator → `server.hpp` + `server.cpp`
 
 Consumes the pre-parsed `Endpoint` IR. Produces an abstract `openapi::Server` class with one pure-virtual method per endpoint. The `.cpp` file contains the dispatch table:
 
@@ -176,7 +212,7 @@ Consumes the pre-parsed `Endpoint` IR. Produces an abstract `openapi::Server` cl
 - **Parameterised paths**: `match_path()` segment-by-segment algorithm over a linear array of patterns
 - **404 fallback**: returns `http::status::not_found` when no route matches
 
-### 3d. PythonGenerator → `py_module.cpp`
+### 3d. BeastPythonGenerator → `py_module.cpp`
 
 Consumes the pre-parsed `Endpoint` IR. Generates a nanobind module containing:
 - `#include <siesta/beast/python_util.hpp>` for `json_to_python()` and `extract_response_json()` — these live in the shared siesta runtime header rather than being duplicated in every generated module.
@@ -189,7 +225,7 @@ Synchronous execution model:
 3. `future.get()` retrieves the outcome
 4. Convert response body to Python via `extract_response_json()`
 
-### 3e. ServerPythonGenerator → `server_py.cpp`
+### 3e. BeastServerPythonGenerator → `server_py.cpp`
 
 Consumes the pre-parsed `Endpoint` IR. Generates a nanobind trampoline class (`PyServer`) enabling Python-side subclassing of the C++ server. Each virtual method dispatches to a Python override via `nb::detail::ticket`. The module exposes `listen()` and `shutdown()` on the `Server` class.
 
@@ -198,24 +234,24 @@ Consumes the pre-parsed `Endpoint` IR. Generates a nanobind trampoline class (`P
 ## Data Flow
 
 ```
-main.cpp
-  └─ openapi3_codegen.cpp::generateFromOpenAPI()
-       ├─ openapi::OpenAPI::Load()                          [simdjson]
+Driver/main.cpp
+  └─ Driver/Driver.cpp::generateFromOpenAPI()
+       ├─ Frontend/openapi::OpenAPI::Load()                  [simdjson]
        ├─ buildAST()
-       │    ├─ parseSchemas()  ──▶ SchemaParser × N
+       │    ├─ parseSchemas()  ──▶ Frontend/SchemaParser × N
        │    └─ parsePaths()
-       │         └─ schema::NormalizedAST
+       │         └─ Frontend/AST.hpp :: NormalizedAST
        ├─ ast.validate()
-       ├─ DependencyGraph::buildFromAST()
+       ├─ IR/DependencyGraph::buildFromAST()
        ├─ sortTypes()  ──▶ TopologicalOrder
-       ├─ parseEndpoints()  ──▶ std::vector<Endpoint>      [shared endpoint IR]
+       ├─ IR/EndpointIR.hpp :: parseEndpoints()  ──▶ std::vector<Endpoint>
        └─ Phase 4: for each backend
-            CodegenArgs args{ast, order, &spec, name, &eps};
-            DefsGenerator{}(args, out_dir);                 // openapi_defs.hpp/.cpp
-            ClientGenerator{}(args, out_dir);               // client.hpp
-            ServerGenerator{}(args, out_dir);               // server.hpp/.cpp
-            PythonGenerator{}(args, out_dir);               // py_module.cpp
-            ServerPythonGenerator{}(server_args, out_dir);  // server_py.cpp
+            CodegenArgs args{ast, order, &spec, name, ns, &eps};
+            IR/DefsGenerator{}(args, out_dir);                    // openapi_defs.hpp/.cpp
+            BeastClientGenerator{}(args, out_dir);               // client.hpp
+            BeastServerGenerator{}(args, out_dir);               // server.hpp/.cpp
+            BeastPythonGenerator{}(args, out_dir);               // py_module.cpp
+            BeastServerPythonGenerator{}(server_args, out_dir);  // server_py.cpp
 ```
 
 ---
@@ -279,10 +315,10 @@ Names matching GCC/Clang predefined macros (`unix`, `linux`, `x86_64`, `__unix__
 Path templates use `std::string::find` + `replace` instead of `std::format`. This avoids requiring `<format>` (and `<regex>`) in generated client headers, keeping the generated code compatible with older standard library implementations.
 
 ### 10. ICodeGenerator Interface
-All five backends share a single abstract interface. Constructors receive only per-backend configuration (`PythonGenerator` takes a module name; the other four take nothing). All data needed for generation flows in through `operator()(const CodegenArgs&, const fs::path&)`. This separates configuration from execution and lets the pipeline call every generator through the same polymorphic pattern.
+All backends share a single abstract interface. All data needed for generation flows in through `operator()(const CodegenArgs&, const fs::path&)`. This separates configuration from execution and lets the pipeline call every generator through the same polymorphic pattern. The `CodegenArgs::ns` field carries the C++ namespace (derived from the spec title or `--namespace` flag) — all types, client, server, and Python bindings live in the same namespace per schema.
 
-### 11. Namespace Organization
-Utility functions live in `namespace codegen` (moved from the global namespace during refactoring). File-local callers in non-`codegen` TUs use `using codegen::fn;` at file scope. The `endpoint_ir.hpp` header declares the shared endpoint IR and `parseEndpoints()` in `namespace codegen` — the implementation lives in `endpoint_ir.cpp` for clean compilation-unit separation.
+### 11. Utility Organization
+Utility functions live in `namespace codegen` and `namespace codegen::filenames`. Output path constants (`SERVER_HPP`, `CLIENT_HPP`, `DEFS_HPP`, etc.) are centralized in `Support/Filenames.hpp` as `constexpr string_view` rather than hardcoded across five generator files. The `siesta/encoding.hpp` runtime header provides shared `url_encode()` + `query_value()` overloads so they are not duplicated in every generated `client.hpp`.
 
 ---
 
@@ -360,7 +396,7 @@ cd tests/echo && ./run.sh
 ### Debugging Compilation Errors
 
 1. Search for undefined type names in `openapi_defs.hpp` — types referenced but not forward-declared
-2. Check `namespace api { ... }` — all generated types live here; client code uses `api::TypeName`
+2. Check the C++ namespace — all generated types, client, server, and Python bindings live in a single namespace (derived from the spec title or `--namespace`). No separate `api` vs `openapi` namespaces.
 3. Check C++ keyword conflicts — `delete`, `class`, `template`, `operator` in identifiers
 4. Check variant ordering — variant alternatives must be defined before the variant that references them
 5. Verify `NB_MODULE` name matches CMake target name for Python import

@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
-#include "schema_parser.hpp"
-#include "util.hpp"
+#include "Frontend/SchemaParser.hpp"
+#include "Support/Utils.hpp"
 
 namespace schema {
 
