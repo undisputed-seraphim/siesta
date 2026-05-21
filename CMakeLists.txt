@@ -25,6 +25,7 @@ find_package(nanobind 2.12 REQUIRED)
 
 add_subdirectory(jsonschema)
 add_subdirectory(generator)
+add_subdirectory(generator-rpc)
 
 file(GLOB_RECURSE lib_src "${CMAKE_CURRENT_SOURCE_DIR}/src/*")
 add_library(siesta STATIC ${lib_src})

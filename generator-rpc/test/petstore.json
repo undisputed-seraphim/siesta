@@ -1,0 +1,51 @@
+{
+  "openrpc": "1.2.6",
+  "info": {
+    "title": "PetStore",
+    "version": "1.0.0"
+  },
+  "methods": [
+    {
+      "name": "pet_create",
+      "summary": "Create a pet",
+      "params": [
+        {"name": "name", "schema": {"type": "string"}},
+        {"name": "kind", "schema": {"type": "string"}, "required": true}
+      ],
+      "result": {
+        "name": "pet",
+        "schema": {"$ref": "#/components/schemas/Pet"}
+      },
+      "errors": [
+        {"code": 100, "message": "Invalid name"}
+      ]
+    },
+    {
+      "name": "pet_feed",
+      "summary": "Feed a pet (notification)",
+      "params": [
+        {"name": "pet_id", "schema": {"type": "integer", "format": "int32"}, "required": true}
+      ]
+    },
+    {
+      "name": "rpc.discover",
+      "summary": "Service discovery",
+      "params": [],
+      "result": {
+        "name": "openrpc_schema",
+        "schema": {}
+      }
+    }
+  ],
+  "components": {
+    "schemas": {
+      "Pet": {
+        "type": "object",
+        "properties": {
+          "name": {"type": "string"},
+          "kind": {"type": "string"}
+        }
+      }
+    }
+  }
+}
