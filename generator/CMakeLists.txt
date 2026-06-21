@@ -8,7 +8,6 @@ target_link_libraries(siesta-generator PRIVATE
 	Boost::boost
 	Boost::program_options
 	Boost::json
-	Boost::system
 )
 
 include(GNUInstallDirs)

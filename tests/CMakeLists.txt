@@ -5,11 +5,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # -- Dependencies --------------------------------------------------
-find_package(Catch2 3.7 REQUIRED)
+if(NOT TARGET Catch2::Catch2)
+	find_package(Catch2 3.7 REQUIRED)
+endif()
 message(STATUS "Catch2 ${Catch2_VERSION}")
 
-find_package(Python 3.10 REQUIRED COMPONENTS Interpreter Development)
-find_package(nanobind 2.12 REQUIRED)
+if(NOT TARGET nanobind::nanobind)
+	find_package(Python 3.10 REQUIRED COMPONENTS Interpreter Development)
+	find_package(nanobind 2.12 REQUIRED)
+endif()
 
 if(NOT TARGET siesta)
 	find_package(siesta REQUIRED)
@@ -33,6 +37,7 @@ siesta_generate(
 	SCHEMA "${CMAKE_CURRENT_SOURCE_DIR}/echo.json"
 	MODE BOTH
 	BACKEND beast
+	MODULE_NAME Echo_API
 )
 set_target_properties(Echo_API PROPERTIES EXCLUDE_FROM_ALL TRUE)
 

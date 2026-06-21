@@ -1,17 +1,19 @@
 # SPDX-License-Identifier: Apache-2.0
 #
 # siesta_generate(TARGET <name> SCHEMA <path> [MODE CLIENT|SERVER|BOTH]
-#                 [BACKEND beast|nghttp3|...] [NO_PYTHON])
+#                 [BACKEND beast|nghttp3|...] [MODULE_NAME <name>] [NO_PYTHON])
 #
 # Runs siesta-generator on the OpenAPI schema. Appends the generated C++
 # sources to <name> and creates nanobind modules for Python bindings.
 #
 # BACKEND:          HTTP backend to target (default: beast)
+# MODULE_NAME:      Python module name (skips configure-time generator query;
+#                   required for in-tree builds where the generator isn't built yet)
 # NO_PYTHON:        skip nanobind module generation and Python dependency checks
 # REQUIRES:         find_package(siesta)
 
 function(siesta_generate)
-	cmake_parse_arguments(SG "NO_PYTHON" "TARGET;SCHEMA;MODE;BACKEND" "" ${ARGN})
+	cmake_parse_arguments(SG "NO_PYTHON" "TARGET;SCHEMA;MODE;BACKEND;MODULE_NAME" "" ${ARGN})
 
 	if(NOT SG_TARGET)
 		message(FATAL_ERROR "siesta_generate: TARGET is required")
@@ -94,7 +96,7 @@ function(siesta_generate)
 	add_custom_command(
 		OUTPUT ${_all_outputs}
 		COMMAND "$<TARGET_FILE:${_gen_target}>" ${_gen_args}
-		DEPENDS "${SG_SCHEMA}"
+		DEPENDS "${SG_SCHEMA}" ${_gen_target}
 		COMMENT "Generating siesta stubs: ${_schema_name}"
 	)
 
@@ -121,45 +123,50 @@ function(siesta_generate)
 			find_package(nanobind 2.12 REQUIRED)
 		endif()
 
-		# Resolve the generator executable path at configure time
-		get_target_property(_gen_exe ${_gen_target} IMPORTED_LOCATION)
-		if(NOT _gen_exe)
-			foreach(_cfg IN ITEMS RELEASE DEBUG RELWITHDEBINFO MINSIZEREL)
-				get_target_property(_gen_exe ${_gen_target} "IMPORTED_LOCATION_${_cfg}")
-				if(_gen_exe)
-					break()
-				endif()
-			endforeach()
-		endif()
-		# Fallback: for in-tree builds, look in the build tree
-		if(NOT _gen_exe AND CMAKE_BINARY_DIR)
-			set(_gen_exe "${CMAKE_BINARY_DIR}/generator/siesta-generator")
-			if(NOT EXISTS "${_gen_exe}")
-				set(_gen_exe "")
+		if(SG_MODULE_NAME)
+			set(SIESTA_CLIENT_MODULE "${SG_MODULE_NAME}")
+			set(SIESTA_SERVER_MODULE "${SG_MODULE_NAME}_server")
+		else()
+			# Resolve the generator executable path at configure time
+			get_target_property(_gen_exe ${_gen_target} IMPORTED_LOCATION)
+			if(NOT _gen_exe)
+				foreach(_cfg IN ITEMS RELEASE DEBUG RELWITHDEBINFO MINSIZEREL)
+					get_target_property(_gen_exe ${_gen_target} "IMPORTED_LOCATION_${_cfg}")
+					if(_gen_exe)
+						break()
+					endif()
+				endforeach()
 			endif()
-		endif()
-		if(NOT _gen_exe)
-			message(FATAL_ERROR "siesta_generate: could not locate siesta-generator executable")
-		endif()
+			# Fallback: for in-tree builds, look in the build tree
+			if(NOT _gen_exe AND CMAKE_BINARY_DIR)
+				set(_gen_exe "${CMAKE_BINARY_DIR}/generator/siesta-generator")
+				if(NOT EXISTS "${_gen_exe}")
+					set(_gen_exe "")
+				endif()
+			endif()
+			if(NOT _gen_exe)
+				message(FATAL_ERROR "siesta_generate: could not locate siesta-generator executable (hint: pass MODULE_NAME to skip configure-time query)")
+			endif()
 
-		execute_process(
-			COMMAND "${_gen_exe}"
-				--input "${SG_SCHEMA}"
-				--print-module-names
-			OUTPUT_VARIABLE _module_names
-			OUTPUT_STRIP_TRAILING_WHITESPACE
-			RESULT_VARIABLE _mod_rc
-		)
-		if(NOT _mod_rc EQUAL 0)
-			message(FATAL_ERROR "siesta_generate: failed to query module names")
-		endif()
-		string(REGEX MATCH "client=([^\n]+)" _match "${_module_names}")
-		if(_match)
-			set(SIESTA_CLIENT_MODULE "${CMAKE_MATCH_1}")
-		endif()
-		string(REGEX MATCH "server=([^\n]+)" _match "${_module_names}")
-		if(_match)
-			set(SIESTA_SERVER_MODULE "${CMAKE_MATCH_1}")
+			execute_process(
+				COMMAND "${_gen_exe}"
+					--input "${SG_SCHEMA}"
+					--print-module-names
+				OUTPUT_VARIABLE _module_names
+				OUTPUT_STRIP_TRAILING_WHITESPACE
+				RESULT_VARIABLE _mod_rc
+			)
+			if(NOT _mod_rc EQUAL 0)
+				message(FATAL_ERROR "siesta_generate: failed to query module names")
+			endif()
+			string(REGEX MATCH "client=([^\n]+)" _match "${_module_names}")
+			if(_match)
+				set(SIESTA_CLIENT_MODULE "${CMAKE_MATCH_1}")
+			endif()
+			string(REGEX MATCH "server=([^\n]+)" _match "${_module_names}")
+			if(_match)
+				set(SIESTA_SERVER_MODULE "${CMAKE_MATCH_1}")
+			endif()
 		endif()
 
 		if(DEFINED SIESTA_CLIENT_MODULE AND (SG_MODE STREQUAL "CLIENT" OR SG_MODE STREQUAL "BOTH"))

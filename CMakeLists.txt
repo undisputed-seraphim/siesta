@@ -13,21 +13,27 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
+find_package(Python 3.10 REQUIRED COMPONENTS Interpreter Development)
+find_package(nanobind 2.12 QUIET)
+
 add_subdirectory(thirdparty)
 
 set(Boost_USE_STATIC_LIBS ON)
-find_package(Boost 1.83 REQUIRED COMPONENTS system json program_options)
+set(Boost_USE_STATIC_RUNTIME ON)
+find_package(Boost 1.83 REQUIRED COMPONENTS json program_options)
 find_package(simdjson 4.6 REQUIRED)
 message(STATUS "simdjson version ${simdjson_VERSION}")
 
-find_package(Python 3.10 REQUIRED COMPONENTS Interpreter Development)
-find_package(nanobind 2.12 REQUIRED)
+if(NOT nanobind_FOUND)
+	find_package(nanobind 2.12 REQUIRED)
+endif()
 
 add_subdirectory(jsonschema)
 add_subdirectory(generator)
 
 file(GLOB_RECURSE lib_src "${CMAKE_CURRENT_SOURCE_DIR}/src/*")
 add_library(siesta STATIC ${lib_src})
+add_library(siesta::siesta ALIAS siesta)
 target_include_directories(siesta PUBLIC
 	$<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 	$<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
@@ -35,7 +41,6 @@ target_include_directories(siesta PUBLIC
 target_link_libraries(siesta PUBLIC
 	Boost::boost
 	Boost::json
-	Boost::system
 )
 
 include(CMakePackageConfigHelpers)
@@ -61,3 +66,8 @@ NAMESPACE
 DESTINATION
 	${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/cmake
 )
+
+option(BUILD_TESTING "Build tests" ON)
+if(BUILD_TESTING)
+	add_subdirectory(tests)
+endif()
