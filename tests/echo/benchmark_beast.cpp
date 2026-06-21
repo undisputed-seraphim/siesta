@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <csignal>
 #include <cstdint>
 #include <cstdio>
 #include <iomanip>
@@ -16,6 +17,14 @@
 
 namespace asio = boost::asio;
 using bench_clock = std::chrono::steady_clock;
+
+static asio::io_context* g_server_ctx = nullptr;
+static asio::io_context* g_client_ctx = nullptr;
+
+static void sigint_handler(int) {
+	if (g_client_ctx) g_client_ctx->stop();
+	if (g_server_ctx) g_server_ctx->stop();
+}
 
 struct Runner : std::enable_shared_from_this<Runner> {
 	std::shared_ptr<Echo_API::Client> client;
@@ -114,6 +123,10 @@ int main(int argc, char* argv[]) {
 	}
 
 	asio::io_context client_ctx;
+	g_server_ctx = &server_ctx;
+	g_client_ctx = &client_ctx;
+	std::signal(SIGINT, sigint_handler);
+	std::signal(SIGTERM, sigint_handler);
 	std::vector<std::shared_ptr<Echo_API::Client>> clients;
 	for (int i = 0; i < concurrency; i++) {
 		auto c = std::make_shared<Echo_API::Client>(client_ctx);
@@ -198,5 +211,7 @@ int main(int argc, char* argv[]) {
 		server_ctx.stop();
 		server_thread.join();
 	}
+	g_server_ctx = nullptr;
+	g_client_ctx = nullptr;
 	return 0;
 }

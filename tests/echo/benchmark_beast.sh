@@ -5,16 +5,17 @@ set -euo pipefail
 #  Siesta Echo — Beast Backend Benchmark & Profiling
 # ==================================================================
 # Usage:
-#   ./benchmark_beast.sh --bench     # load test with max-performance build
-#   ./benchmark_beast.sh --profile   # load test + CPU profile report
-#   ./benchmark_beast.sh --server    # start server in foreground (manual testing)
-#   ./benchmark_beast.sh --load      # load test only (assumes server running)
+#   ./benchmark_beast.sh --bench       # C++ benchmark with embedded server
+#   ./benchmark_beast.sh --profile     # CPU profile with -O0 server
+#   ./benchmark_beast.sh --profile-o2  # CPU profile with -O2 server
+#   ./benchmark_beast.sh --server      # start server in foreground
+#   ./benchmark_beast.sh --load        # Python load test (assumes server running)
 #
 # Environment:
 #   BUILD_DIR         — path to CMake build directory (default: ../../build)
 #   HOST, PORT        — server listen address (default 127.0.0.1:9910)
-#   REQUESTS          — load-test request count (default: mode-dependent)
-#   CONCURRENCY       — load-test workers    (default: mode-dependent)
+#   REQUESTS          — request count (default: mode-dependent)
+#   CONCURRENCY       — connections (default: 1)
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -22,10 +23,25 @@ BUILD="${BUILD_DIR:-"$PROJECT_ROOT/build"}"
 SERVE="${HOST:-127.0.0.1}"
 PORT="${PORT:-9910}"
 
-RED='\033[0;31m'; GREEN='\033[0;32m'; CYAN='\033[0;36m'; NC='\033[0m'
+RED='\033[0;31m'; CYAN='\033[0;36m'; NC='\033[0m'
 log()   { echo -e "[$(date +%H:%M:%S)] $*"; }
 fail()  { echo -e "${RED}FAIL${NC} $*"; }
 info()  { echo -e "${CYAN}INFO${NC} $*"; }
+
+SRV_PID=""
+cleanup() {
+	if [[ -n "$SRV_PID" ]] && kill -0 "$SRV_PID" 2>/dev/null; then
+		log "cleanup: stopping server (pid $SRV_PID)"
+		kill -INT "$SRV_PID" 2>/dev/null || true
+		for _ in $(seq 1 20); do
+			kill -0 "$SRV_PID" 2>/dev/null || break
+			sleep 0.2
+		done
+		kill -9 "$SRV_PID" 2>/dev/null || true
+	fi
+	SRV_PID=""
+}
+trap cleanup EXIT
 
 # ── Help ──────────────────────────────────────────────────────
 
@@ -43,8 +59,8 @@ Modes:
 Environment:
   BUILD_DIR            path to CMake build directory (default: $BUILD)
   HOST, PORT           server listen address (default $SERVE:$PORT)
-  REQUESTS             load-test request count
-  CONCURRENCY          load-test concurrency
+  REQUESTS             request count
+  CONCURRENCY          connections (default: 1)
 EOF
 	exit 0
 }
@@ -70,52 +86,63 @@ build_target() {
 # ── Server lifecycle ───────────────────────────────────────────
 
 start_server() {
-	local server_bin="$1"; shift
-	local env_vars=("$@")
-
+	local server_bin="$1"
 	log "starting echo server on ${SERVE}:${PORT}"
-	if [[ ${#env_vars[@]} -gt 0 ]]; then
-		env "${env_vars[@]}" "$server_bin" "$SERVE" "$PORT" >/dev/null 2>&1 &
-	else
-		"$server_bin" "$SERVE" "$PORT" >/dev/null 2>&1 &
-	fi
-	local pid=$!
-	echo "$pid"
+	"$server_bin" "$SERVE" "$PORT" >/dev/null 2>&1 &
+	SRV_PID=$!
 
-	for i in $(seq 1 10); do
+	for _ in $(seq 1 10); do
 		if python3 -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('${SERVE}',${PORT})); s.close()" 2>/dev/null; then
 			return
 		fi
 		sleep 0.3
 	done
-	echo ""
+	fail "server did not start"
+	SRV_PID=""
 	return 1
 }
 
-kill_server() {
-	local pid="${1:-}"
-	if [[ -z "$pid" ]]; then return; fi
-	if ! kill -0 "$pid" 2>/dev/null; then return; fi
+start_profiled_server() {
+	local server_bin="$1"
+	local prof_file="$2"
+	log "starting profiled server on ${SERVE}:${PORT}"
+	CPUPROFILE="$prof_file" CPUPROFILE_FREQUENCY=500 \
+		"$server_bin" "$SERVE" "$PORT" >/dev/null 2>&1 &
+	SRV_PID=$!
 
-	log "stopping server (pid $pid)"
-	kill -INT "$pid" 2>/dev/null || true
-	for i in $(seq 1 20); do
-		if ! kill -0 "$pid" 2>/dev/null; then
-			return 0
+	for _ in $(seq 1 10); do
+		if python3 -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('${SERVE}',${PORT})); s.close()" 2>/dev/null; then
+			return
 		fi
-		sleep 0.2
+		sleep 0.3
 	done
-	kill -9 "$pid" 2>/dev/null || true
+	fail "profiled server did not start"
+	SRV_PID=""
+	return 1
 }
 
-# ── Benchmark helpers ──────────────────────────────────────────
+stop_server() {
+	if [[ -z "$SRV_PID" ]]; then return; fi
+	if ! kill -0 "$SRV_PID" 2>/dev/null; then SRV_PID=""; return; fi
+
+	log "stopping server (pid $SRV_PID)"
+	kill -INT "$SRV_PID" 2>/dev/null || true
+	for _ in $(seq 1 20); do
+		kill -0 "$SRV_PID" 2>/dev/null || break
+		sleep 0.2
+	done
+	kill -9 "$SRV_PID" 2>/dev/null || true
+	SRV_PID=""
+}
+
+# ── Benchmark / Profile helpers ────────────────────────────────
 
 run_benchmark_traffic() {
 	local bench_bin="$BUILD/tests/echo_beast_benchmark"
 	require_binary "$bench_bin" echo_beast_benchmark
 	"$bench_bin" \
 		--host "$SERVE" --port "$PORT" \
-		--requests "${REQUESTS}" --concurrency "${CONCURRENCY}" \
+		--requests "${REQUESTS}" --concurrency "${CONCURRENCY:-1}" \
 		--warmup 100
 }
 
@@ -129,11 +156,8 @@ generate_profile_report() {
 		return
 	fi
 
-	rm -rf "$prof_dir"
-	mkdir -p "$prof_dir"
-
 	log "generating CPU profile reports"
-	google-pprof --text --lines "$binary" "$prof_file" \
+	google-pprof --text "$binary" "$prof_file" \
 		> "$prof_dir/cpu_text.txt" 2>/dev/null
 	google-pprof --dot "$binary" "$prof_file" \
 		> "$prof_dir/cpu_graph.dot" 2>/dev/null
@@ -153,7 +177,7 @@ mode_server() {
 	local bin="$BUILD/tests/echo_beast_server"
 	build_target echo_beast_server
 	require_binary "$bin" echo_beast_server
-	log "starting echo server on ${SERVE}:${PORT}"
+	log "starting echo server on ${SERVE}:${PORT} (foreground)"
 	exec "$bin" "$SERVE" "$PORT"
 }
 
@@ -161,7 +185,6 @@ mode_bench() {
 	local bin="$BUILD/tests/echo_beast_benchmark"
 	build_target echo_beast_benchmark
 	require_binary "$bin" echo_beast_benchmark
-
 	"$bin" \
 		--requests "${REQUESTS:-100000}" \
 		--concurrency "${CONCURRENCY:-1}" \
@@ -169,60 +192,29 @@ mode_bench() {
 		--port "$PORT"
 }
 
-mode_profile() {
+run_profile() {
+	local bin="$1"
+	local target="$2"
 	: "${REQUESTS:=50000}"
-	: "${CONCURRENCY:=1}"
 
-	local bin="$BUILD/tests/echo_beast_server_prof"
-	require_binary "$bin" echo_beast_server_prof
+	require_binary "$bin" "$target"
 
 	local prof_dir="$SCRIPT_DIR/load_test/profiles"
 	rm -rf "$prof_dir"
 	mkdir -p "$prof_dir"
 
-	local srv_pid
-	if ! srv_pid=$(start_server "$bin" \
-		CPUPROFILE="$prof_dir/cpu.prof" \
-		CPUPROFILE_FREQUENCY=500) || [[ -z "$srv_pid" ]]; then
-		fail "could not start server"
-		exit 1
-	fi
-	trap "kill_server $srv_pid" EXIT
-
-	run_benchmark_traffic || exit 1
-
-	kill_server "$srv_pid"
-	trap - EXIT
-
+	start_profiled_server "$bin" "$prof_dir/cpu.prof"
+	run_benchmark_traffic
+	stop_server
 	generate_profile_report "$bin"
 }
 
+mode_profile() {
+	run_profile "$BUILD/tests/echo_beast_server_prof" echo_beast_server_prof
+}
+
 mode_profile_o2() {
-	: "${REQUESTS:=50000}"
-	: "${CONCURRENCY:=1}"
-
-	local bin="$BUILD/tests/echo_beast_server_prof_o2"
-	require_binary "$bin" echo_beast_server_prof_o2
-
-	local prof_dir="$SCRIPT_DIR/load_test/profiles"
-	rm -rf "$prof_dir"
-	mkdir -p "$prof_dir"
-
-	local srv_pid
-	if ! srv_pid=$(start_server "$bin" \
-		CPUPROFILE="$prof_dir/cpu.prof" \
-		CPUPROFILE_FREQUENCY=500) || [[ -z "$srv_pid" ]]; then
-		fail "could not start server"
-		exit 1
-	fi
-	trap "kill_server $srv_pid" EXIT
-
-	run_benchmark_traffic || exit 1
-
-	kill_server "$srv_pid"
-	trap - EXIT
-
-	generate_profile_report "$bin"
+	run_profile "$BUILD/tests/echo_beast_server_prof_o2" echo_beast_server_prof_o2
 }
 
 mode_load() {
