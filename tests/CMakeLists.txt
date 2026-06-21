@@ -40,6 +40,7 @@ siesta_generate(
 	MODULE_NAME Echo_API
 )
 set_target_properties(Echo_API PROPERTIES EXCLUDE_FROM_ALL TRUE)
+set_target_properties(Echo_API_server PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
 # ══════════════════════════════════════════════════════════════════
 #  Flag Buckets
@@ -88,53 +89,56 @@ endif()
 
 set(BEAST_SERVER_SRC "${CMAKE_CURRENT_SOURCE_DIR}/echo/test_beast_server.cpp")
 
-# -- echo_beast_server (release, default) --------------------------
+# -- echo_beast_server (release) -----------------------------------
 add_executable(echo_beast_server ${BEAST_SERVER_SRC})
 target_link_libraries(echo_beast_server PRIVATE echo_gen)
 target_compile_options(echo_beast_server PRIVATE ${FLAGS_RELEASE})
 target_link_options(echo_beast_server PRIVATE ${LINK_FLAGS_RELEASE})
 
-# -- echo_beast_server_prof (debug + profiling) --------------------
-add_executable(echo_beast_server_prof EXCLUDE_FROM_ALL ${BEAST_SERVER_SRC})
-target_link_libraries(echo_beast_server_prof PRIVATE echo_gen)
-target_compile_definitions(echo_beast_server_prof PRIVATE ENABLE_PROFILER)
-target_compile_options(echo_beast_server_prof PRIVATE ${FLAGS_PROFILING})
-target_link_options(echo_beast_server_prof PRIVATE ${LINK_FLAGS_PROFILING})
-find_library(PROFILER_LIB profiler REQUIRED)
-target_link_libraries(echo_beast_server_prof PRIVATE ${PROFILER_LIB})
+# -- echo_beast_server_prof (debug + profiling, optional) ----------
+find_library(PROFILER_LIB profiler)
+if(PROFILER_LIB)
+	add_executable(echo_beast_server_prof ${BEAST_SERVER_SRC})
+	target_link_libraries(echo_beast_server_prof PRIVATE echo_gen)
+	target_compile_definitions(echo_beast_server_prof PRIVATE ENABLE_PROFILER)
+	target_compile_options(echo_beast_server_prof PRIVATE ${FLAGS_PROFILING})
+	target_link_options(echo_beast_server_prof PRIVATE ${LINK_FLAGS_PROFILING})
+	target_link_libraries(echo_beast_server_prof PRIVATE ${PROFILER_LIB})
+else()
+	message(STATUS "gperftools not found — echo_beast_server_prof target disabled")
+endif()
 
 # -- echo_beast_server_bench (max performance) ---------------------
-add_executable(echo_beast_server_bench EXCLUDE_FROM_ALL ${BEAST_SERVER_SRC})
+add_executable(echo_beast_server_bench ${BEAST_SERVER_SRC})
 target_link_libraries(echo_beast_server_bench PRIVATE echo_gen)
 target_compile_options(echo_beast_server_bench PRIVATE ${FLAGS_BENCHMARK})
 target_link_options(echo_beast_server_bench PRIVATE ${LINK_FLAGS_BENCHMARK})
 
 # ══════════════════════════════════════════════════════════════════
-#  Beast C++ integration test client
-# ══════════════════════════════════════════════════════════════════
-
-add_executable(echo_beast_client EXCLUDE_FROM_ALL
-	"${CMAKE_CURRENT_SOURCE_DIR}/echo/test_beast_client.cpp")
-target_link_libraries(echo_beast_client PRIVATE echo_gen siesta::siesta Catch2::Catch2WithMain)
-target_compile_options(echo_beast_client PRIVATE ${FLAGS_RELEASE})
-catch_discover_tests(echo_beast_client)
-
-# ══════════════════════════════════════════════════════════════════
 #  Beast self-contained integration test (embedded server + client)
 # ══════════════════════════════════════════════════════════════════
 
-add_executable(echo_beast_integration EXCLUDE_FROM_ALL
+add_executable(echo_beast_integration
 	"${CMAKE_CURRENT_SOURCE_DIR}/echo/test_beast_integration.cpp")
 target_link_libraries(echo_beast_integration PRIVATE echo_gen siesta::siesta Catch2::Catch2WithMain)
 target_compile_options(echo_beast_integration PRIVATE ${FLAGS_RELEASE})
 catch_discover_tests(echo_beast_integration)
 
 # ══════════════════════════════════════════════════════════════════
+#  Beast benchmark (embedded server + async client, Release-optimized)
+# ══════════════════════════════════════════════════════════════════
+
+add_executable(echo_beast_benchmark
+	"${CMAKE_CURRENT_SOURCE_DIR}/echo/benchmark_beast.cpp")
+target_link_libraries(echo_beast_benchmark PRIVATE echo_gen siesta::siesta)
+target_compile_options(echo_beast_benchmark PRIVATE -O2 -DNDEBUG)
+
+# ══════════════════════════════════════════════════════════════════
 #  Library unit tests
 # ══════════════════════════════════════════════════════════════════
 
 file(GLOB_RECURSE test_srcs "${CMAKE_CURRENT_SOURCE_DIR}/siesta/*")
-add_executable(siesta_test EXCLUDE_FROM_ALL ${test_srcs})
+add_executable(siesta_test ${test_srcs})
 target_include_directories(siesta_test PRIVATE "${PROJECT_SOURCE_DIR}/include")
 target_link_libraries(siesta_test
 	PRIVATE

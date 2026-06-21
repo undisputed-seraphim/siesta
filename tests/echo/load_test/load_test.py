@@ -3,14 +3,14 @@
 """
 Concurrent load test for the siesta echo server.
 
-Sends GET /echo?message=... requests over raw HTTP/1.1 sockets using a
-thread pool for maximum throughput.  Reports latency percentiles and
-requests-per-second.
+Sends GET /echo?message=... requests over persistent HTTP/1.1 connections
+using a thread pool. Each worker opens one connection and sends its share
+of requests over it (keep-alive). Reports latency percentiles and RPS.
 
 Usage:
     python3 load_test.py [--host HOST] [--port PORT]
                          [--requests N] [--concurrency C]
-                         [--warmup N] [--keepalive N]
+                         [--warmup N] [--no-keepalive]
 """
 
 import argparse
@@ -23,130 +23,98 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 MESSAGE = "hello_load_test_1234567890"
 
 
-def make_http_request(msg: str) -> bytes:
+def make_http_request(msg: str, keepalive: bool = True) -> bytes:
+    conn = "keep-alive" if keepalive else "close"
     return (
         f"GET /echo?message={msg} HTTP/1.1\r\n"
-        "Host: localhost\r\n"
-        "Connection: keep-alive\r\n"
+        f"Host: localhost\r\n"
+        f"Connection: {conn}\r\n"
         "\r\n"
     ).encode()
 
 
-def make_request(host: str, port: int) -> tuple[float, bool]:
-    """Open a fresh connection, send one request, measure latency."""
-    t0 = time.perf_counter()
-    try:
-        s = socket.create_connection((host, port), timeout=5.0)
-        s.sendall(make_http_request(MESSAGE))
-        buf = read_response(s)
-        s.close()
-        elapsed = time.perf_counter() - t0
-        return elapsed, b"200 OK" in buf
-    except Exception:
-        return time.perf_counter() - t0, False
+def read_response(s: socket.socket, buf: bytearray) -> tuple[bool, int]:
+    while b"\r\n\r\n" not in buf:
+        chunk = s.recv(4096)
+        if not chunk:
+            return False, 0
+        buf.extend(chunk)
+
+    header_end = buf.index(b"\r\n\r\n") + 4
+    headers = buf[:header_end].decode("latin-1", errors="replace")
+
+    content_length = 0
+    for line in headers.split("\r\n"):
+        if line.lower().startswith("content-length:"):
+            content_length = int(line.split(":", 1)[1].strip())
+            break
+
+    total_needed = header_end + content_length
+    while len(buf) < total_needed:
+        chunk = s.recv(4096)
+        if not chunk:
+            return False, 0
+        buf.extend(chunk)
+
+    ok = b"200 OK" in buf[:header_end]
+    del buf[:total_needed]
+    return ok, total_needed
 
 
-def make_keepalive_requests(host: str, port: int, count: int) -> list[tuple[float, bool]]:
-    """Open one connection, pipeline `count` requests, measure each latency."""
+def run_keepalive_worker(host: str, port: int, count: int) -> list[tuple[float, bool]]:
     results = []
     try:
         s = socket.create_connection((host, port), timeout=10.0)
-        req = make_http_request(MESSAGE)
+        s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        req = make_http_request(MESSAGE, keepalive=True)
+        buf = bytearray()
         for _ in range(count):
             t0 = time.perf_counter()
             s.sendall(req)
-            buf = read_response(s)
+            ok, _ = read_response(s, buf)
             elapsed = time.perf_counter() - t0
-            results.append((elapsed, b"200 OK" in buf))
+            results.append((elapsed, ok))
         s.close()
     except Exception:
         results.extend([(0.0, False)] * (count - len(results)))
     return results
 
 
-def read_response(s: socket.socket) -> bytes:
-    """Read until \r\n\r\n or connection close."""
-    buf = b""
-    while len(buf) < 8192:
-        try:
-            chunk = s.recv(4096)
-        except Exception:
-            break
-        if not chunk:
-            break
-        buf += chunk
-        if b"\r\n\r\n" in buf:
-            break
-    return buf
+def run_oneshot_worker(host: str, port: int) -> tuple[float, bool]:
+    t0 = time.perf_counter()
+    try:
+        s = socket.create_connection((host, port), timeout=5.0)
+        s.sendall(make_http_request(MESSAGE, keepalive=False))
+        buf = bytearray()
+        ok, _ = read_response(s, buf)
+        s.close()
+        return time.perf_counter() - t0, ok
+    except Exception:
+        return time.perf_counter() - t0, False
 
 
 def run_load_test(host: str, port: int, total: int, concurrency: int,
-                  warmup: int = 0, keepalive: int = 0) -> dict:
-    """Run load test and return aggregated results."""
-
+                  warmup: int = 0, no_keepalive: bool = False) -> dict:
     latencies: list[float] = []
     ok_count = 0
     fail_count = 0
     lock = threading.Lock()
 
+    mode = "new-conn" if no_keepalive else "keep-alive"
     print(f"  target: {host}:{port}")
-    print(f"  requests: {total}, concurrency: {concurrency}")
-    if warmup:
-        print(f"  warmup: {warmup}")
-    if keepalive:
-        print(f"  keep-alive: {keepalive} req/conn")
+    print(f"  requests: {total}, concurrency: {concurrency}, mode: {mode}")
 
-    if keepalive:
-        conns_needed = (total + keepalive - 1) // keepalive
-
-        # Warmup
+    if no_keepalive:
         if warmup:
-            print("  warming up ...", end=" ", flush=True)
-            warm_conns = (warmup + keepalive - 1) // keepalive
-            with ThreadPoolExecutor(max_workers=min(concurrency, warm_conns)) as pool:
-                futures = []
-                for i in range(warm_conns):
-                    k = min(keepalive, warmup - i * keepalive)
-                    if k > 0:
-                        futures.append(pool.submit(make_keepalive_requests, host, port, k))
-                for fut in as_completed(futures):
-                    pass
-            print("done")
-
-        print("  running load test ...", end=" ", flush=True)
-        t_start = time.perf_counter()
-
-        with ThreadPoolExecutor(max_workers=concurrency) as pool:
-            futures = []
-            for i in range(conns_needed):
-                k = min(keepalive, total - i * keepalive)
-                futures.append(pool.submit(make_keepalive_requests, host, port, k))
-
-            for fut in as_completed(futures):
-                for elapsed, ok in fut.result():
-                    with lock:
-                        latencies.append(elapsed)
-                        if ok:
-                            ok_count += 1
-                        else:
-                            fail_count += 1
-
-        t_end = time.perf_counter()
-        wall_time = t_end - t_start
-    else:
-        if warmup:
-            print("  warming up ...", end=" ", flush=True)
+            print(f"  warming up ({warmup}) ...", end=" ", flush=True)
             with ThreadPoolExecutor(max_workers=concurrency) as pool:
-                futures = {pool.submit(make_request, host, port): i for i in range(warmup)}
-                for _ in as_completed(futures):
-                    pass
+                list(pool.map(lambda _: run_oneshot_worker(host, port), range(warmup)))
             print("done")
 
         print("  running load test ...", end=" ", flush=True)
         t_start = time.perf_counter()
-
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
-            futures = [pool.submit(make_request, host, port) for _ in range(total)]
+            futures = [pool.submit(run_oneshot_worker, host, port) for _ in range(total)]
             for fut in as_completed(futures):
                 elapsed, ok = fut.result()
                 with lock:
@@ -155,9 +123,34 @@ def run_load_test(host: str, port: int, total: int, concurrency: int,
                         ok_count += 1
                     else:
                         fail_count += 1
+        wall_time = time.perf_counter() - t_start
+    else:
+        per_worker = total // concurrency
+        remainder = total % concurrency
 
-        t_end = time.perf_counter()
-        wall_time = t_end - t_start
+        if warmup:
+            warm_per = max(1, warmup // concurrency)
+            print(f"  warming up ({warmup}) ...", end=" ", flush=True)
+            with ThreadPoolExecutor(max_workers=concurrency) as pool:
+                list(pool.map(lambda _: run_keepalive_worker(host, port, warm_per), range(concurrency)))
+            print("done")
+
+        print("  running load test ...", end=" ", flush=True)
+        t_start = time.perf_counter()
+        with ThreadPoolExecutor(max_workers=concurrency) as pool:
+            futures = []
+            for i in range(concurrency):
+                n = per_worker + (1 if i < remainder else 0)
+                futures.append(pool.submit(run_keepalive_worker, host, port, n))
+            for fut in as_completed(futures):
+                for elapsed, ok in fut.result():
+                    with lock:
+                        latencies.append(elapsed)
+                        if ok:
+                            ok_count += 1
+                        else:
+                            fail_count += 1
+        wall_time = time.perf_counter() - t_start
 
     print(f"done ({wall_time:.2f}s)")
 
@@ -189,12 +182,12 @@ def main():
     p.add_argument("--requests", "-n", type=int, default=10000)
     p.add_argument("--concurrency", "-c", type=int, default=50)
     p.add_argument("--warmup", type=int, default=200)
-    p.add_argument("--keepalive", "-k", type=int, default=0,
-                   help="Requests per connection (1=new conn each time, >1=reuse)")
+    p.add_argument("--no-keepalive", action="store_true",
+                   help="Open a new connection for every request (tests conn establishment)")
     args = p.parse_args()
 
     results = run_load_test(args.host, args.port, args.requests,
-                            args.concurrency, args.warmup, args.keepalive)
+                            args.concurrency, args.warmup, args.no_keepalive)
 
     print()
     print("══════════════════════════════════════════")

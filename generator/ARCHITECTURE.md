@@ -377,14 +377,11 @@ Tags: `PARSE`, `DEP`, `SORT`, `EMIT`
 # Build generator
 cd build && ninja siesta-generator
 
-# Setup test build
-cmake -S tests -B tests/build -DCMAKE_PREFIX_PATH=build/install -GNinja
+# Build + run all integration tests
+ninja && ctest --test-dir build/tests --output-on-failure
 
-# Generate + compile echo sanity targets
-ninja -C tests/build echo_beast_server Echo_API echo_beast_client
-
-# Run C++ + Python integration tests
-cd tests/echo && ./run.sh
+# Benchmark (optional)
+cd tests/echo && ./benchmark_beast.sh --bench
 ```
 
 ### Quick Sanity Check
