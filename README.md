@@ -117,7 +117,7 @@ cd tests/echo && ./run.sh
 
 # Build specific targets
 cmake -S tests -B tests/build -DCMAKE_PREFIX_PATH=build/install -GNinja
-ninja -C tests/build echo_server Echo_API echo_test_client
+ninja -C tests/build echo_beast_server Echo_API echo_beast_client
 
 # Benchmark
 ./run.sh --bench

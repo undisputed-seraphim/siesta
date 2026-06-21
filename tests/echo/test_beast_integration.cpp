@@ -217,7 +217,7 @@ struct RawTestClient : Echo_API::Client {
 
 // ── Existing echo tests (sanity) ────────────────────────────────
 
-TEST_CASE("echo basic", "[integration]") {
+TEST_CASE("echo basic", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 	auto resp = call_echo(client, ctx, "hello");
@@ -226,7 +226,7 @@ TEST_CASE("echo basic", "[integration]") {
 
 // ── POST echo body round-trip ───────────────────────────────────
 
-TEST_CASE("POST echo body round-trip", "[integration]") {
+TEST_CASE("POST echo body round-trip", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
@@ -244,7 +244,7 @@ TEST_CASE("POST echo body round-trip", "[integration]") {
 
 // ── Path parameter ──────────────────────────────────────────────
 
-TEST_CASE("GET with path param", "[integration]") {
+TEST_CASE("GET with path param", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
@@ -260,7 +260,7 @@ TEST_CASE("GET with path param", "[integration]") {
 
 // ── DELETE verb ─────────────────────────────────────────────────
 
-TEST_CASE("DELETE verb dispatches", "[integration]") {
+TEST_CASE("DELETE verb dispatches", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
@@ -277,7 +277,7 @@ TEST_CASE("DELETE verb dispatches", "[integration]") {
 
 // ── Multi-verb same path ────────────────────────────────────────
 
-TEST_CASE("multi-verb same path dispatches correctly", "[integration]") {
+TEST_CASE("multi-verb same path dispatches correctly", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
@@ -300,7 +300,7 @@ TEST_CASE("multi-verb same path dispatches correctly", "[integration]") {
 
 // ── POST Item full struct round-trip ────────────────────────────
 
-TEST_CASE("POST Item all fields round-trip", "[integration]") {
+TEST_CASE("POST Item all fields round-trip", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
@@ -329,7 +329,7 @@ TEST_CASE("POST Item all fields round-trip", "[integration]") {
 
 // ── POST Item required-only ─────────────────────────────────────
 
-TEST_CASE("POST Item required-only fields", "[integration]") {
+TEST_CASE("POST Item required-only fields", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
@@ -350,7 +350,7 @@ TEST_CASE("POST Item required-only fields", "[integration]") {
 
 // ── GET items with optional query params ────────────────────────
 
-TEST_CASE("GET items with limit query param", "[integration]") {
+TEST_CASE("GET items with limit query param", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
@@ -365,7 +365,7 @@ TEST_CASE("GET items with limit query param", "[integration]") {
 	REQUIRE(resp.description == "limit=10");
 }
 
-TEST_CASE("GET items with both query params", "[integration]") {
+TEST_CASE("GET items with both query params", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
@@ -379,7 +379,7 @@ TEST_CASE("GET items with both query params", "[integration]") {
 
 // ── Enum values round-trip ──────────────────────────────────────
 
-TEST_CASE("enum inactive round-trip", "[integration]") {
+TEST_CASE("enum inactive round-trip", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
@@ -397,7 +397,7 @@ TEST_CASE("enum inactive round-trip", "[integration]") {
 	REQUIRE(resp.status == Echo_API::ItemStatus::inactive);
 }
 
-TEST_CASE("enum archived round-trip", "[integration]") {
+TEST_CASE("enum archived round-trip", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
@@ -417,7 +417,7 @@ TEST_CASE("enum archived round-trip", "[integration]") {
 
 // ── Server 404 fallback ─────────────────────────────────────────
 
-TEST_CASE("server returns 404 for unknown path", "[integration]") {
+TEST_CASE("server returns 404 for unknown path", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = std::make_shared<RawTestClient>(ctx);
 	client->start(TEST_ADDR, TEST_PORT);
@@ -436,7 +436,7 @@ TEST_CASE("server returns 404 for unknown path", "[integration]") {
 
 // ── PUT with body + path param ──────────────────────────────────
 
-TEST_CASE("PUT item with body and path param", "[integration]") {
+TEST_CASE("PUT item with body and path param", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
@@ -460,7 +460,7 @@ TEST_CASE("PUT item with body and path param", "[integration]") {
 
 // ── Multiple path params ────────────────────────────────────────
 
-TEST_CASE("GET with multiple path params", "[integration]") {
+TEST_CASE("GET with multiple path params", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
@@ -475,7 +475,7 @@ TEST_CASE("GET with multiple path params", "[integration]") {
 
 // ── Required int query param ────────────────────────────────────
 
-TEST_CASE("GET with required int and string query params", "[integration]") {
+TEST_CASE("GET with required int and string query params", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
@@ -490,7 +490,7 @@ TEST_CASE("GET with required int and string query params", "[integration]") {
 
 // ── allOf inheritance round-trip ────────────────────────────────
 
-TEST_CASE("POST DetailedItem allOf all fields round-trip", "[integration]") {
+TEST_CASE("POST DetailedItem allOf all fields round-trip", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
@@ -519,7 +519,7 @@ TEST_CASE("POST DetailedItem allOf all fields round-trip", "[integration]") {
 	REQUIRE(resp.rating == 4.5);
 }
 
-TEST_CASE("POST DetailedItem allOf required-only fields", "[integration]") {
+TEST_CASE("POST DetailedItem allOf required-only fields", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
@@ -543,7 +543,7 @@ TEST_CASE("POST DetailedItem allOf required-only fields", "[integration]") {
 
 // ── oneOf variant round-trip ────────────────────────────────────
 
-TEST_CASE("POST Outcome variant with EchoResponse alternative", "[integration]") {
+TEST_CASE("POST Outcome variant with EchoResponse alternative", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
@@ -559,7 +559,7 @@ TEST_CASE("POST Outcome variant with EchoResponse alternative", "[integration]")
 	REQUIRE(std::get<Echo_API::EchoResponse>(resp).message == "variant-msg");
 }
 
-TEST_CASE("POST Outcome variant with Error serialization", "[integration]") {
+TEST_CASE("POST Outcome variant with Error serialization", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 

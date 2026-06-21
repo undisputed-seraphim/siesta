@@ -1,15 +1,17 @@
 # SPDX-License-Identifier: Apache-2.0
 #
-# siesta_generate(TARGET <name> SCHEMA <path> [MODE CLIENT|SERVER|BOTH] [NO_PYTHON])
+# siesta_generate(TARGET <name> SCHEMA <path> [MODE CLIENT|SERVER|BOTH]
+#                 [BACKEND beast|nghttp3|...] [NO_PYTHON])
 #
 # Runs siesta-generator on the OpenAPI schema. Appends the generated C++
 # sources to <name> and creates nanobind modules for Python bindings.
 #
+# BACKEND:          HTTP backend to target (default: beast)
 # NO_PYTHON:        skip nanobind module generation and Python dependency checks
 # REQUIRES:         find_package(siesta)
 
 function(siesta_generate)
-	cmake_parse_arguments(SG "NO_PYTHON" "TARGET;SCHEMA;MODE" "" ${ARGN})
+	cmake_parse_arguments(SG "NO_PYTHON" "TARGET;SCHEMA;MODE;BACKEND" "" ${ARGN})
 
 	if(NOT SG_TARGET)
 		message(FATAL_ERROR "siesta_generate: TARGET is required")
@@ -22,6 +24,9 @@ function(siesta_generate)
 	endif()
 	if(NOT SG_MODE MATCHES "^(CLIENT|SERVER|BOTH)$")
 		message(FATAL_ERROR "siesta_generate: MODE must be CLIENT, SERVER, or BOTH (got '${SG_MODE}')")
+	endif()
+	if(NOT SG_BACKEND)
+		set(SG_BACKEND "beast")
 	endif()
 
 	if(NOT TARGET siesta::siesta-generator AND NOT TARGET siesta-generator)
@@ -41,7 +46,7 @@ function(siesta_generate)
 	endif()
 
 	get_filename_component(_schema_name "${SG_SCHEMA}" NAME_WE)
-	set(_gen_dir "${CMAKE_CURRENT_BINARY_DIR}/siesta_gen/${_schema_name}")
+	set(_gen_dir "${CMAKE_CURRENT_BINARY_DIR}/siesta_gen/${_schema_name}/${SG_BACKEND}")
 
 	set(_gen_mode "both")
 	if(SG_MODE STREQUAL "CLIENT")
@@ -80,6 +85,7 @@ function(siesta_generate)
 		--input "${SG_SCHEMA}"
 		--output "${_gen_dir}"
 		--mode "${_gen_mode}"
+		--backend "${SG_BACKEND}"
 	)
 	if(SG_NO_PYTHON)
 		list(APPEND _gen_args "--no-python")

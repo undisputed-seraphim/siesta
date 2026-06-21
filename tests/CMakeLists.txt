@@ -32,6 +32,7 @@ siesta_generate(
 	TARGET echo_gen
 	SCHEMA "${CMAKE_CURRENT_SOURCE_DIR}/echo.json"
 	MODE BOTH
+	BACKEND beast
 )
 set_target_properties(Echo_API PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
@@ -77,51 +78,51 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
 endif()
 
 # ══════════════════════════════════════════════════════════════════
-#  Server targets (same source, different flag sets)
+#  Beast server targets (same source, different flag sets)
 # ══════════════════════════════════════════════════════════════════
 
-set(SERVER_SRC "${CMAKE_CURRENT_SOURCE_DIR}/echo/test_server.cpp")
+set(BEAST_SERVER_SRC "${CMAKE_CURRENT_SOURCE_DIR}/echo/test_beast_server.cpp")
 
-# -- echo_server (release, default) --------------------------------
-add_executable(echo_server ${SERVER_SRC})
-target_link_libraries(echo_server PRIVATE echo_gen)
-target_compile_options(echo_server PRIVATE ${FLAGS_RELEASE})
-target_link_options(echo_server PRIVATE ${LINK_FLAGS_RELEASE})
+# -- echo_beast_server (release, default) --------------------------
+add_executable(echo_beast_server ${BEAST_SERVER_SRC})
+target_link_libraries(echo_beast_server PRIVATE echo_gen)
+target_compile_options(echo_beast_server PRIVATE ${FLAGS_RELEASE})
+target_link_options(echo_beast_server PRIVATE ${LINK_FLAGS_RELEASE})
 
-# -- echo_server_prof (debug + profiling) --------------------------
-add_executable(echo_server_prof EXCLUDE_FROM_ALL ${SERVER_SRC})
-target_link_libraries(echo_server_prof PRIVATE echo_gen)
-target_compile_definitions(echo_server_prof PRIVATE ENABLE_PROFILER)
-target_compile_options(echo_server_prof PRIVATE ${FLAGS_PROFILING})
-target_link_options(echo_server_prof PRIVATE ${LINK_FLAGS_PROFILING})
+# -- echo_beast_server_prof (debug + profiling) --------------------
+add_executable(echo_beast_server_prof EXCLUDE_FROM_ALL ${BEAST_SERVER_SRC})
+target_link_libraries(echo_beast_server_prof PRIVATE echo_gen)
+target_compile_definitions(echo_beast_server_prof PRIVATE ENABLE_PROFILER)
+target_compile_options(echo_beast_server_prof PRIVATE ${FLAGS_PROFILING})
+target_link_options(echo_beast_server_prof PRIVATE ${LINK_FLAGS_PROFILING})
 find_library(PROFILER_LIB profiler REQUIRED)
-target_link_libraries(echo_server_prof PRIVATE ${PROFILER_LIB})
+target_link_libraries(echo_beast_server_prof PRIVATE ${PROFILER_LIB})
 
-# -- echo_server_bench (max performance) ---------------------------
-add_executable(echo_server_bench EXCLUDE_FROM_ALL ${SERVER_SRC})
-target_link_libraries(echo_server_bench PRIVATE echo_gen)
-target_compile_options(echo_server_bench PRIVATE ${FLAGS_BENCHMARK})
-target_link_options(echo_server_bench PRIVATE ${LINK_FLAGS_BENCHMARK})
-
-# ══════════════════════════════════════════════════════════════════
-#  C++ integration test client
-# ══════════════════════════════════════════════════════════════════
-
-add_executable(echo_test_client EXCLUDE_FROM_ALL
-	"${CMAKE_CURRENT_SOURCE_DIR}/echo/test_client.cpp")
-target_link_libraries(echo_test_client PRIVATE echo_gen siesta::siesta Catch2::Catch2WithMain)
-target_compile_options(echo_test_client PRIVATE ${FLAGS_RELEASE})
-catch_discover_tests(echo_test_client)
+# -- echo_beast_server_bench (max performance) ---------------------
+add_executable(echo_beast_server_bench EXCLUDE_FROM_ALL ${BEAST_SERVER_SRC})
+target_link_libraries(echo_beast_server_bench PRIVATE echo_gen)
+target_compile_options(echo_beast_server_bench PRIVATE ${FLAGS_BENCHMARK})
+target_link_options(echo_beast_server_bench PRIVATE ${LINK_FLAGS_BENCHMARK})
 
 # ══════════════════════════════════════════════════════════════════
-#  Self-contained integration test (embedded server + client)
+#  Beast C++ integration test client
 # ══════════════════════════════════════════════════════════════════
 
-add_executable(echo_integration_test EXCLUDE_FROM_ALL
-	"${CMAKE_CURRENT_SOURCE_DIR}/echo/test_integration.cpp")
-target_link_libraries(echo_integration_test PRIVATE echo_gen siesta::siesta Catch2::Catch2WithMain)
-target_compile_options(echo_integration_test PRIVATE ${FLAGS_RELEASE})
-catch_discover_tests(echo_integration_test)
+add_executable(echo_beast_client EXCLUDE_FROM_ALL
+	"${CMAKE_CURRENT_SOURCE_DIR}/echo/test_beast_client.cpp")
+target_link_libraries(echo_beast_client PRIVATE echo_gen siesta::siesta Catch2::Catch2WithMain)
+target_compile_options(echo_beast_client PRIVATE ${FLAGS_RELEASE})
+catch_discover_tests(echo_beast_client)
+
+# ══════════════════════════════════════════════════════════════════
+#  Beast self-contained integration test (embedded server + client)
+# ══════════════════════════════════════════════════════════════════
+
+add_executable(echo_beast_integration EXCLUDE_FROM_ALL
+	"${CMAKE_CURRENT_SOURCE_DIR}/echo/test_beast_integration.cpp")
+target_link_libraries(echo_beast_integration PRIVATE echo_gen siesta::siesta Catch2::Catch2WithMain)
+target_compile_options(echo_beast_integration PRIVATE ${FLAGS_RELEASE})
+catch_discover_tests(echo_beast_integration)
 
 # ══════════════════════════════════════════════════════════════════
 #  Library unit tests

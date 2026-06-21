@@ -34,7 +34,7 @@ Echo_API::EchoResponse call_echo(std::shared_ptr<Echo_API::Client> client,
 
 } // namespace
 
-TEST_CASE("echo basic", "[integration]") {
+TEST_CASE("echo basic", "[integration][beast]") {
 	boost::asio::io_context ctx;
 	auto client = std::make_shared<Echo_API::Client>(ctx);
 	client->start(boost::asio::ip::make_address(echo_host()), echo_port());
@@ -43,7 +43,7 @@ TEST_CASE("echo basic", "[integration]") {
 	REQUIRE(resp.message == "hello");
 }
 
-TEST_CASE("echo empty message", "[integration]") {
+TEST_CASE("echo empty message", "[integration][beast]") {
 	boost::asio::io_context ctx;
 	auto client = std::make_shared<Echo_API::Client>(ctx);
 	client->start(boost::asio::ip::make_address(echo_host()), echo_port());
@@ -52,7 +52,7 @@ TEST_CASE("echo empty message", "[integration]") {
 	REQUIRE(resp.message == "");
 }
 
-TEST_CASE("echo special chars", "[integration]") {
+TEST_CASE("echo special chars", "[integration][beast]") {
 	boost::asio::io_context ctx;
 	auto client = std::make_shared<Echo_API::Client>(ctx);
 	client->start(boost::asio::ip::make_address(echo_host()), echo_port());
@@ -61,7 +61,7 @@ TEST_CASE("echo special chars", "[integration]") {
 	REQUIRE(resp.message == "hello world");
 }
 
-TEST_CASE("echo with header param", "[integration]") {
+TEST_CASE("echo with header param", "[integration][beast]") {
 	boost::asio::io_context ctx;
 	auto client = std::make_shared<Echo_API::Client>(ctx);
 	client->start(boost::asio::ip::make_address(echo_host()), echo_port());

@@ -1,8 +1,8 @@
 # SPDX-License-Identifier: Apache-2.0
 """Integration tests for the echo server/client using siesta_client.
 
-Usage (via run.sh):
-    HOST=127.0.0.1 PORT=9910 python3 test/test_client.py
+Usage (via run_beast.sh):
+    HOST=127.0.0.1 PORT=9910 python3 test/test_beast_client.py
 """
 
 import json
