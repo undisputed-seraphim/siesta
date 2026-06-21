@@ -110,13 +110,15 @@ int main(int argc, char* argv[]) {
 	}
 
 	auto addr = asio::ip::make_address(external ? host : "127.0.0.1");
-
 	asio::io_context server_ctx;
 	std::unique_ptr<echo_testing::DefaultServer> server;
 	std::thread server_thread;
 
 	if (!external) {
-		server = std::make_unique<echo_testing::DefaultServer>(server_ctx);
+		siesta::beast::ServerBase::Config srv_conf;
+		srv_conf.read_timeout = std::chrono::milliseconds::zero();
+		srv_conf.write_timeout = std::chrono::milliseconds::zero();
+		server = std::make_unique<echo_testing::DefaultServer>(server_ctx, srv_conf);
 		server->start(addr, port);
 		server_thread = std::thread([&] { server_ctx.run(); });
 		std::this_thread::sleep_for(std::chrono::milliseconds(30));
@@ -127,9 +129,14 @@ int main(int argc, char* argv[]) {
 	g_client_ctx = &client_ctx;
 	std::signal(SIGINT, sigint_handler);
 	std::signal(SIGTERM, sigint_handler);
+
+	siesta::beast::ClientBase::Config cli_conf;
+	cli_conf.read_timeout = std::chrono::milliseconds::zero();
+	cli_conf.write_timeout = std::chrono::milliseconds::zero();
+
 	std::vector<std::shared_ptr<Echo_API::Client>> clients;
 	for (int i = 0; i < concurrency; i++) {
-		auto c = std::make_shared<Echo_API::Client>(client_ctx);
+		auto c = std::make_shared<Echo_API::Client>(client_ctx, cli_conf);
 		c->start(addr, port);
 		clients.push_back(c);
 	}

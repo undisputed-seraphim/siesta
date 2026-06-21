@@ -48,7 +48,10 @@ int main(int argc, char* argv[]) {
 #endif
 
 	asio::io_context ctx;
-	EchoServer server(ctx);
+	siesta::beast::ServerBase::Config conf;
+	conf.read_timeout = std::chrono::milliseconds::zero();
+	conf.write_timeout = std::chrono::milliseconds::zero();
+	EchoServer server(ctx, conf);
 	server.start(asio::ip::make_address(host), port);
 	std::cout << "echo-server listening on " << host << ":" << port << std::endl;
 	ctx.run();

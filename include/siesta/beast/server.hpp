@@ -23,6 +23,8 @@ public:
 	using response = ::boost::beast::http::response<::boost::beast::http::string_body>;
 	using protocol = ::boost::asio::ip::tcp;
 	using ec_t = ::boost::system::error_code;
+	using strand_type = ::boost::asio::strand<::boost::asio::io_context::executor_type>;
+	using stream_type = ::boost::beast::basic_stream<protocol, strand_type>;
 
 	struct Config {
 		std::chrono::milliseconds read_timeout{std::chrono::hours{1}};
@@ -32,7 +34,7 @@ public:
 	class Session : public std::enable_shared_from_this<Session> {
 	public:
 		using Ptr = std::shared_ptr<Session>;
-		Session(ServerBase&, protocol::socket, Config, uint64_t);
+		Session(ServerBase&, stream_type, Config, uint64_t);
 		~Session() noexcept;
 
 		void run();
@@ -45,7 +47,7 @@ public:
 		friend ServerBase;
 
 		ServerBase& _parent;
-		::boost::beast::tcp_stream _stream;
+		stream_type _stream;
 		::boost::beast::flat_buffer _buffer;
 		request _request;
 		response _response;

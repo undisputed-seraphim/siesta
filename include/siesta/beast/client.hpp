@@ -25,6 +25,8 @@ public:
 	using protocol = ::boost::asio::ip::tcp;
 	using outcome_type = ::boost::outcome_v2::std_outcome<response_type>;
 	using error_type = ::boost::system::error_code;
+	using strand_type = ::boost::asio::strand<::boost::asio::io_context::executor_type>;
+	using stream_type = ::boost::beast::basic_stream<protocol, strand_type>;
 
 	struct Config {
 		std::chrono::milliseconds connect_timeout;
@@ -58,7 +60,7 @@ protected:
 	::boost::asio::strand<::boost::asio::io_context::executor_type> _strand;
 	protocol::resolver _resolver;
 	::boost::beast::flat_buffer _buffer;
-	::boost::beast::tcp_stream _stream;
+	stream_type _stream;
 	request_type _request;
 	response_type _response;
 
@@ -92,14 +94,16 @@ protected:
 				switch (state) {
 				case 0: { // send
 					state = 1;
-					_stream.expires_after(_conf.write_timeout);
+					if (_conf.write_timeout > std::chrono::milliseconds::zero())
+						_stream.expires_after(_conf.write_timeout);
 					http::async_write(_stream, _request, std::move(self));
 					return;
 				}
 				case 1: { // recv
 					_response = {};
 					state = 2;
-					_stream.expires_after(_conf.read_timeout);
+					if (_conf.read_timeout > std::chrono::milliseconds::zero())
+						_stream.expires_after(_conf.read_timeout);
 					http::async_read(_stream, _buffer, _response, std::move(self));
 					return;
 				}

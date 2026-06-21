@@ -49,7 +49,9 @@ void ServerBase::on_accept(const ec_t& ec, protocol::socket socket) {
 	if (ec) {
 		return fail("on_accept", ec);
 	}
-	std::make_shared<Session>(*this, std::move(socket), _conf, _client_id++)->run();
+	ServerBase::stream_type stream(asio::make_strand(*_ctx));
+	stream.socket().assign(protocol::v4(), socket.release());
+	std::make_shared<Session>(*this, std::move(stream), _conf, _client_id++)->run();
 	_acceptor.async_accept(asio::make_strand(*_ctx), [this](const ec_t& ec, protocol::socket socket) {
 		on_accept(ec, std::move(socket));
 	});
@@ -57,9 +59,9 @@ void ServerBase::on_accept(const ec_t& ec, protocol::socket socket) {
 
 // Session
 
-ServerBase::Session::Session(ServerBase& parent, protocol::socket socket, Config config, uint64_t id)
+ServerBase::Session::Session(ServerBase& parent, stream_type stream, Config config, uint64_t id)
 	: _parent(parent)
-	, _stream(std::move(socket))
+	, _stream(std::move(stream))
 	, _config(std::move(config))
 	, _id(id) {}
 
@@ -73,7 +75,8 @@ void ServerBase::Session::run() {
 
 void ServerBase::Session::write() {
 	_response.prepare_payload();
-	_stream.expires_after(_config.write_timeout);
+	if (_config.write_timeout > std::chrono::milliseconds::zero())
+		_stream.expires_after(_config.write_timeout);
 	http::async_write(_stream, _response, [self = shared_from_this()](ec_t ec, std::size_t bytes) {
 		self->on_write(ec, bytes);
 	});
@@ -81,7 +84,8 @@ void ServerBase::Session::write() {
 
 void ServerBase::Session::do_read() {
 	_request = {};
-	_stream.expires_after(_config.read_timeout);
+	if (_config.read_timeout > std::chrono::milliseconds::zero())
+		_stream.expires_after(_config.read_timeout);
 	http::async_read(_stream, _buffer, _request, [self = shared_from_this()](ec_t ec, std::size_t bytes) {
 		self->on_read(ec, bytes);
 	});
