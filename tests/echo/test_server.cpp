@@ -136,6 +136,24 @@ struct EchoServer : Echo_API::Server {
 		resp.prepare_payload();
 		session->write();
 	}
+
+	void post__items_detailed(const request req, Session::Ptr session) override {
+		auto& resp = session->get_response();
+		resp.result(http::status::ok);
+		resp.body() = req.body();
+		resp.set(http::field::content_type, "application/json");
+		resp.prepare_payload();
+		session->write();
+	}
+
+	void post__outcome(const request req, Session::Ptr session) override {
+		auto& resp = session->get_response();
+		resp.result(http::status::ok);
+		resp.body() = req.body();
+		resp.set(http::field::content_type, "application/json");
+		resp.prepare_payload();
+		session->write();
+	}
 };
 
 #ifdef ENABLE_PROFILER

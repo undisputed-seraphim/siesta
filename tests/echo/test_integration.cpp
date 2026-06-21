@@ -149,6 +149,24 @@ struct StubServer : Echo_API::Server {
 		resp.prepare_payload();
 		session->write();
 	}
+
+	void post__items_detailed(const request req, Session::Ptr session) override {
+		auto& resp = session->get_response();
+		resp.result(http::status::ok);
+		resp.body() = req.body();
+		resp.set(http::field::content_type, "application/json");
+		resp.prepare_payload();
+		session->write();
+	}
+
+	void post__outcome(const request req, Session::Ptr session) override {
+		auto& resp = session->get_response();
+		resp.result(http::status::ok);
+		resp.body() = req.body();
+		resp.set(http::field::content_type, "application/json");
+		resp.prepare_payload();
+		session->write();
+	}
 };
 
 static asio::io_context g_server_ctx;
@@ -468,4 +486,97 @@ TEST_CASE("GET with required int and string query params", "[integration]") {
 	REQUIRE(outcome.has_value());
 	auto resp = boost::json::value_to<Echo_API::EchoResponse>(boost::json::parse(outcome.value().body()));
 	REQUIRE(resp.message == "cat=7,q=widgets");
+}
+
+// ── allOf inheritance round-trip ────────────────────────────────
+
+TEST_CASE("POST DetailedItem allOf all fields round-trip", "[integration]") {
+	asio::io_context ctx;
+	auto client = make_client(ctx);
+
+	Echo_API::DetailedItem di;
+	di.id = 100;
+	di.name = "detailed-widget";
+	di.description = "base desc";
+	di.tags = {"x", "y", "z"};
+	di.status = Echo_API::ItemStatus::inactive;
+	di.detail = "extra info";
+	di.rating = 4.5;
+
+	auto future = client->post__items_detailed(di, asio::use_future);
+	ctx.restart();
+	ctx.run();
+	auto outcome = future.get();
+	REQUIRE(outcome.has_value());
+	auto jv = boost::json::parse(outcome.value().body());
+	auto resp = boost::json::value_to<Echo_API::DetailedItem>(jv);
+	REQUIRE(resp.id == 100);
+	REQUIRE(resp.name == "detailed-widget");
+	REQUIRE(resp.description == "base desc");
+	REQUIRE(resp.tags.size() == 3);
+	REQUIRE(resp.status == Echo_API::ItemStatus::inactive);
+	REQUIRE(resp.detail == "extra info");
+	REQUIRE(resp.rating == 4.5);
+}
+
+TEST_CASE("POST DetailedItem allOf required-only fields", "[integration]") {
+	asio::io_context ctx;
+	auto client = make_client(ctx);
+
+	Echo_API::DetailedItem di;
+	di.id = 200;
+	di.name = "minimal-detailed";
+	di.detail = "required-detail";
+
+	auto future = client->post__items_detailed(di, asio::use_future);
+	ctx.restart();
+	ctx.run();
+	auto outcome = future.get();
+	REQUIRE(outcome.has_value());
+	auto jv = boost::json::parse(outcome.value().body());
+	auto resp = boost::json::value_to<Echo_API::DetailedItem>(jv);
+	REQUIRE(resp.id == 200);
+	REQUIRE(resp.name == "minimal-detailed");
+	REQUIRE(resp.detail == "required-detail");
+	REQUIRE(resp.tags.empty());
+}
+
+// ── oneOf variant round-trip ────────────────────────────────────
+
+TEST_CASE("POST Outcome variant with EchoResponse alternative", "[integration]") {
+	asio::io_context ctx;
+	auto client = make_client(ctx);
+
+	Echo_API::Outcome body = Echo_API::EchoResponse{"variant-msg"};
+	auto future = client->post__outcome(body, asio::use_future);
+	ctx.restart();
+	ctx.run();
+	auto outcome = future.get();
+	REQUIRE(outcome.has_value());
+	auto jv = boost::json::parse(outcome.value().body());
+	auto resp = boost::json::value_to<Echo_API::Outcome>(jv);
+	REQUIRE(std::holds_alternative<Echo_API::EchoResponse>(resp));
+	REQUIRE(std::get<Echo_API::EchoResponse>(resp).message == "variant-msg");
+}
+
+TEST_CASE("POST Outcome variant with Error serialization", "[integration]") {
+	asio::io_context ctx;
+	auto client = make_client(ctx);
+
+	Echo_API::Error err;
+	err.code = 42;
+	err.message = "something failed";
+	err.fields = "field1";
+	Echo_API::Outcome body = err;
+
+	auto future = client->post__outcome(body, asio::use_future);
+	ctx.restart();
+	ctx.run();
+	auto outcome = future.get();
+	REQUIRE(outcome.has_value());
+	auto jv = boost::json::parse(outcome.value().body());
+	auto obj = jv.as_object();
+	REQUIRE(obj["code"].as_int64() == 42);
+	REQUIRE(obj["message"].as_string() == "something failed");
+	REQUIRE(obj["fields"].as_string() == "field1");
 }

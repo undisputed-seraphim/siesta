@@ -115,6 +115,54 @@
         }
       }
     },
+    "/outcome": {
+      "post": {
+        "description": "Echo an outcome variant",
+        "operationId": "postOutcome",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/Outcome" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Outcome" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/items/detailed": {
+      "post": {
+        "description": "Create a detailed item",
+        "operationId": "createDetailedItem",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/DetailedItem" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/DetailedItem" }
+              }
+            }
+          }
+        }
+      }
+    },
     "/items/search": {
       "get": {
         "description": "Search items by category",
@@ -292,6 +340,25 @@
           },
           "status": { "$ref": "#/components/schemas/ItemStatus" }
         }
+      },
+      "DetailedItem": {
+        "allOf": [
+          { "$ref": "#/components/schemas/Item" },
+          {
+            "type": "object",
+            "required": ["detail"],
+            "properties": {
+              "detail": { "type": "string" },
+              "rating": { "type": "number", "format": "double" }
+            }
+          }
+        ]
+      },
+      "Outcome": {
+        "oneOf": [
+          { "$ref": "#/components/schemas/Error" },
+          { "$ref": "#/components/schemas/EchoResponse" }
+        ]
       }
     }
   }
