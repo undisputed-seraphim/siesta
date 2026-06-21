@@ -64,6 +64,78 @@ struct EchoServer : Echo_API::Server {
 		resp.prepare_payload();
 		session->write();
 	}
+
+	void post__echo(const request req, Session::Ptr session) override {
+		auto& resp = session->get_response();
+		resp.result(http::status::ok);
+		resp.body() = req.body();
+		resp.set(http::field::content_type, "application/json");
+		resp.prepare_payload();
+		session->write();
+	}
+
+	void get__echo__id(const request req, Session::Ptr session) override {
+		auto& resp = session->get_response();
+		resp.result(http::status::ok);
+		resp.body() = "{\"message\":\"stub\"}";
+		resp.set(http::field::content_type, "application/json");
+		resp.prepare_payload();
+		session->write();
+	}
+
+	void delete__echo__id(const request req, Session::Ptr session) override {
+		auto& resp = session->get_response();
+		resp.result(http::status::ok);
+		resp.body() = "{\"message\":\"deleted\"}";
+		resp.set(http::field::content_type, "application/json");
+		resp.prepare_payload();
+		session->write();
+	}
+
+	void get__items(const request req, Session::Ptr session) override {
+		auto& resp = session->get_response();
+		resp.result(http::status::ok);
+		resp.body() = "{\"id\":1,\"name\":\"stub\"}";
+		resp.set(http::field::content_type, "application/json");
+		resp.prepare_payload();
+		session->write();
+	}
+
+	void post__items(const request req, Session::Ptr session) override {
+		auto& resp = session->get_response();
+		resp.result(http::status::ok);
+		resp.body() = req.body();
+		resp.set(http::field::content_type, "application/json");
+		resp.prepare_payload();
+		session->write();
+	}
+
+	void get__items_search(const request req, Session::Ptr session) override {
+		auto& resp = session->get_response();
+		resp.result(http::status::ok);
+		resp.body() = "{\"message\":\"search\"}";
+		resp.set(http::field::content_type, "application/json");
+		resp.prepare_payload();
+		session->write();
+	}
+
+	void get__items__itemId_tags__tagIndex(const request req, Session::Ptr session) override {
+		auto& resp = session->get_response();
+		resp.result(http::status::ok);
+		resp.body() = "{\"message\":\"tag\"}";
+		resp.set(http::field::content_type, "application/json");
+		resp.prepare_payload();
+		session->write();
+	}
+
+	void put__items__id(const request req, Session::Ptr session) override {
+		auto& resp = session->get_response();
+		resp.result(http::status::ok);
+		resp.body() = req.body();
+		resp.set(http::field::content_type, "application/json");
+		resp.prepare_payload();
+		session->write();
+	}
 };
 
 #ifdef ENABLE_PROFILER

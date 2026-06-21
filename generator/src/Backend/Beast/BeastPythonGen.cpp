@@ -61,7 +61,7 @@ void BeastPythonGenerator::emitEndpointWrapper(std::ostream& out, const Endpoint
 	out << "\t\t\t[](ClientWrapper& self";
 
 	if (ep.has_request_body) {
-		out << ", const " << ep.body_type << "& body";
+		out << ", const " << ns_ << "::" << ep.body_type << "& body";
 	}
 
 	for (size_t i = 0; i < ep.params.size(); ++i) {

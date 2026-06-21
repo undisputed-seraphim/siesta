@@ -114,6 +114,16 @@ target_compile_options(echo_test_client PRIVATE ${FLAGS_RELEASE})
 catch_discover_tests(echo_test_client)
 
 # ══════════════════════════════════════════════════════════════════
+#  Self-contained integration test (embedded server + client)
+# ══════════════════════════════════════════════════════════════════
+
+add_executable(echo_integration_test EXCLUDE_FROM_ALL
+	"${CMAKE_CURRENT_SOURCE_DIR}/echo/test_integration.cpp")
+target_link_libraries(echo_integration_test PRIVATE echo_gen siesta::siesta Catch2::Catch2WithMain)
+target_compile_options(echo_integration_test PRIVATE ${FLAGS_RELEASE})
+catch_discover_tests(echo_integration_test)
+
+# ══════════════════════════════════════════════════════════════════
 #  Library unit tests
 # ══════════════════════════════════════════════════════════════════
 

@@ -202,11 +202,30 @@ generate_profile_report() {
 
 # ── Modes ──────────────────────────────────────────────────────
 
+run_integration_tests() {
+	log "running self-contained integration tests"
+	local out rc=0
+	out=$("$BUILD/echo_integration_test" 2>&1) || rc=$?
+	echo "$out"
+	if echo "$out" | grep -q "All tests passed"; then
+		pass "integration tests passed"
+	else
+		fail "integration tests failed"
+		rc=1
+	fi
+	return "$rc"
+}
+
 mode_sanity() {
 	ensure_build "sanity"
 	build_target echo_server
 	build_target Echo_API
 	build_target echo_test_client
+	build_target echo_integration_test
+
+	local failed=0
+
+	run_integration_tests || failed=1
 
 	local srv_pid
 	if ! srv_pid=$(start_server "$BUILD/echo_server") || [[ -z "$srv_pid" ]]; then
@@ -215,7 +234,6 @@ mode_sanity() {
 	fi
 	trap "kill_server $srv_pid" EXIT
 
-	local failed=0
 	run_cpp_tests || failed=1
 	run_python_tests || failed=1
 
