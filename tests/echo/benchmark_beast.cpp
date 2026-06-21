@@ -1,9 +1,7 @@
+#include "echo_stubs.hpp"
 #include "client.hpp"
-#include "server.hpp"
 
 #include <boost/asio.hpp>
-#include <boost/beast/http.hpp>
-#include <boost/json.hpp>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -12,56 +10,12 @@
 #include <iomanip>
 #include <iostream>
 #include <memory>
-#include <numeric>
 #include <string>
-#include <string_view>
 #include <thread>
 #include <vector>
 
 namespace asio = boost::asio;
-namespace http = boost::beast::http;
 using bench_clock = std::chrono::steady_clock;
-
-static constexpr uint16_t DEFAULT_PORT = 19920;
-static const auto LOCALHOST = asio::ip::make_address("127.0.0.1");
-
-static std::string extract_query_param(std::string_view target, std::string_view key) {
-	auto q = target.find('?');
-	if (q == std::string_view::npos) return {};
-	auto qs = target.substr(q + 1);
-	std::string needle(key);
-	needle += '=';
-	auto pos = qs.find(needle);
-	if (pos == std::string_view::npos) return {};
-	auto val_start = pos + needle.size();
-	auto amp = qs.find('&', val_start);
-	if (amp == std::string_view::npos) amp = qs.size();
-	return std::string(qs.substr(val_start, amp - val_start));
-}
-
-struct BenchServer : Echo_API::Server {
-	using Echo_API::Server::Server;
-
-	void get__echo(const request req, Session::Ptr session) override {
-		auto msg = extract_query_param(req.target(), "message");
-		auto& resp = session->get_response();
-		resp.result(http::status::ok);
-		resp.body() = "{\"message\":\"" + msg + "\"}";
-		resp.set(http::field::content_type, "application/json");
-		resp.prepare_payload();
-		session->write();
-	}
-	void post__echo(const request, Session::Ptr s) override { s->get_response().result(http::status::ok); s->write(); }
-	void get__echo__id(const request, Session::Ptr s) override { s->get_response().result(http::status::ok); s->write(); }
-	void delete__echo__id(const request, Session::Ptr s) override { s->get_response().result(http::status::ok); s->write(); }
-	void get__items(const request, Session::Ptr s) override { s->get_response().result(http::status::ok); s->write(); }
-	void post__items(const request, Session::Ptr s) override { s->get_response().result(http::status::ok); s->write(); }
-	void get__items_search(const request, Session::Ptr s) override { s->get_response().result(http::status::ok); s->write(); }
-	void get__items__itemId_tags__tagIndex(const request, Session::Ptr s) override { s->get_response().result(http::status::ok); s->write(); }
-	void put__items__id(const request, Session::Ptr s) override { s->get_response().result(http::status::ok); s->write(); }
-	void post__items_detailed(const request, Session::Ptr s) override { s->get_response().result(http::status::ok); s->write(); }
-	void post__outcome(const request, Session::Ptr s) override { s->get_response().result(http::status::ok); s->write(); }
-};
 
 struct Runner : std::enable_shared_from_this<Runner> {
 	std::shared_ptr<Echo_API::Client> client;
@@ -118,7 +72,9 @@ int main(int argc, char* argv[]) {
 	int total_requests = 100'000;
 	int concurrency = 1;
 	int warmup = 100;
-	uint16_t port = DEFAULT_PORT;
+	uint16_t port = 19920;
+	std::string host;
+	bool external = false;
 
 	for (int i = 1; i < argc; i++) {
 		std::string arg = argv[i];
@@ -130,31 +86,38 @@ int main(int argc, char* argv[]) {
 			warmup = std::stoi(argv[++i]);
 		else if (arg == "--port" && i + 1 < argc)
 			port = static_cast<uint16_t>(std::stoi(argv[++i]));
-		else if (arg == "--help" || arg == "-h") {
+		else if (arg == "--host" && i + 1 < argc) {
+			host = argv[++i];
+			external = true;
+		} else if (arg == "--help" || arg == "-h") {
 			std::cout << "Usage: echo_beast_benchmark [OPTIONS]\n"
 			          << "  -n, --requests N     Total requests (default: 100000)\n"
 			          << "  -c, --concurrency C  Persistent connections (default: 1)\n"
 			          << "      --warmup N       Warmup requests per connection (default: 100)\n"
+			          << "      --host H         Connect to external server (skip embedded)\n"
 			          << "      --port P         Server port (default: 19920)\n";
 			return 0;
 		}
 	}
 
-	int per_client = total_requests / concurrency;
-	int remainder = total_requests % concurrency;
+	auto addr = asio::ip::make_address(external ? host : "127.0.0.1");
 
 	asio::io_context server_ctx;
-	BenchServer server(server_ctx);
-	server.start(LOCALHOST, port);
-	std::thread server_thread([&] { server_ctx.run(); });
-	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+	std::unique_ptr<echo_testing::DefaultServer> server;
+	std::thread server_thread;
+
+	if (!external) {
+		server = std::make_unique<echo_testing::DefaultServer>(server_ctx);
+		server->start(addr, port);
+		server_thread = std::thread([&] { server_ctx.run(); });
+		std::this_thread::sleep_for(std::chrono::milliseconds(30));
+	}
 
 	asio::io_context client_ctx;
-
 	std::vector<std::shared_ptr<Echo_API::Client>> clients;
 	for (int i = 0; i < concurrency; i++) {
 		auto c = std::make_shared<Echo_API::Client>(client_ctx);
-		c->start(LOCALHOST, port);
+		c->start(addr, port);
 		clients.push_back(c);
 	}
 	client_ctx.run();
@@ -176,8 +139,12 @@ int main(int argc, char* argv[]) {
 		std::cerr << "done\n";
 	}
 
+	int per_client = total_requests / concurrency;
+	int remainder = total_requests % concurrency;
+
 	std::cerr << "  running " << total_requests << " requests over "
 	          << concurrency << " connection" << (concurrency > 1 ? "s" : "")
+	          << (external ? " (external " + host + ":" + std::to_string(port) + ")" : "")
 	          << " ... " << std::flush;
 
 	std::atomic<int> done_count{0};
@@ -200,9 +167,8 @@ int main(int argc, char* argv[]) {
 	std::cerr << "done\n\n";
 
 	std::vector<double> all_latencies;
-	for (auto& r : runners) {
+	for (auto& r : runners)
 		all_latencies.insert(all_latencies.end(), r->latencies.begin(), r->latencies.end());
-	}
 	std::sort(all_latencies.begin(), all_latencies.end());
 
 	int ok = static_cast<int>(all_latencies.size());
@@ -228,7 +194,9 @@ int main(int argc, char* argv[]) {
 	std::cout << "  Latency max:  " << std::setw(8) << format_latency(pct(1.0)) << "\n";
 	std::cout << "════════════════════════════════════════\n";
 
-	server_ctx.stop();
-	server_thread.join();
+	if (!external) {
+		server_ctx.stop();
+		server_thread.join();
+	}
 	return 0;
 }

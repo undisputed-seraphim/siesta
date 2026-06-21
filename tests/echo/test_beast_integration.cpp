@@ -1,5 +1,5 @@
+#include "echo_stubs.hpp"
 #include "client.hpp"
-#include "server.hpp"
 
 #include <boost/asio.hpp>
 #include <boost/asio/use_future.hpp>
@@ -18,154 +18,48 @@ namespace http = boost::beast::http;
 static constexpr uint16_t TEST_PORT = 19910;
 static const auto TEST_ADDR = asio::ip::make_address("127.0.0.1");
 
-static std::string extract_path_segment(std::string_view target, size_t index) {
-	if (auto q = target.find('?'); q != std::string_view::npos)
-		target = target.substr(0, q);
-	size_t pos = 0;
-	size_t seg = 0;
-	while (pos < target.size()) {
-		if (target[pos] == '/') { ++pos; continue; }
-		auto end = target.find('/', pos);
-		if (end == std::string_view::npos) end = target.size();
-		if (seg == index) return std::string(target.substr(pos, end - pos));
-		pos = end;
-		++seg;
-	}
-	return {};
-}
-
-static std::string extract_query_param(std::string_view target, std::string_view key) {
-	auto q = target.find('?');
-	if (q == std::string_view::npos) return {};
-	auto qs = target.substr(q + 1);
-	std::string needle(key);
-	needle += '=';
-	auto pos = qs.find(needle);
-	if (pos == std::string_view::npos) return {};
-	auto val_start = pos + needle.size();
-	auto amp = qs.find('&', val_start);
-	if (amp == std::string_view::npos) amp = qs.size();
-	return std::string(qs.substr(val_start, amp - val_start));
-}
-
-struct StubServer : Echo_API::Server {
-	using Echo_API::Server::Server;
-
-	void get__echo(const request req, Session::Ptr session) override {
-		auto msg = extract_query_param(req.target(), "message");
-		auto& resp = session->get_response();
-		resp.result(http::status::ok);
-		resp.body() = "{\"message\":\"" + msg + "\"}";
-		resp.set(http::field::content_type, "application/json");
-		resp.prepare_payload();
-		session->write();
-	}
-
-	void post__echo(const request req, Session::Ptr session) override {
-		auto& resp = session->get_response();
-		resp.result(http::status::ok);
-		resp.body() = req.body();
-		resp.set(http::field::content_type, "application/json");
-		resp.prepare_payload();
-		session->write();
-	}
+struct StubServer : echo_testing::DefaultServer {
+	using echo_testing::DefaultServer::DefaultServer;
 
 	void get__echo__id(const request req, Session::Ptr session) override {
-		auto id_str = extract_path_segment(req.target(), 1);
-		auto& resp = session->get_response();
-		resp.result(http::status::ok);
-		resp.body() = "{\"message\":\"" + id_str + "\"}";
-		resp.set(http::field::content_type, "application/json");
-		resp.prepare_payload();
-		session->write();
+		auto id_str = echo_testing::extract_path_segment(req.target(), 1);
+		reply_json(std::move(session), "{\"message\":\"" + id_str + "\"}");
 	}
 
 	void delete__echo__id(const request req, Session::Ptr session) override {
-		auto id_str = extract_path_segment(req.target(), 1);
-		auto& resp = session->get_response();
-		resp.result(http::status::ok);
-		resp.body() = "{\"message\":\"deleted " + id_str + "\"}";
-		resp.set(http::field::content_type, "application/json");
-		resp.prepare_payload();
-		session->write();
+		auto id_str = echo_testing::extract_path_segment(req.target(), 1);
+		reply_json(std::move(session), "{\"message\":\"deleted " + id_str + "\"}");
 	}
 
 	void get__items(const request req, Session::Ptr session) override {
-		auto limit_str = extract_query_param(req.target(), "limit");
-		auto status_str = extract_query_param(req.target(), "status");
+		auto limit_str = echo_testing::extract_query_param(req.target(), "limit");
+		auto status_str = echo_testing::extract_query_param(req.target(), "status");
 		boost::json::object obj;
 		obj["id"] = 1;
 		obj["name"] = "test-item";
 		if (!limit_str.empty())  obj["description"] = "limit=" + limit_str;
 		if (!status_str.empty()) obj["description"] = "status=" + status_str;
-		auto& resp = session->get_response();
-		resp.result(http::status::ok);
-		resp.body() = boost::json::serialize(obj);
-		resp.set(http::field::content_type, "application/json");
-		resp.prepare_payload();
-		session->write();
-	}
-
-	void post__items(const request req, Session::Ptr session) override {
-		auto& resp = session->get_response();
-		resp.result(http::status::ok);
-		resp.body() = req.body();
-		resp.set(http::field::content_type, "application/json");
-		resp.prepare_payload();
-		session->write();
+		reply_json(std::move(session), boost::json::serialize(obj));
 	}
 
 	void get__items_search(const request req, Session::Ptr session) override {
-		auto cat = extract_query_param(req.target(), "category");
-		auto q = extract_query_param(req.target(), "q");
-		auto& resp = session->get_response();
-		resp.result(http::status::ok);
-		resp.body() = "{\"message\":\"cat=" + cat + ",q=" + q + "\"}";
-		resp.set(http::field::content_type, "application/json");
-		resp.prepare_payload();
-		session->write();
+		auto cat = echo_testing::extract_query_param(req.target(), "category");
+		auto q = echo_testing::extract_query_param(req.target(), "q");
+		reply_json(std::move(session), "{\"message\":\"cat=" + cat + ",q=" + q + "\"}");
 	}
 
 	void get__items__itemId_tags__tagIndex(const request req, Session::Ptr session) override {
-		auto itemId = extract_path_segment(req.target(), 1);
-		auto tagIndex = extract_path_segment(req.target(), 3);
-		auto& resp = session->get_response();
-		resp.result(http::status::ok);
-		resp.body() = "{\"message\":\"" + itemId + ":" + tagIndex + "\"}";
-		resp.set(http::field::content_type, "application/json");
-		resp.prepare_payload();
-		session->write();
+		auto itemId = echo_testing::extract_path_segment(req.target(), 1);
+		auto tagIndex = echo_testing::extract_path_segment(req.target(), 3);
+		reply_json(std::move(session), "{\"message\":\"" + itemId + ":" + tagIndex + "\"}");
 	}
 
 	void put__items__id(const request req, Session::Ptr session) override {
-		auto id_str = extract_path_segment(req.target(), 1);
+		auto id_str = echo_testing::extract_path_segment(req.target(), 1);
 		auto jv = boost::json::parse(req.body());
 		auto item = boost::json::value_to<Echo_API::Item>(jv);
 		item.description = "updated:" + id_str;
-		auto& resp = session->get_response();
-		resp.result(http::status::ok);
-		resp.body() = boost::json::serialize(boost::json::value_from(item));
-		resp.set(http::field::content_type, "application/json");
-		resp.prepare_payload();
-		session->write();
-	}
-
-	void post__items_detailed(const request req, Session::Ptr session) override {
-		auto& resp = session->get_response();
-		resp.result(http::status::ok);
-		resp.body() = req.body();
-		resp.set(http::field::content_type, "application/json");
-		resp.prepare_payload();
-		session->write();
-	}
-
-	void post__outcome(const request req, Session::Ptr session) override {
-		auto& resp = session->get_response();
-		resp.result(http::status::ok);
-		resp.body() = req.body();
-		resp.set(http::field::content_type, "application/json");
-		resp.prepare_payload();
-		session->write();
+		reply_json(std::move(session), boost::json::serialize(boost::json::value_from(item)));
 	}
 };
 

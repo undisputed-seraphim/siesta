@@ -34,10 +34,11 @@ usage() {
 Usage: ./benchmark_beast.sh [MODE]
 
 Modes:
-  --bench         load test with max-performance build (100k req, 200 concurrency)
-  --profile       load test + CPU profile report (50k req, 100 concurrent)
+  --bench         C++ benchmark with embedded server (default: 100k req, 1 conn)
+  --profile       CPU profile with -O0 server (line-level, 50k req)
+  --profile-o2    CPU profile with -O2 server (function-level, 50k req)
   --server        start server in foreground (manual testing)
-  --load          load test only (assumes server running)
+  --load          Python load test only (assumes server running)
 
 Environment:
   BUILD_DIR            path to CMake build directory (default: $BUILD)
@@ -109,17 +110,17 @@ kill_server() {
 
 # ── Benchmark helpers ──────────────────────────────────────────
 
-run_load_test() {
-	local py="$SCRIPT_DIR/load_test/load_test.py"
-	info "load test ($REQUESTS req, $CONCURRENCY concurrent)"
-	python3 "$py" \
+run_benchmark_traffic() {
+	local bench_bin="$BUILD/tests/echo_beast_benchmark"
+	require_binary "$bench_bin" echo_beast_benchmark
+	"$bench_bin" \
 		--host "$SERVE" --port "$PORT" \
-		--requests "$REQUESTS" --concurrency "$CONCURRENCY" \
-		--warmup 50
+		--requests "${REQUESTS}" --concurrency "${CONCURRENCY}" \
+		--warmup 100
 }
 
 generate_profile_report() {
-	local binary="$BUILD/tests/echo_beast_server_prof"
+	local binary="$1"
 	local prof_dir="$SCRIPT_DIR/load_test/profiles"
 	local prof_file="$prof_dir/cpu.prof"
 
@@ -170,7 +171,7 @@ mode_bench() {
 
 mode_profile() {
 	: "${REQUESTS:=50000}"
-	: "${CONCURRENCY:=100}"
+	: "${CONCURRENCY:=1}"
 
 	local bin="$BUILD/tests/echo_beast_server_prof"
 	require_binary "$bin" echo_beast_server_prof
@@ -188,12 +189,40 @@ mode_profile() {
 	fi
 	trap "kill_server $srv_pid" EXIT
 
-	run_load_test || exit 1
+	run_benchmark_traffic || exit 1
 
 	kill_server "$srv_pid"
 	trap - EXIT
 
-	generate_profile_report
+	generate_profile_report "$bin"
+}
+
+mode_profile_o2() {
+	: "${REQUESTS:=50000}"
+	: "${CONCURRENCY:=1}"
+
+	local bin="$BUILD/tests/echo_beast_server_prof_o2"
+	require_binary "$bin" echo_beast_server_prof_o2
+
+	local prof_dir="$SCRIPT_DIR/load_test/profiles"
+	rm -rf "$prof_dir"
+	mkdir -p "$prof_dir"
+
+	local srv_pid
+	if ! srv_pid=$(start_server "$bin" \
+		CPUPROFILE="$prof_dir/cpu.prof" \
+		CPUPROFILE_FREQUENCY=500) || [[ -z "$srv_pid" ]]; then
+		fail "could not start server"
+		exit 1
+	fi
+	trap "kill_server $srv_pid" EXIT
+
+	run_benchmark_traffic || exit 1
+
+	kill_server "$srv_pid"
+	trap - EXIT
+
+	generate_profile_report "$bin"
 }
 
 mode_load() {
@@ -206,11 +235,12 @@ mode_load() {
 # ── Main ───────────────────────────────────────────────────────
 
 case "${1:-}" in
-	--help|-h)   usage ;;
-	--server)    mode_server ;;
-	--bench)     mode_bench ;;
-	--profile)   mode_profile ;;
-	--load)      mode_load ;;
-	"")          usage ;;
-	*)           echo "Unknown flag: $1"; usage ;;
+	--help|-h)      usage ;;
+	--server)       mode_server ;;
+	--bench)        mode_bench ;;
+	--profile)      mode_profile ;;
+	--profile-o2)   mode_profile_o2 ;;
+	--load)         mode_load ;;
+	"")             usage ;;
+	*)              echo "Unknown flag: $1"; usage ;;
 esac

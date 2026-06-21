@@ -104,8 +104,14 @@ if(PROFILER_LIB)
 	target_compile_options(echo_beast_server_prof PRIVATE ${FLAGS_PROFILING})
 	target_link_options(echo_beast_server_prof PRIVATE ${LINK_FLAGS_PROFILING})
 	target_link_libraries(echo_beast_server_prof PRIVATE ${PROFILER_LIB})
+
+	add_executable(echo_beast_server_prof_o2 ${BEAST_SERVER_SRC})
+	target_link_libraries(echo_beast_server_prof_o2 PRIVATE echo_gen)
+	target_compile_definitions(echo_beast_server_prof_o2 PRIVATE ENABLE_PROFILER)
+	target_compile_options(echo_beast_server_prof_o2 PRIVATE -O2 -g -fno-omit-frame-pointer)
+	target_link_libraries(echo_beast_server_prof_o2 PRIVATE ${PROFILER_LIB})
 else()
-	message(STATUS "gperftools not found — echo_beast_server_prof target disabled")
+	message(STATUS "gperftools not found — profiling targets disabled")
 endif()
 
 # -- echo_beast_server_bench (max performance) ---------------------
