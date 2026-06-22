@@ -103,6 +103,7 @@ void BeastServerPythonGenerator::emitServerPy(std::ostream& out, const std::vect
 	out << "\n";
 	out << "\tPyServer() : " << ns_ << "::Server(ctx) {}\n";
 	out << "\t~PyServer() {\n";
+	out << "\t\t" << ns_ << "::Server::shutdown();\n";
 	out << "\t\tctx.stop();\n";
 	out << "\t\tif (_thread.joinable()) _thread.join();\n";
 	out << "\t}\n";
@@ -112,6 +113,7 @@ void BeastServerPythonGenerator::emitServerPy(std::ostream& out, const std::vect
 	out << "\t\t_thread = std::thread([this] { ctx.run(); });\n";
 	out << "\t}\n";
 	out << "\tvoid shutdown() {\n";
+	out << "\t\t" << ns_ << "::Server::shutdown();\n";
 	out << "\t\tctx.stop();\n";
 	out << "\t\tif (_thread.joinable()) _thread.join();\n";
 	out << "\t}\n";

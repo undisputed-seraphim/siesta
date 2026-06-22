@@ -474,3 +474,44 @@ TEST_CASE("POST Outcome variant with Error serialization", "[integration][beast]
 	REQUIRE(obj["message"].as_string() == "something failed");
 	REQUIRE(obj["fields"].as_string() == "field1");
 }
+
+// ── Graceful shutdown ───────────────────────────────────────────
+
+TEST_CASE("graceful shutdown drains and stops", "[integration][beast]") {
+	static constexpr uint16_t SHUTDOWN_PORT = 19911;
+
+	asio::io_context srv_ctx;
+	echo_testing::DefaultServer srv(srv_ctx);
+	srv.start(TEST_ADDR, SHUTDOWN_PORT);
+	std::thread srv_thread([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	auto client = std::make_shared<Echo_API::Client>(ctx);
+	client->start(TEST_ADDR, SHUTDOWN_PORT);
+	ctx.run();
+	auto resp = call_echo(client, ctx, "before-shutdown");
+	REQUIRE(resp.message == "before-shutdown");
+	client->stop();
+
+	srv.shutdown();
+	srv_thread.join();
+}
+
+TEST_CASE("no new connections after shutdown", "[integration][beast]") {
+	static constexpr uint16_t SHUTDOWN_PORT2 = 19912;
+
+	asio::io_context srv_ctx;
+	echo_testing::DefaultServer srv(srv_ctx);
+	srv.start(TEST_ADDR, SHUTDOWN_PORT2);
+	std::thread srv_thread([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	srv.shutdown();
+	srv_thread.join();
+
+	boost::system::error_code ec;
+	asio::ip::tcp::socket sock(srv_ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, SHUTDOWN_PORT2), ec);
+	REQUIRE(ec);
+}

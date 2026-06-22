@@ -45,6 +45,12 @@ void ServerBase::start(const protocol::endpoint& endpoint) {
 	});
 }
 
+void ServerBase::shutdown() {
+	ec_t ec;
+	_shutting_down = true;
+	_acceptor.close(ec);
+}
+
 void ServerBase::on_accept(const ec_t& ec, protocol::socket socket) {
 	if (ec) {
 		return fail("on_accept", ec);
@@ -74,6 +80,10 @@ void ServerBase::Session::run() {
 }
 
 void ServerBase::Session::do_read() {
+	if (_parent._shutting_down) {
+		do_close();
+		return;
+	}
 	_request = {};
 	if (_config.read_timeout > std::chrono::milliseconds::zero())
 		_stream.expires_after(_config.read_timeout);
@@ -109,7 +119,7 @@ void ServerBase::Session::on_read(ec_t ec, std::size_t) {
 void ServerBase::Session::do_write() {
 	if (response_queue_.empty()) {
 		is_writing_ = false;
-		if (should_close_) do_close();
+		if (should_close_ || _parent._shutting_down) do_close();
 		return;
 	}
 	is_writing_ = true;

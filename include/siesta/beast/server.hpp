@@ -75,6 +75,7 @@ public:
 
 	void start(const ::boost::asio::ip::address, uint16_t);
 	void start(const protocol::endpoint&);
+	void shutdown();
 
 	virtual void handle_request(const request, Session::Ptr) = 0;
 
@@ -83,6 +84,7 @@ protected:
 	boost::asio::io_context* _ctx{nullptr};
 	protocol::acceptor _acceptor;
 	std::atomic<uint64_t> _client_id{0};
+	std::atomic<bool> _shutting_down{false};
 
 	void on_accept(const ec_t&, protocol::socket);
 };
