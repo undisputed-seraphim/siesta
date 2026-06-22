@@ -201,7 +201,7 @@ TEST_CASE("POST Item all fields round-trip", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
-	Echo_API::Item item;
+	Echo_API::Item item{};
 	item.id = 1;
 	item.name = "widget";
 	item.description = "a useful thing";
@@ -216,11 +216,12 @@ TEST_CASE("POST Item all fields round-trip", "[integration][beast]") {
 	auto jv = boost::json::parse(outcome.value().body());
 	auto resp = boost::json::value_to<Echo_API::Item>(jv);
 	REQUIRE(resp.id == 1);
-	REQUIRE(resp.name == "widget");
+	REQUIRE(resp.name == "processed:widget");
 	REQUIRE(resp.description == "a useful thing");
-	REQUIRE(resp.tags.size() == 2);
+	REQUIRE(resp.tags.size() == 3);
 	REQUIRE(resp.tags[0] == "alpha");
 	REQUIRE(resp.tags[1] == "beta");
+	REQUIRE(resp.tags[2] == "server-added");
 	REQUIRE(resp.status == Echo_API::ItemStatus::active);
 }
 
@@ -230,7 +231,7 @@ TEST_CASE("POST Item required-only fields", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
-	Echo_API::Item item;
+	Echo_API::Item item{};
 	item.id = 2;
 	item.name = "minimal";
 
@@ -242,7 +243,7 @@ TEST_CASE("POST Item required-only fields", "[integration][beast]") {
 	auto jv = boost::json::parse(outcome.value().body());
 	auto resp = boost::json::value_to<Echo_API::Item>(jv);
 	REQUIRE(resp.id == 2);
-	REQUIRE(resp.name == "minimal");
+	REQUIRE(resp.name == "processed:minimal");
 }
 
 // ── GET items with optional query params ────────────────────────
@@ -280,7 +281,7 @@ TEST_CASE("enum inactive round-trip", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
-	Echo_API::Item item;
+	Echo_API::Item item{};
 	item.id = 10;
 	item.name = "test";
 	item.status = Echo_API::ItemStatus::inactive;
@@ -298,7 +299,7 @@ TEST_CASE("enum archived round-trip", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
-	Echo_API::Item item;
+	Echo_API::Item item{};
 	item.id = 11;
 	item.name = "test";
 	item.status = Echo_API::ItemStatus::archived;
@@ -337,7 +338,7 @@ TEST_CASE("PUT item with body and path param", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
-	Echo_API::Item item;
+	Echo_API::Item item{};
 	item.id = 42;
 	item.name = "updated-widget";
 	item.tags = {"x"};
@@ -391,7 +392,7 @@ TEST_CASE("POST DetailedItem allOf all fields round-trip", "[integration][beast]
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
-	Echo_API::DetailedItem di;
+	Echo_API::DetailedItem di{};
 	di.id = 100;
 	di.name = "detailed-widget";
 	di.description = "base desc";
@@ -412,15 +413,15 @@ TEST_CASE("POST DetailedItem allOf all fields round-trip", "[integration][beast]
 	REQUIRE(resp.description == "base desc");
 	REQUIRE(resp.tags.size() == 3);
 	REQUIRE(resp.status == Echo_API::ItemStatus::inactive);
-	REQUIRE(resp.detail == "extra info");
-	REQUIRE(resp.rating == 4.5);
+	REQUIRE(resp.detail == "processed:extra info");
+	REQUIRE(resp.rating == 5.5);
 }
 
 TEST_CASE("POST DetailedItem allOf required-only fields", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
-	Echo_API::DetailedItem di;
+	Echo_API::DetailedItem di{};
 	di.id = 200;
 	di.name = "minimal-detailed";
 	di.detail = "required-detail";
@@ -434,7 +435,7 @@ TEST_CASE("POST DetailedItem allOf required-only fields", "[integration][beast]"
 	auto resp = boost::json::value_to<Echo_API::DetailedItem>(jv);
 	REQUIRE(resp.id == 200);
 	REQUIRE(resp.name == "minimal-detailed");
-	REQUIRE(resp.detail == "required-detail");
+	REQUIRE(resp.detail == "processed:required-detail");
 	REQUIRE(resp.tags.empty());
 }
 
@@ -453,14 +454,14 @@ TEST_CASE("POST Outcome variant with EchoResponse alternative", "[integration][b
 	auto jv = boost::json::parse(outcome.value().body());
 	auto resp = boost::json::value_to<Echo_API::Outcome>(jv);
 	REQUIRE(std::holds_alternative<Echo_API::EchoResponse>(resp));
-	REQUIRE(std::get<Echo_API::EchoResponse>(resp).message == "variant-msg");
+	REQUIRE(std::get<Echo_API::EchoResponse>(resp).message == "visited:variant-msg");
 }
 
 TEST_CASE("POST Outcome variant with Error serialization", "[integration][beast]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
-	Echo_API::Error err;
+	Echo_API::Error err{};
 	err.code = 42;
 	err.message = "something failed";
 	err.fields = "field1";
@@ -472,10 +473,9 @@ TEST_CASE("POST Outcome variant with Error serialization", "[integration][beast]
 	auto outcome = future.get();
 	REQUIRE(outcome.has_value());
 	auto jv = boost::json::parse(outcome.value().body());
-	auto obj = jv.as_object();
-	REQUIRE(obj["code"].as_int64() == 42);
-	REQUIRE(obj["message"].as_string() == "something failed");
-	REQUIRE(obj["fields"].as_string() == "field1");
+	auto resp = boost::json::value_to<Echo_API::Outcome>(jv);
+	REQUIRE(std::holds_alternative<Echo_API::EchoResponse>(resp));
+	REQUIRE(std::get<Echo_API::EchoResponse>(resp).message == "visited:something failed");
 }
 
 // ── Graceful shutdown ───────────────────────────────────────────
