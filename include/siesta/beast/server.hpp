@@ -25,6 +25,7 @@
 #include <optional>
 #include <queue>
 #include <string>
+#include <type_traits>
 #include <variant>
 
 namespace siesta::beast {
@@ -51,6 +52,7 @@ public:
 		std::string cors_headers{"Content-Type, Authorization"};
 		uint32_t cors_max_age{86400};
 		::boost::asio::ssl::context* ssl_ctx = nullptr;
+		std::function<std::string(std::string_view)> compress;
 	};
 
 	class Session : public std::enable_shared_from_this<Session> {
@@ -70,6 +72,18 @@ public:
 			msg.set(::boost::beast::http::field::date, rfc7231_date());
 			if (!_config.cors_origin.empty())
 				msg.set(::boost::beast::http::field::access_control_allow_origin, _config.cors_origin);
+			if constexpr (std::is_same_v<typename Body::value_type, std::string>) {
+				if (accepts_gzip_ && _config.compress && !msg.body().empty()) {
+					msg.body() = _config.compress(msg.body());
+					msg.set(::boost::beast::http::field::content_encoding, "gzip");
+					msg.set(::boost::beast::http::field::vary, "Accept-Encoding");
+					msg.prepare_payload();
+				}
+				if (head_request_) {
+					msg.prepare_payload();
+					msg.body().clear();
+				}
+			}
 			response_queue_.push(::boost::beast::http::message_generator(std::move(msg)));
 			if (state_ == State::reading) {
 				state_ = State::active;
@@ -92,6 +106,8 @@ public:
 
 		std::queue<::boost::beast::http::message_generator> response_queue_;
 		State state_ = State::reading;
+		bool accepts_gzip_ = false;
+		bool head_request_ = false;
 
 		static stream_type& tcp_of(stream_type& s) { return s; }
 		static stream_type& tcp_of(ssl_stream_type& s) { return s.next_layer(); }

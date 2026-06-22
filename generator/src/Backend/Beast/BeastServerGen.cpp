@@ -104,6 +104,10 @@ void BeastServerGenerator::emitServerCpp(std::ostream& out, const std::vector<En
 		for (const auto* ep : static_eps) {
 			out << "\t{{\"" << escapeCppString(ep->path) << "\"sv, http::verb::" << ep->cpp_verb
 				<< "}, &Server::" << ep->function_name << "},\n";
+			if (ep->cpp_verb == "get") {
+				out << "\t{{\"" << escapeCppString(ep->path) << "\"sv, http::verb::head"
+					<< "}, &Server::" << ep->function_name << "},\n";
+			}
 		}
 		out << "};\n\n";
 	}
@@ -132,6 +136,10 @@ void BeastServerGenerator::emitServerCpp(std::ostream& out, const std::vector<En
 		for (const auto* ep : param_eps) {
 			out << "\t{\"" << escapeCppString(ep->path_template) << "\"sv, {http::verb::" << ep->cpp_verb
 				<< ", &Server::" << ep->function_name << "}},\n";
+			if (ep->cpp_verb == "get") {
+				out << "\t{\"" << escapeCppString(ep->path_template) << "\"sv, {http::verb::head"
+					<< ", &Server::" << ep->function_name << "}},\n";
+			}
 		}
 		out << "};\n\n";
 	}

@@ -140,6 +140,10 @@ void ServerBase::Session::start_read_loop() {
 						auto req = parser_->release();
 						parser_.reset();
 
+						accepts_gzip_ = req[http::field::accept_encoding].find("gzip")
+							!= std::string_view::npos;
+						head_request_ = (req.method() == http::verb::head);
+
 						if (req.method() == http::verb::options
 							&& !_config.cors_origin.empty()) {
 							http::response<http::string_body> resp{

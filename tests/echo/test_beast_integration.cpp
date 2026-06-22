@@ -9,6 +9,7 @@
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
 #include <memory>
+#include <siesta/beast/compression.hpp>
 #include <siesta/beast/pool.hpp>
 #include <string>
 #include <string_view>
@@ -813,4 +814,127 @@ TEST_CASE("connection pool round-robin", "[integration][beast]") {
 	}
 
 	pool.stop();
+}
+
+// ── HEAD request ────────────────────────────────────────────────
+
+TEST_CASE("HEAD returns headers without body", "[integration][beast]") {
+	asio::io_context ctx;
+	asio::ip::tcp::socket s(ctx);
+	s.connect(asio::ip::tcp::endpoint(TEST_ADDR, TEST_PORT));
+
+	http::request<http::string_body> req{http::verb::head, "/echo?message=headtest", 11};
+	req.set(http::field::host, "localhost");
+	req.prepare_payload();
+	http::write(s, req);
+
+	boost::beast::flat_buffer buffer;
+	http::response_parser<http::string_body> parser;
+	parser.skip(true);
+	http::read(s, buffer, parser);
+	auto resp = parser.release();
+
+	REQUIRE(resp.result() == http::status::ok);
+	REQUIRE(resp.body().empty());
+	auto cl = resp[http::field::content_length];
+	REQUIRE(!cl.empty());
+	REQUIRE(std::stoi(std::string(cl)) > 0);
+
+	s.close();
+}
+
+// ── Gzip compression ────────────────────────────────────────────
+
+static std::string gzip_decompress(std::string_view input) {
+	z_stream zs{};
+	inflateInit2(&zs, 15 + 16);
+	zs.next_in = reinterpret_cast<Bytef*>(const_cast<char*>(input.data()));
+	zs.avail_in = static_cast<uInt>(input.size());
+	std::string output;
+	char buf[4096];
+	int ret;
+	do {
+		zs.next_out = reinterpret_cast<Bytef*>(buf);
+		zs.avail_out = sizeof(buf);
+		ret = inflate(&zs, Z_NO_FLUSH);
+		output.append(buf, sizeof(buf) - zs.avail_out);
+	} while (ret == Z_OK);
+	inflateEnd(&zs);
+	return output;
+}
+
+TEST_CASE("gzip compression when Accept-Encoding set", "[integration][beast]") {
+	static constexpr uint16_t GZIP_PORT = 19920;
+
+	asio::io_context srv_ctx;
+	siesta::beast::ServerBase::Config conf;
+	conf.idle_timeout = std::chrono::milliseconds::zero();
+	conf.write_timeout = std::chrono::milliseconds::zero();
+	conf.compress = siesta::beast::gzip_compress;
+	echo_testing::DefaultServer srv(srv_ctx, conf);
+	srv.start(TEST_ADDR, GZIP_PORT);
+	std::thread srv_thread([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::ip::tcp::socket sock(srv_ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, GZIP_PORT));
+
+	http::request<http::string_body> req{http::verb::get, "/echo?message=compressed", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::accept_encoding, "gzip");
+	req.prepare_payload();
+	http::write(sock, req);
+
+	boost::beast::flat_buffer buffer;
+	http::response<http::string_body> resp;
+	http::read(sock, buffer, resp);
+
+	REQUIRE(resp.result() == http::status::ok);
+	REQUIRE(resp[http::field::content_encoding] == "gzip");
+
+	auto body = gzip_decompress(resp.body());
+	auto jv = boost::json::parse(body);
+	auto result = boost::json::value_to<Echo_API::EchoResponse>(jv);
+	REQUIRE(result.message == "compressed");
+
+	sock.close();
+	srv.shutdown();
+	srv_thread.join();
+}
+
+TEST_CASE("no compression without Accept-Encoding", "[integration][beast]") {
+	static constexpr uint16_t GZIP_PORT2 = 19921;
+
+	asio::io_context srv_ctx;
+	siesta::beast::ServerBase::Config conf;
+	conf.idle_timeout = std::chrono::milliseconds::zero();
+	conf.write_timeout = std::chrono::milliseconds::zero();
+	conf.compress = siesta::beast::gzip_compress;
+	echo_testing::DefaultServer srv(srv_ctx, conf);
+	srv.start(TEST_ADDR, GZIP_PORT2);
+	std::thread srv_thread([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::ip::tcp::socket sock(srv_ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, GZIP_PORT2));
+
+	http::request<http::string_body> req{http::verb::get, "/echo?message=plain", 11};
+	req.set(http::field::host, "localhost");
+	req.prepare_payload();
+	http::write(sock, req);
+
+	boost::beast::flat_buffer buffer;
+	http::response<http::string_body> resp;
+	http::read(sock, buffer, resp);
+
+	REQUIRE(resp.result() == http::status::ok);
+	REQUIRE(resp[http::field::content_encoding].empty());
+
+	auto jv = boost::json::parse(resp.body());
+	auto result = boost::json::value_to<Echo_API::EchoResponse>(jv);
+	REQUIRE(result.message == "plain");
+
+	sock.close();
+	srv.shutdown();
+	srv_thread.join();
 }
