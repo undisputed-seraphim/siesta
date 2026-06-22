@@ -2,6 +2,7 @@
 #pragma once
 
 #include <array>
+#include <boost/asio/compose.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/address.hpp>
 #include <boost/asio/ip/tcp.hpp>
@@ -17,6 +18,7 @@
 #include <boost/beast/http/parser.hpp>
 #include <boost/beast/http/read.hpp>
 #include <boost/beast/ssl.hpp>
+#include <concepts>
 #include <ctime>
 #include <functional>
 #include <memory>
@@ -61,22 +63,25 @@ public:
 		uint64_t id() const { return _id; }
 		bool is_tls() const { return std::holds_alternative<ssl_stream_type>(_stream); }
 
-		template <bool isRequest, class Body, class Fields>
-		void send(::boost::beast::http::message<isRequest, Body, Fields>&& msg) {
-			if constexpr (!isRequest) {
-				if (!_config.server_name.empty())
-					msg.set(::boost::beast::http::field::server, _config.server_name);
-				msg.set(::boost::beast::http::field::date, rfc7231_date());
-				if (!_config.cors_origin.empty())
-					msg.set(::boost::beast::http::field::access_control_allow_origin, _config.cors_origin);
-			}
+		template <class Body, class Fields>
+		void send(::boost::beast::http::response<Body, Fields>&& msg) {
+			if (!_config.server_name.empty())
+				msg.set(::boost::beast::http::field::server, _config.server_name);
+			msg.set(::boost::beast::http::field::date, rfc7231_date());
+			if (!_config.cors_origin.empty())
+				msg.set(::boost::beast::http::field::access_control_allow_origin, _config.cors_origin);
 			response_queue_.push(::boost::beast::http::message_generator(std::move(msg)));
-			if (!is_writing_) do_write();
+			if (state_ == State::reading) {
+				state_ = State::active;
+				do_write();
+			}
 		}
 
 	protected:
 		friend ServerBase;
 		static constexpr std::size_t max_responses_ = 64;
+
+		enum class State : uint8_t { handshaking, reading, active, draining, closing, closed };
 
 		ServerBase& _parent;
 		any_stream _stream;
@@ -86,10 +91,7 @@ public:
 		uint64_t _id;
 
 		std::queue<::boost::beast::http::message_generator> response_queue_;
-		bool is_writing_ = false;
-
-		enum class CloseState : uint8_t { open, draining, closing };
-		CloseState close_state_ = CloseState::open;
+		State state_ = State::reading;
 
 		static stream_type& tcp_of(stream_type& s) { return s; }
 		static stream_type& tcp_of(ssl_stream_type& s) { return s.next_layer(); }
@@ -99,12 +101,14 @@ public:
 		}
 
 		template <typename F>
+			requires std::invocable<F, stream_type&>
+			      && std::invocable<F, ssl_stream_type&>
 		decltype(auto) with_stream(F&& f) {
 			return std::visit(std::forward<F>(f), _stream);
 		}
 
-		void do_read();
-		void on_read(ec_t, std::size_t);
+		void start_read_loop();
+		void on_read_done(ec_t);
 		void do_write();
 		void do_close();
 		static std::string rfc7231_date();
