@@ -9,6 +9,7 @@
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
 #include <memory>
+#include <siesta/beast/pool.hpp>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -789,4 +790,27 @@ TEST_CASE("plain client on TLS server fails", "[integration][beast][tls]") {
 	sock.close();
 	srv.shutdown();
 	srv_thread.join();
+}
+
+// ── Connection pool ─────────────────────────────────────────────
+
+TEST_CASE("connection pool round-robin", "[integration][beast]") {
+	asio::io_context ctx;
+	siesta::beast::ClientPool<Echo_API::Client> pool(ctx, 4);
+	pool.start(TEST_ADDR, TEST_PORT);
+	ctx.run();
+
+	for (int i = 0; i < 8; i++) {
+		auto msg = "pool_" + std::to_string(i);
+		auto future = pool.next()->get__echo(msg, std::nullopt, asio::use_future);
+		ctx.restart();
+		ctx.run();
+		auto outcome = future.get();
+		REQUIRE(outcome.has_value());
+		auto jv = boost::json::parse(outcome.value().body());
+		auto result = boost::json::value_to<Echo_API::EchoResponse>(jv);
+		REQUIRE(result.message == msg);
+	}
+
+	pool.stop();
 }
