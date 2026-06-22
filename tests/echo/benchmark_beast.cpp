@@ -222,6 +222,7 @@ int main(int argc, char* argv[]) {
 		siesta::beast::ServerBase::Config srv_conf;
 		srv_conf.read_timeout = std::chrono::milliseconds::zero();
 		srv_conf.write_timeout = std::chrono::milliseconds::zero();
+		srv_conf.idle_timeout = std::chrono::milliseconds::zero();
 		server = std::make_unique<echo_testing::DefaultServer>(server_ctx, srv_conf);
 		server->start(addr, port);
 		server_thread = std::thread([&] { server_ctx.run(); });

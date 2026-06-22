@@ -526,6 +526,7 @@ TEST_CASE("oversized body returns 413", "[integration][beast]") {
 	conf.max_body_size = 100;
 	conf.read_timeout = std::chrono::milliseconds::zero();
 	conf.write_timeout = std::chrono::milliseconds::zero();
+	conf.idle_timeout = std::chrono::milliseconds::zero();
 	echo_testing::DefaultServer srv(srv_ctx, conf);
 	srv.start(TEST_ADDR, LIMIT_PORT);
 	std::thread srv_thread([&] { srv_ctx.run(); });
@@ -560,6 +561,7 @@ TEST_CASE("body under limit succeeds", "[integration][beast]") {
 	conf.max_body_size = 1024;
 	conf.read_timeout = std::chrono::milliseconds::zero();
 	conf.write_timeout = std::chrono::milliseconds::zero();
+	conf.idle_timeout = std::chrono::milliseconds::zero();
 	echo_testing::DefaultServer srv(srv_ctx, conf);
 	srv.start(TEST_ADDR, LIMIT_PORT2);
 	std::thread srv_thread([&] { srv_ctx.run(); });
@@ -579,6 +581,126 @@ TEST_CASE("body under limit succeeds", "[integration][beast]") {
 	REQUIRE(outcome.has_value());
 
 	client->stop();
+	srv.shutdown();
+	srv_thread.join();
+}
+
+// ── Idle connection timeout ─────────────────────────────────────
+
+TEST_CASE("idle connection times out", "[integration][beast]") {
+	static constexpr uint16_t IDLE_PORT = 19915;
+
+	asio::io_context srv_ctx;
+	siesta::beast::ServerBase::Config conf;
+	conf.idle_timeout = std::chrono::milliseconds(200);
+	conf.write_timeout = std::chrono::milliseconds::zero();
+	echo_testing::DefaultServer srv(srv_ctx, conf);
+	srv.start(TEST_ADDR, IDLE_PORT);
+	std::thread srv_thread([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::ip::tcp::socket sock(srv_ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, IDLE_PORT));
+
+	http::request<http::string_body> req{http::verb::get, "/echo?message=hi", 11};
+	req.set(http::field::host, "localhost");
+	req.prepare_payload();
+	http::write(sock, req);
+
+	boost::beast::flat_buffer buffer;
+	http::response<http::string_body> resp;
+	http::read(sock, buffer, resp);
+	REQUIRE(resp.result() == http::status::ok);
+
+	std::this_thread::sleep_for(std::chrono::milliseconds(400));
+
+	http::request<http::string_body> req2{http::verb::get, "/echo?message=hi", 11};
+	req2.set(http::field::host, "localhost");
+	req2.prepare_payload();
+
+	boost::system::error_code ec;
+	http::write(sock, req2, ec);
+	if (!ec) {
+		http::response<http::string_body> resp2;
+		http::read(sock, buffer, resp2, ec);
+	}
+	REQUIRE(ec);
+
+	sock.close();
+	srv.shutdown();
+	srv_thread.join();
+}
+
+// ── CORS + Common response headers ─────────────────────────────
+
+TEST_CASE("CORS preflight returns allow headers", "[integration][beast]") {
+	static constexpr uint16_t CORS_PORT = 19916;
+
+	asio::io_context srv_ctx;
+	siesta::beast::ServerBase::Config conf;
+	conf.idle_timeout = std::chrono::milliseconds::zero();
+	conf.write_timeout = std::chrono::milliseconds::zero();
+	conf.cors_origin = "*";
+	echo_testing::DefaultServer srv(srv_ctx, conf);
+	srv.start(TEST_ADDR, CORS_PORT);
+	std::thread srv_thread([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::ip::tcp::socket sock(srv_ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, CORS_PORT));
+
+	http::request<http::string_body> req{http::verb::options, "/echo", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::origin, "http://example.com");
+	req.prepare_payload();
+	http::write(sock, req);
+
+	boost::beast::flat_buffer buffer;
+	http::response<http::string_body> resp;
+	http::read(sock, buffer, resp);
+
+	REQUIRE(resp.result() == http::status::no_content);
+	REQUIRE(resp[http::field::access_control_allow_origin] == "*");
+	REQUIRE(!resp[http::field::access_control_allow_methods].empty());
+	REQUIRE(!resp[http::field::access_control_allow_headers].empty());
+
+	sock.close();
+	srv.shutdown();
+	srv_thread.join();
+}
+
+TEST_CASE("responses include Date Server and CORS headers", "[integration][beast]") {
+	static constexpr uint16_t HDR_PORT = 19917;
+
+	asio::io_context srv_ctx;
+	siesta::beast::ServerBase::Config conf;
+	conf.idle_timeout = std::chrono::milliseconds::zero();
+	conf.write_timeout = std::chrono::milliseconds::zero();
+	conf.cors_origin = "*";
+	conf.server_name = "test-siesta";
+	echo_testing::DefaultServer srv(srv_ctx, conf);
+	srv.start(TEST_ADDR, HDR_PORT);
+	std::thread srv_thread([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::ip::tcp::socket sock(srv_ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, HDR_PORT));
+
+	http::request<http::string_body> req{http::verb::get, "/echo?message=hi", 11};
+	req.set(http::field::host, "localhost");
+	req.prepare_payload();
+	http::write(sock, req);
+
+	boost::beast::flat_buffer buffer;
+	http::response<http::string_body> resp;
+	http::read(sock, buffer, resp);
+
+	REQUIRE(resp.result() == http::status::ok);
+	REQUIRE(resp[http::field::server] == "test-siesta");
+	REQUIRE(!resp[http::field::date].empty());
+	REQUIRE(resp[http::field::access_control_allow_origin] == "*");
+
+	sock.close();
 	srv.shutdown();
 	srv_thread.join();
 }

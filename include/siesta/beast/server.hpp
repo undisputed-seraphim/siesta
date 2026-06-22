@@ -15,10 +15,12 @@
 #include <boost/beast/http/message_generator.hpp>
 #include <boost/beast/http/parser.hpp>
 #include <boost/beast/http/read.hpp>
+#include <ctime>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <queue>
+#include <string>
 
 namespace siesta::beast {
 
@@ -34,7 +36,13 @@ public:
 	struct Config {
 		std::chrono::milliseconds read_timeout{std::chrono::hours{1}};
 		std::chrono::milliseconds write_timeout{std::chrono::seconds{30}};
+		std::chrono::milliseconds idle_timeout{std::chrono::seconds{60}};
 		std::uint64_t max_body_size{1024 * 1024};
+		std::string server_name{"siesta"};
+		std::string cors_origin;
+		std::string cors_methods{"GET, POST, PUT, DELETE, PATCH, OPTIONS"};
+		std::string cors_headers{"Content-Type, Authorization"};
+		uint32_t cors_max_age{86400};
 	};
 
 	class Session : public std::enable_shared_from_this<Session> {
@@ -48,6 +56,13 @@ public:
 
 		template <bool isRequest, class Body, class Fields>
 		void send(::boost::beast::http::message<isRequest, Body, Fields>&& msg) {
+			if constexpr (!isRequest) {
+				if (!_config.server_name.empty())
+					msg.set(::boost::beast::http::field::server, _config.server_name);
+				msg.set(::boost::beast::http::field::date, rfc7231_date());
+				if (!_config.cors_origin.empty())
+					msg.set(::boost::beast::http::field::access_control_allow_origin, _config.cors_origin);
+			}
 			response_queue_.push(::boost::beast::http::message_generator(std::move(msg)));
 			if (!is_writing_) do_write();
 		}
@@ -71,6 +86,7 @@ public:
 		void on_read(ec_t, std::size_t);
 		void do_write();
 		void do_close();
+		static std::string rfc7231_date();
 	};
 
 	ServerBase(boost::asio::io_context&);

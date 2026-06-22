@@ -79,6 +79,13 @@ void ServerBase::Session::run() {
 	});
 }
 
+std::string ServerBase::Session::rfc7231_date() {
+	char buf[30];
+	std::time_t t = std::time(nullptr);
+	std::strftime(buf, sizeof(buf), "%a, %d %b %Y %H:%M:%S GMT", std::gmtime(&t));
+	return buf;
+}
+
 void ServerBase::Session::do_read() {
 	if (_parent._shutting_down) {
 		do_close();
@@ -89,8 +96,10 @@ void ServerBase::Session::do_read() {
 		parser_->body_limit(_config.max_body_size);
 	else
 		parser_->body_limit(boost::none);
-	if (_config.read_timeout > std::chrono::milliseconds::zero())
-		_stream.expires_after(_config.read_timeout);
+	auto timeout = _config.idle_timeout > std::chrono::milliseconds::zero()
+		? _config.idle_timeout : _config.read_timeout;
+	if (timeout > std::chrono::milliseconds::zero())
+		_stream.expires_after(timeout);
 	http::async_read(_stream, _buffer, *parser_, [self = shared_from_this()](ec_t ec, std::size_t bytes) {
 		self->on_read(ec, bytes);
 	});
@@ -119,6 +128,18 @@ void ServerBase::Session::on_read(ec_t ec, std::size_t) {
 
 	auto req = parser_->release();
 	parser_.reset();
+
+	if (req.method() == http::verb::options && !_config.cors_origin.empty()) {
+		http::response<http::string_body> resp{http::status::no_content, req.version()};
+		resp.set(http::field::access_control_allow_methods, _config.cors_methods);
+		resp.set(http::field::access_control_allow_headers, _config.cors_headers);
+		resp.set(http::field::access_control_max_age, std::to_string(_config.cors_max_age));
+		resp.keep_alive(req.keep_alive());
+		resp.prepare_payload();
+		send(std::move(resp));
+		do_read();
+		return;
+	}
 
 	if (response_queue_.size() >= max_responses_) {
 		http::response<http::string_body> resp{http::status::too_many_requests, req.version()};
