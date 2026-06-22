@@ -4,14 +4,17 @@
 #include <boost/asio/compose.hpp>
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
+#include <boost/asio/ssl.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
+#include <boost/beast/ssl.hpp>
 #include <boost/json.hpp>
 #include <boost/outcome/std_outcome.hpp>
 #include <cstring>
 #include <functional>
 #include <memory>
+#include <variant>
 
 #include <siesta/beast/error.hpp>
 #include <siesta/format.hpp>
@@ -27,11 +30,14 @@ public:
 	using error_type = ::boost::system::error_code;
 	using strand_type = ::boost::asio::strand<::boost::asio::io_context::executor_type>;
 	using stream_type = ::boost::beast::basic_stream<protocol, strand_type>;
+	using ssl_stream_type = ::boost::beast::ssl_stream<stream_type>;
+	using any_stream = std::variant<stream_type, ssl_stream_type>;
 
 	struct Config {
 		std::chrono::milliseconds connect_timeout;
 		std::chrono::milliseconds write_timeout;
 		std::chrono::milliseconds read_timeout;
+		::boost::asio::ssl::context* ssl_ctx = nullptr;
 
 		Config()
 			: connect_timeout(1000)
@@ -48,10 +54,11 @@ public:
 	void start(const protocol::endpoint&);
 
 	::boost::asio::io_context& context() { return _ctx; }
+	bool is_tls() const { return std::holds_alternative<ssl_stream_type>(_stream); }
 
 	void stop() {
 		_resolver.cancel();
-		_stream.close();
+		tcp_layer().close();
 	}
 
 protected:
@@ -60,13 +67,25 @@ protected:
 	::boost::asio::strand<::boost::asio::io_context::executor_type> _strand;
 	protocol::resolver _resolver;
 	::boost::beast::flat_buffer _buffer;
-	stream_type _stream;
+	any_stream _stream;
 	request_type _request;
 	response_type _response;
 
 	std::string _host_value;
 
 	std::array<unsigned char, 1024 + 256 + 128> _json_buffer;
+
+	static stream_type& tcp_of(stream_type& s) { return s; }
+	static stream_type& tcp_of(ssl_stream_type& s) { return s.next_layer(); }
+
+	stream_type& tcp_layer() {
+		return std::visit([](auto& s) -> stream_type& { return tcp_of(s); }, _stream);
+	}
+
+	template <typename F>
+	decltype(auto) with_stream(F&& f) {
+		return std::visit(std::forward<F>(f), _stream);
+	}
 
 	void on_resolve(const error_type&, protocol::resolver::results_type);
 	void on_connect(const error_type&, protocol::resolver::endpoint_type);
@@ -79,12 +98,10 @@ protected:
 		t = T(json::value_to<T>(json::parse(resp.body(), &json_rsc)));
 	}
 
-	template <::boost::asio::completion_token_for<void(outcome_type)> CompletionToken>
-	auto async_submit_request(request_type req, CompletionToken&& token) {
-		_request = std::move(req);
-		_request.set(::boost::beast::http::field::host, _host_value);
+	template <typename Stream, ::boost::asio::completion_token_for<void(outcome_type)> CompletionToken>
+	auto do_submit(Stream& stream, CompletionToken&& token) {
 		return ::boost::asio::async_compose<CompletionToken, void(outcome_type)>(
-			[this, lifetime = shared_from_this(), state = 0](
+			[this, &stream, lifetime = shared_from_this(), state = 0](
 				auto& self, ::boost::system::error_code error = {}, std::size_t bytes = 0) mutable -> void {
 				namespace http = ::boost::beast::http;
 				if (error) {
@@ -92,19 +109,19 @@ protected:
 					return;
 				}
 				switch (state) {
-				case 0: { // send
+				case 0: {
 					state = 1;
 					if (_conf.write_timeout > std::chrono::milliseconds::zero())
-						_stream.expires_after(_conf.write_timeout);
-					http::async_write(_stream, _request, std::move(self));
+						tcp_of(stream).expires_after(_conf.write_timeout);
+					http::async_write(stream, _request, std::move(self));
 					return;
 				}
-				case 1: { // recv
+				case 1: {
 					_response = {};
 					state = 2;
 					if (_conf.read_timeout > std::chrono::milliseconds::zero())
-						_stream.expires_after(_conf.read_timeout);
-					http::async_read(_stream, _buffer, _response, std::move(self));
+						tcp_of(stream).expires_after(_conf.read_timeout);
+					http::async_read(stream, _buffer, _response, std::move(self));
 					return;
 				}
 				default:
@@ -119,6 +136,15 @@ protected:
 				state = 0;
 			},
 			token);
+	}
+
+	template <::boost::asio::completion_token_for<void(outcome_type)> CompletionToken>
+	auto async_submit_request(request_type req, CompletionToken&& token) {
+		_request = std::move(req);
+		_request.set(::boost::beast::http::field::host, _host_value);
+		return with_stream([&](auto& s) {
+			return do_submit(s, std::forward<CompletionToken>(token));
+		});
 	}
 };
 

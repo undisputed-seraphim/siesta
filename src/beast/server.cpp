@@ -55,8 +55,13 @@ void ServerBase::on_accept(const ec_t& ec, protocol::socket socket) {
 	if (ec) {
 		return fail("on_accept", ec);
 	}
-	ServerBase::stream_type stream(asio::make_strand(*_ctx));
-	stream.socket().assign(protocol::v4(), socket.release());
+	stream_type tcp(asio::make_strand(*_ctx));
+	tcp.socket().assign(protocol::v4(), socket.release());
+
+	any_stream stream = _conf.ssl_ctx
+		? any_stream{ssl_stream_type(std::move(tcp), *_conf.ssl_ctx)}
+		: any_stream{std::move(tcp)};
+
 	std::make_shared<Session>(*this, std::move(stream), _conf, _client_id++)->run();
 	_acceptor.async_accept(asio::make_strand(*_ctx), [this](const ec_t& ec, protocol::socket socket) {
 		on_accept(ec, std::move(socket));
@@ -65,7 +70,7 @@ void ServerBase::on_accept(const ec_t& ec, protocol::socket socket) {
 
 // Session
 
-ServerBase::Session::Session(ServerBase& parent, stream_type stream, Config config, uint64_t id)
+ServerBase::Session::Session(ServerBase& parent, any_stream stream, Config config, uint64_t id)
 	: _parent(parent)
 	, _stream(std::move(stream))
 	, _config(std::move(config))
@@ -74,9 +79,18 @@ ServerBase::Session::Session(ServerBase& parent, stream_type stream, Config conf
 ServerBase::Session::~Session() noexcept { do_close(); }
 
 void ServerBase::Session::run() {
-	asio::post(_stream.get_executor(), [self = shared_from_this()] {
-		self->do_read();
-	});
+	if (auto* ssl = std::get_if<ssl_stream_type>(&_stream)) {
+		tcp_of(*ssl).expires_after(std::chrono::seconds{30});
+		ssl->async_handshake(asio::ssl::stream_base::server,
+			[self = shared_from_this()](ec_t ec) {
+				if (ec) return fail("ssl_handshake", ec);
+				self->do_read();
+			});
+	} else {
+		asio::post(tcp_layer().get_executor(), [self = shared_from_this()] {
+			self->do_read();
+		});
+	}
 }
 
 std::string ServerBase::Session::rfc7231_date() {
@@ -96,12 +110,14 @@ void ServerBase::Session::do_read() {
 		parser_->body_limit(_config.max_body_size);
 	else
 		parser_->body_limit(boost::none);
-	auto timeout = _config.idle_timeout > std::chrono::milliseconds::zero()
-		? _config.idle_timeout : _config.read_timeout;
-	if (timeout > std::chrono::milliseconds::zero())
-		_stream.expires_after(timeout);
-	http::async_read(_stream, _buffer, *parser_, [self = shared_from_this()](ec_t ec, std::size_t bytes) {
-		self->on_read(ec, bytes);
+	with_stream([this](auto& s) {
+		auto timeout = _config.idle_timeout > std::chrono::milliseconds::zero()
+			? _config.idle_timeout : _config.read_timeout;
+		if (timeout > std::chrono::milliseconds::zero())
+			tcp_of(s).expires_after(timeout);
+		http::async_read(s, _buffer, *parser_, [self = shared_from_this()](ec_t ec, std::size_t bytes) {
+			self->on_read(ec, bytes);
+		});
 	});
 }
 
@@ -163,22 +179,23 @@ void ServerBase::Session::do_write() {
 	}
 	is_writing_ = true;
 	bool close = !response_queue_.front().keep_alive();
-	if (_config.write_timeout > std::chrono::milliseconds::zero())
-		_stream.expires_after(_config.write_timeout);
-	::boost::beast::async_write(_stream, std::move(response_queue_.front()),
-		[self = shared_from_this(), close](ec_t ec, std::size_t) {
-			self->response_queue_.pop();
-			if (ec || close) {
-				self->do_close();
-				return;
-			}
-			self->do_write();
-		});
+	with_stream([this, close](auto& s) {
+		if (_config.write_timeout > std::chrono::milliseconds::zero())
+			tcp_of(s).expires_after(_config.write_timeout);
+		::boost::beast::async_write(s, std::move(response_queue_.front()),
+			[self = shared_from_this(), close](ec_t ec, std::size_t) {
+				self->response_queue_.pop();
+				if (ec || close) {
+					self->do_close();
+					return;
+				}
+				self->do_write();
+			});
+	});
 }
 
 void ServerBase::Session::do_close() {
-	ec_t ec;
-	_stream.close();
+	tcp_layer().close();
 }
 
 namespace __detail {

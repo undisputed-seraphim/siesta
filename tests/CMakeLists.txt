@@ -128,6 +128,9 @@ add_executable(echo_beast_integration
 	"${CMAKE_CURRENT_SOURCE_DIR}/echo/test_beast_integration.cpp")
 target_link_libraries(echo_beast_integration PRIVATE echo_gen siesta::siesta Catch2::Catch2WithMain)
 target_compile_options(echo_beast_integration PRIVATE ${FLAGS_RELEASE})
+target_compile_definitions(echo_beast_integration PRIVATE
+	SIESTA_TEST_CERT_DIR="${SIESTA_CERT_DIR}")
+add_dependencies(echo_beast_integration siesta_test_certs)
 catch_discover_tests(echo_beast_integration)
 
 # ══════════════════════════════════════════════════════════════════

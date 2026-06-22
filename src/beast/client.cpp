@@ -16,7 +16,10 @@ ClientBase::ClientBase(::boost::asio::io_context& ctx, Config config)
 	, _conf(std::move(config))
 	, _strand(::boost::asio::make_strand(ctx))
 	, _resolver(_strand)
-	, _stream(_strand) {}
+	, _stream(_conf.ssl_ctx
+		? any_stream{ssl_stream_type(stream_type(_strand), *_conf.ssl_ctx)}
+		: any_stream{stream_type(_strand)})
+{}
 
 void ClientBase::start(const ::boost::asio::ip::address& address, uint16_t port) {
 	start(protocol::endpoint(address, port));
@@ -32,8 +35,8 @@ void ClientBase::on_resolve(const error_type& ec, protocol::resolver::results_ty
 	if (ec) {
 		return fail("on_resolve", ec);
 	}
-	_stream.expires_after(_conf.connect_timeout);
-	_stream.async_connect(results, [self = shared_from_this()](const error_type& ec, protocol::resolver::endpoint_type endpoint) {
+	tcp_layer().expires_after(_conf.connect_timeout);
+	tcp_layer().async_connect(results, [self = shared_from_this()](const error_type& ec, protocol::resolver::endpoint_type endpoint) {
 		self->on_connect(ec, endpoint);
 	});
 }
@@ -41,6 +44,13 @@ void ClientBase::on_resolve(const error_type& ec, protocol::resolver::results_ty
 void ClientBase::on_connect(const error_type& ec, protocol::resolver::endpoint_type endpoint) {
 	if (ec) {
 		return fail("on_connect", ec);
+	}
+	if (auto* ssl = std::get_if<ssl_stream_type>(&_stream)) {
+		tcp_layer().expires_after(_conf.connect_timeout);
+		ssl->async_handshake(::boost::asio::ssl::stream_base::client,
+			[self = shared_from_this()](const error_type& ec) {
+				if (ec) return fail("ssl_handshake", ec);
+			});
 	}
 }
 

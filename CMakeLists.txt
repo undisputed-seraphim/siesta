@@ -41,12 +41,13 @@ target_include_directories(siesta PUBLIC
 target_link_libraries(siesta PUBLIC
 	Boost::boost
 	Boost::json
+	siesta_ssl
 )
 
 include(CMakePackageConfigHelpers)
 include(GNUInstallDirs)
 
-install(TARGETS siesta EXPORT ${PROJECT_NAME}_Targets)
+install(TARGETS siesta siesta_ssl EXPORT ${PROJECT_NAME}_Targets)
 install(DIRECTORY include/ DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
 install(FILES cmake/SiestaGenerate.cmake DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${PROJECT_NAME}/cmake)
 write_basic_package_version_file("${PROJECT_NAME}ConfigVersion.cmake" VERSION ${PROJECT_VERSION} COMPATIBILITY SameMajorVersion)

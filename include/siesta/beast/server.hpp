@@ -6,6 +6,7 @@
 #include <boost/asio/ip/address.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/post.hpp>
+#include <boost/asio/ssl.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/asio/system_timer.hpp>
 #include <boost/beast/core.hpp>
@@ -15,12 +16,14 @@
 #include <boost/beast/http/message_generator.hpp>
 #include <boost/beast/http/parser.hpp>
 #include <boost/beast/http/read.hpp>
+#include <boost/beast/ssl.hpp>
 #include <ctime>
 #include <functional>
 #include <memory>
 #include <optional>
 #include <queue>
 #include <string>
+#include <variant>
 
 namespace siesta::beast {
 
@@ -32,6 +35,8 @@ public:
 	using ec_t = ::boost::system::error_code;
 	using strand_type = ::boost::asio::strand<::boost::asio::io_context::executor_type>;
 	using stream_type = ::boost::beast::basic_stream<protocol, strand_type>;
+	using ssl_stream_type = ::boost::beast::ssl_stream<stream_type>;
+	using any_stream = std::variant<stream_type, ssl_stream_type>;
 
 	struct Config {
 		std::chrono::milliseconds read_timeout{std::chrono::hours{1}};
@@ -43,16 +48,18 @@ public:
 		std::string cors_methods{"GET, POST, PUT, DELETE, PATCH, OPTIONS"};
 		std::string cors_headers{"Content-Type, Authorization"};
 		uint32_t cors_max_age{86400};
+		::boost::asio::ssl::context* ssl_ctx = nullptr;
 	};
 
 	class Session : public std::enable_shared_from_this<Session> {
 	public:
 		using Ptr = std::shared_ptr<Session>;
-		Session(ServerBase&, stream_type, Config, uint64_t);
+		Session(ServerBase&, any_stream, Config, uint64_t);
 		~Session() noexcept;
 
 		void run();
 		uint64_t id() const { return _id; }
+		bool is_tls() const { return std::holds_alternative<ssl_stream_type>(_stream); }
 
 		template <bool isRequest, class Body, class Fields>
 		void send(::boost::beast::http::message<isRequest, Body, Fields>&& msg) {
@@ -72,7 +79,7 @@ public:
 		static constexpr std::size_t max_responses_ = 64;
 
 		ServerBase& _parent;
-		stream_type _stream;
+		any_stream _stream;
 		::boost::beast::flat_buffer _buffer;
 		std::optional<::boost::beast::http::request_parser<::boost::beast::http::string_body>> parser_;
 		Config _config;
@@ -81,6 +88,18 @@ public:
 		std::queue<::boost::beast::http::message_generator> response_queue_;
 		bool is_writing_ = false;
 		bool should_close_ = false;
+
+		static stream_type& tcp_of(stream_type& s) { return s; }
+		static stream_type& tcp_of(ssl_stream_type& s) { return s.next_layer(); }
+
+		stream_type& tcp_layer() {
+			return std::visit([](auto& s) -> stream_type& { return tcp_of(s); }, _stream);
+		}
+
+		template <typename F>
+		decltype(auto) with_stream(F&& f) {
+			return std::visit(std::forward<F>(f), _stream);
+		}
 
 		void do_read();
 		void on_read(ec_t, std::size_t);

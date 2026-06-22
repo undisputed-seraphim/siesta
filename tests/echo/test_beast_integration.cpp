@@ -2,6 +2,7 @@
 #include "client.hpp"
 
 #include <boost/asio.hpp>
+#include <boost/asio/ssl.hpp>
 #include <boost/asio/use_future.hpp>
 #include <boost/json.hpp>
 #include <catch2/catch_test_macros.hpp>
@@ -699,6 +700,91 @@ TEST_CASE("responses include Date Server and CORS headers", "[integration][beast
 	REQUIRE(resp[http::field::server] == "test-siesta");
 	REQUIRE(!resp[http::field::date].empty());
 	REQUIRE(resp[http::field::access_control_allow_origin] == "*");
+
+	sock.close();
+	srv.shutdown();
+	srv_thread.join();
+}
+
+// ── TLS ─────────────────────────────────────────────────────────
+
+TEST_CASE("TLS echo round-trip", "[integration][beast][tls]") {
+	static constexpr uint16_t TLS_PORT = 19918;
+
+	boost::asio::ssl::context srv_ssl(boost::asio::ssl::context::tls_server);
+	srv_ssl.use_certificate_chain_file(SIESTA_TEST_CERT_DIR "/server.pem");
+	srv_ssl.use_private_key_file(SIESTA_TEST_CERT_DIR "/server.key", boost::asio::ssl::context::pem);
+
+	asio::io_context srv_ctx;
+	siesta::beast::ServerBase::Config conf;
+	conf.ssl_ctx = &srv_ssl;
+	conf.idle_timeout = std::chrono::milliseconds::zero();
+	conf.write_timeout = std::chrono::milliseconds::zero();
+	echo_testing::DefaultServer srv(srv_ctx, conf);
+	srv.start(TEST_ADDR, TLS_PORT);
+	std::thread srv_thread([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	boost::asio::ssl::context cli_ssl(boost::asio::ssl::context::tls_client);
+	cli_ssl.load_verify_file(SIESTA_TEST_CERT_DIR "/server.pem");
+
+	asio::io_context ctx;
+	siesta::beast::ClientBase::Config cli_conf;
+	cli_conf.ssl_ctx = &cli_ssl;
+	auto client = std::make_shared<Echo_API::Client>(ctx, cli_conf);
+	REQUIRE(client->is_tls());
+	client->start(TEST_ADDR, TLS_PORT);
+	ctx.run();
+
+	Echo_API::EchoResponse body;
+	body.message = "encrypted";
+	auto future = client->post__echo(body, asio::use_future);
+	ctx.restart();
+	ctx.run();
+	auto outcome = future.get();
+	REQUIRE(outcome.has_value());
+
+	auto jv = boost::json::parse(outcome.value().body());
+	auto result = boost::json::value_to<Echo_API::EchoResponse>(jv);
+	REQUIRE(result.message == "encrypted");
+
+	client->stop();
+	srv.shutdown();
+	srv_thread.join();
+}
+
+TEST_CASE("plain client on TLS server fails", "[integration][beast][tls]") {
+	static constexpr uint16_t TLS_PORT2 = 19919;
+
+	boost::asio::ssl::context srv_ssl(boost::asio::ssl::context::tls_server);
+	srv_ssl.use_certificate_chain_file(SIESTA_TEST_CERT_DIR "/server.pem");
+	srv_ssl.use_private_key_file(SIESTA_TEST_CERT_DIR "/server.key", boost::asio::ssl::context::pem);
+
+	asio::io_context srv_ctx;
+	siesta::beast::ServerBase::Config conf;
+	conf.ssl_ctx = &srv_ssl;
+	conf.idle_timeout = std::chrono::milliseconds::zero();
+	conf.write_timeout = std::chrono::milliseconds::zero();
+	echo_testing::DefaultServer srv(srv_ctx, conf);
+	srv.start(TEST_ADDR, TLS_PORT2);
+	std::thread srv_thread([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::ip::tcp::socket sock(srv_ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, TLS_PORT2));
+
+	http::request<http::string_body> req{http::verb::get, "/echo?message=hi", 11};
+	req.set(http::field::host, "localhost");
+	req.prepare_payload();
+
+	boost::system::error_code ec;
+	http::write(sock, req, ec);
+	if (!ec) {
+		boost::beast::flat_buffer buffer;
+		http::response<http::string_body> resp;
+		http::read(sock, buffer, resp, ec);
+	}
+	REQUIRE(ec);
 
 	sock.close();
 	srv.shutdown();
