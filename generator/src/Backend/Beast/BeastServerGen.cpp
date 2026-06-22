@@ -162,9 +162,9 @@ void BeastServerGenerator::emitServerCpp(std::ostream& out, const std::vector<En
 	}
 
 	out << "\t// 404 Not Found\n";
-	out << "\tauto& resp = session->get_response();\n";
-	out << "\tresp.result(http::status::not_found);\n";
-	out << "\tsession->write();\n";
+	out << "\thttp::response<http::string_body> resp{http::status::not_found, req.version()};\n";
+	out << "\tresp.prepare_payload();\n";
+	out << "\tsession->send(std::move(resp));\n";
 	out << "}\n";
 	out << "\n";
 	out << "} // namespace " << ns_ << "\n";

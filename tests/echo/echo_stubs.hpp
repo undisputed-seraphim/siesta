@@ -62,31 +62,31 @@ inline std::string url_decode(std::string_view sv) {
 struct DefaultServer : Echo_API::Server {
 	using Echo_API::Server::Server;
 
-	void reply_json(Session::Ptr session, std::string body) {
-		auto& resp = session->get_response();
-		resp.result(::boost::beast::http::status::ok);
+	void reply_json(const request& req, Session::Ptr session, std::string body) {
+		::boost::beast::http::response<::boost::beast::http::string_body> resp{
+			::boost::beast::http::status::ok, req.version()};
 		resp.body() = std::move(body);
 		resp.set(::boost::beast::http::field::content_type, "application/json");
 		resp.prepare_payload();
-		session->write();
+		session->send(std::move(resp));
 	}
 
-	void echo_body(const request req, Session::Ptr session) {
-		reply_json(std::move(session), std::string(req.body()));
+	void echo_body(const request& req, Session::Ptr session) {
+		reply_json(req, std::move(session), std::string(req.body()));
 	}
 
 	void get__echo(const request req, Session::Ptr session) override {
 		auto msg = extract_query_param(req.target(), "message");
-		reply_json(std::move(session), "{\"message\":\"" + msg + "\"}");
+		reply_json(req, std::move(session), "{\"message\":\"" + msg + "\"}");
 	}
 
 	void post__echo(const request req, Session::Ptr s) override { echo_body(req, std::move(s)); }
-	void get__echo__id(const request, Session::Ptr s) override { reply_json(std::move(s), "{}"); }
-	void delete__echo__id(const request, Session::Ptr s) override { reply_json(std::move(s), "{}"); }
-	void get__items(const request, Session::Ptr s) override { reply_json(std::move(s), "{\"id\":1,\"name\":\"stub\"}"); }
+	void get__echo__id(const request req, Session::Ptr s) override { reply_json(req, std::move(s), "{}"); }
+	void delete__echo__id(const request req, Session::Ptr s) override { reply_json(req, std::move(s), "{}"); }
+	void get__items(const request req, Session::Ptr s) override { reply_json(req, std::move(s), "{\"id\":1,\"name\":\"stub\"}"); }
 	void post__items(const request req, Session::Ptr s) override { echo_body(req, std::move(s)); }
-	void get__items_search(const request, Session::Ptr s) override { reply_json(std::move(s), "{}"); }
-	void get__items__itemId_tags__tagIndex(const request, Session::Ptr s) override { reply_json(std::move(s), "{}"); }
+	void get__items_search(const request req, Session::Ptr s) override { reply_json(req, std::move(s), "{}"); }
+	void get__items__itemId_tags__tagIndex(const request req, Session::Ptr s) override { reply_json(req, std::move(s), "{}"); }
 	void put__items__id(const request req, Session::Ptr s) override { echo_body(req, std::move(s)); }
 	void post__items_detailed(const request req, Session::Ptr s) override { echo_body(req, std::move(s)); }
 	void post__outcome(const request req, Session::Ptr s) override { echo_body(req, std::move(s)); }

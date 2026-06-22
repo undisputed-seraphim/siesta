@@ -9,11 +9,14 @@
 #include <boost/asio/strand.hpp>
 #include <boost/asio/system_timer.hpp>
 #include <boost/beast/core.hpp>
+#include <boost/beast/core/buffers_generator.hpp>
 #include <boost/beast/core/tcp_stream.hpp>
 #include <boost/beast/http.hpp>
+#include <boost/beast/http/message_generator.hpp>
 #include <boost/beast/http/read.hpp>
 #include <functional>
 #include <memory>
+#include <queue>
 
 namespace siesta::beast {
 
@@ -40,23 +43,30 @@ public:
 		void run();
 		uint64_t id() const { return _id; }
 
-		response& get_response() noexcept { return _response; }
-		void write();
+		template <bool isRequest, class Body, class Fields>
+		void send(::boost::beast::http::message<isRequest, Body, Fields>&& msg) {
+			response_queue_.push(::boost::beast::http::message_generator(std::move(msg)));
+			if (!is_writing_) do_write();
+		}
 
 	protected:
 		friend ServerBase;
+		static constexpr std::size_t max_responses_ = 64;
 
 		ServerBase& _parent;
 		stream_type _stream;
 		::boost::beast::flat_buffer _buffer;
 		request _request;
-		response _response;
 		Config _config;
 		uint64_t _id;
 
+		std::queue<::boost::beast::http::message_generator> response_queue_;
+		bool is_writing_ = false;
+		bool should_close_ = false;
+
 		void do_read();
 		void on_read(ec_t, std::size_t);
-		void on_write(ec_t, std::size_t);
+		void do_write();
 		void do_close();
 	};
 

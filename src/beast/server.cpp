@@ -73,15 +73,6 @@ void ServerBase::Session::run() {
 	});
 }
 
-void ServerBase::Session::write() {
-	_response.prepare_payload();
-	if (_config.write_timeout > std::chrono::milliseconds::zero())
-		_stream.expires_after(_config.write_timeout);
-	http::async_write(_stream, _response, [self = shared_from_this()](ec_t ec, std::size_t bytes) {
-		self->on_write(ec, bytes);
-	});
-}
-
 void ServerBase::Session::do_read() {
 	_request = {};
 	if (_config.read_timeout > std::chrono::milliseconds::zero())
@@ -91,21 +82,49 @@ void ServerBase::Session::do_read() {
 	});
 }
 
-void ServerBase::Session::on_read(ec_t ec, std::size_t bytes) {
+void ServerBase::Session::on_read(ec_t ec, std::size_t) {
 	if (ec == http::error::end_of_stream) {
-		return do_close();
+		should_close_ = true;
+		if (!is_writing_) do_close();
+		return;
 	}
 	if (ec) {
 		return fail("on_read", ec);
 	}
-	_parent.handle_request(std::move(_request), shared_from_this());
+
+	auto req = std::move(_request);
+
+	if (response_queue_.size() >= max_responses_) {
+		http::response<http::string_body> resp{http::status::too_many_requests, req.version()};
+		resp.keep_alive(false);
+		resp.prepare_payload();
+		send(std::move(resp));
+		return;
+	}
+
+	do_read();
+	_parent.handle_request(std::move(req), shared_from_this());
 }
 
-void ServerBase::Session::on_write(ec_t ec, std::size_t bytes) {
-	if (ec) {
-		return fail("on_write", ec);
+void ServerBase::Session::do_write() {
+	if (response_queue_.empty()) {
+		is_writing_ = false;
+		if (should_close_) do_close();
+		return;
 	}
-	do_read();
+	is_writing_ = true;
+	bool close = !response_queue_.front().keep_alive();
+	if (_config.write_timeout > std::chrono::milliseconds::zero())
+		_stream.expires_after(_config.write_timeout);
+	::boost::beast::async_write(_stream, std::move(response_queue_.front()),
+		[self = shared_from_this(), close](ec_t ec, std::size_t) {
+			self->response_queue_.pop();
+			if (ec || close) {
+				self->do_close();
+				return;
+			}
+			self->do_write();
+		});
 }
 
 void ServerBase::Session::do_close() {

@@ -23,12 +23,12 @@ struct StubServer : echo_testing::DefaultServer {
 
 	void get__echo__id(const request req, Session::Ptr session) override {
 		auto id_str = echo_testing::extract_path_segment(req.target(), 1);
-		reply_json(std::move(session), "{\"message\":\"" + id_str + "\"}");
+		reply_json(req, std::move(session), "{\"message\":\"" + id_str + "\"}");
 	}
 
 	void delete__echo__id(const request req, Session::Ptr session) override {
 		auto id_str = echo_testing::extract_path_segment(req.target(), 1);
-		reply_json(std::move(session), "{\"message\":\"deleted " + id_str + "\"}");
+		reply_json(req, std::move(session), "{\"message\":\"deleted " + id_str + "\"}");
 	}
 
 	void get__items(const request req, Session::Ptr session) override {
@@ -39,19 +39,19 @@ struct StubServer : echo_testing::DefaultServer {
 		obj["name"] = "test-item";
 		if (!limit_str.empty())  obj["description"] = "limit=" + limit_str;
 		if (!status_str.empty()) obj["description"] = "status=" + status_str;
-		reply_json(std::move(session), boost::json::serialize(obj));
+		reply_json(req, std::move(session), boost::json::serialize(obj));
 	}
 
 	void get__items_search(const request req, Session::Ptr session) override {
 		auto cat = echo_testing::extract_query_param(req.target(), "category");
 		auto q = echo_testing::extract_query_param(req.target(), "q");
-		reply_json(std::move(session), "{\"message\":\"cat=" + cat + ",q=" + q + "\"}");
+		reply_json(req, std::move(session), "{\"message\":\"cat=" + cat + ",q=" + q + "\"}");
 	}
 
 	void get__items__itemId_tags__tagIndex(const request req, Session::Ptr session) override {
 		auto itemId = echo_testing::extract_path_segment(req.target(), 1);
 		auto tagIndex = echo_testing::extract_path_segment(req.target(), 3);
-		reply_json(std::move(session), "{\"message\":\"" + itemId + ":" + tagIndex + "\"}");
+		reply_json(req, std::move(session), "{\"message\":\"" + itemId + ":" + tagIndex + "\"}");
 	}
 
 	void put__items__id(const request req, Session::Ptr session) override {
@@ -59,7 +59,7 @@ struct StubServer : echo_testing::DefaultServer {
 		auto jv = boost::json::parse(req.body());
 		auto item = boost::json::value_to<Echo_API::Item>(jv);
 		item.description = "updated:" + id_str;
-		reply_json(std::move(session), boost::json::serialize(boost::json::value_from(item)));
+		reply_json(req, std::move(session), boost::json::serialize(boost::json::value_from(item)));
 	}
 };
 

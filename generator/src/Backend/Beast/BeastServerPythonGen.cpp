@@ -72,8 +72,9 @@ void BeastServerPythonGenerator::emitServerPy(std::ostream& out, const std::vect
 	out << "}\n";
 	out << "\n";
 	out << "// Write a Python object as a JSON HTTP response\n";
-	out << "void write_json_response(const " << ns_ << "::Server::Session::Ptr& session, const nb::object& result) {\n";
-	out << "\tauto& resp = session->get_response();\n";
+	out << "void write_json_response(const " << ns_ << "::Server::Session::Ptr& session, unsigned version, const nb::object& result) {\n";
+	out << "\thttp::response<http::string_body> resp;\n";
+	out << "\tresp.version(version);\n";
 	out << "\ttry {\n";
 	out << "\t\tnb::object json_mod = nb::module_::import_(\"json\");\n";
 	out << "\t\tnb::str body = nb::cast<nb::str>(json_mod.attr(\"dumps\")(result));\n";
@@ -87,7 +88,7 @@ void BeastServerPythonGenerator::emitServerPy(std::ostream& out, const std::vect
 	out << "\t\tresp.set(http::field::content_type, \"application/json\");\n";
 	out << "\t\tresp.prepare_payload();\n";
 	out << "\t}\n";
-	out << "\tsession->write();\n";
+	out << "\tsession->send(std::move(resp));\n";
 	out << "}\n";
 	out << "\n";
 	out << "} // anonymous namespace\n";
@@ -127,21 +128,20 @@ void BeastServerPythonGenerator::emitServerPy(std::ostream& out, const std::vect
 		out << "\t\t\tif (nb_ticket.key.is_valid()) {\n";
 		out << "\t\t\t\ttry {\n";
 		out << "\t\t\t\t\tnb::object result = nb_trampoline.base().attr(nb_ticket.key)(request_to_dict(req));\n";
-		out << "\t\t\t\t\twrite_json_response(session, std::move(result));\n";
+		out << "\t\t\t\t\twrite_json_response(session, req.version(), std::move(result));\n";
 		out << "\t\t\t\t} catch (const std::exception& e) {\n";
-		out << "\t\t\t\t\tauto& resp = session->get_response();\n";
-		out << "\t\t\t\t\tresp.result(http::status::internal_server_error);\n";
+		out << "\t\t\t\t\thttp::response<http::string_body> resp{http::status::internal_server_error, req.version()};\n";
 		out << "\t\t\t\t\tresp.body() = std::string(\"{\\\"error\\\":\\\"\") + e.what() + \"\\\"}\";\n";
 		out << "\t\t\t\t\tresp.set(http::field::content_type, \"application/json\");\n";
 		out << "\t\t\t\t\tresp.prepare_payload();\n";
-		out << "\t\t\t\t\tsession->write();\n";
+		out << "\t\t\t\t\tsession->send(std::move(resp));\n";
 		out << "\t\t\t\t}\n";
 		out << "\t\t\t\treturn;\n";
 		out << "\t\t\t}\n";
 		out << "\t\t}\n";
-		out << "\t\tauto& resp = session->get_response();\n";
-		out << "\t\tresp.result(http::status::not_implemented);\n";
-		out << "\t\tsession->write();\n";
+		out << "\t\thttp::response<http::string_body> resp{http::status::not_implemented, req.version()};\n";
+		out << "\t\tresp.prepare_payload();\n";
+		out << "\t\tsession->send(std::move(resp));\n";
 		out << "\t}\n";
 		out << "\n";
 	}

@@ -18,7 +18,7 @@ struct EchoServer : echo_testing::DefaultServer {
 	void get__echo(const request req, Session::Ptr session) override {
 		auto msg = echo_testing::url_decode(
 			echo_testing::extract_query_param(req.target(), "message"));
-		reply_json(std::move(session), "{\"message\":\"" + msg + "\"}");
+		reply_json(req, std::move(session), "{\"message\":\"" + msg + "\"}");
 	}
 };
 
