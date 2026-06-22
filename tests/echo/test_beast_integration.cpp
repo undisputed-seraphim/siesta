@@ -515,3 +515,70 @@ TEST_CASE("no new connections after shutdown", "[integration][beast]") {
 	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, SHUTDOWN_PORT2), ec);
 	REQUIRE(ec);
 }
+
+// ── Body size limits ────────────────────────────────────────────
+
+TEST_CASE("oversized body returns 413", "[integration][beast]") {
+	static constexpr uint16_t LIMIT_PORT = 19913;
+
+	asio::io_context srv_ctx;
+	siesta::beast::ServerBase::Config conf;
+	conf.max_body_size = 100;
+	conf.read_timeout = std::chrono::milliseconds::zero();
+	conf.write_timeout = std::chrono::milliseconds::zero();
+	echo_testing::DefaultServer srv(srv_ctx, conf);
+	srv.start(TEST_ADDR, LIMIT_PORT);
+	std::thread srv_thread([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::ip::tcp::socket sock(srv_ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, LIMIT_PORT));
+
+	http::request<http::string_body> req{http::verb::post, "/echo", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::content_type, "application/json");
+	req.body() = std::string(200, 'x');
+	req.prepare_payload();
+	http::write(sock, req);
+
+	boost::beast::flat_buffer buffer;
+	http::response<http::string_body> resp;
+	http::read(sock, buffer, resp);
+
+	REQUIRE(resp.result() == http::status::payload_too_large);
+
+	sock.close();
+	srv.shutdown();
+	srv_thread.join();
+}
+
+TEST_CASE("body under limit succeeds", "[integration][beast]") {
+	static constexpr uint16_t LIMIT_PORT2 = 19914;
+
+	asio::io_context srv_ctx;
+	siesta::beast::ServerBase::Config conf;
+	conf.max_body_size = 1024;
+	conf.read_timeout = std::chrono::milliseconds::zero();
+	conf.write_timeout = std::chrono::milliseconds::zero();
+	echo_testing::DefaultServer srv(srv_ctx, conf);
+	srv.start(TEST_ADDR, LIMIT_PORT2);
+	std::thread srv_thread([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	auto client = std::make_shared<Echo_API::Client>(ctx);
+	client->start(TEST_ADDR, LIMIT_PORT2);
+	ctx.run();
+
+	Echo_API::EchoResponse body;
+	body.message = "small";
+	auto future = client->post__echo(body, asio::use_future);
+	ctx.restart();
+	ctx.run();
+	auto outcome = future.get();
+	REQUIRE(outcome.has_value());
+
+	client->stop();
+	srv.shutdown();
+	srv_thread.join();
+}

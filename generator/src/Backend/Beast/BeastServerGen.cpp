@@ -163,6 +163,8 @@ void BeastServerGenerator::emitServerCpp(std::ostream& out, const std::vector<En
 
 	out << "\t// 404 Not Found\n";
 	out << "\thttp::response<http::string_body> resp{http::status::not_found, req.version()};\n";
+	out << "\tresp.body() = \"{\\\"error\\\":\\\"not found\\\"}\";\n";
+	out << "\tresp.set(http::field::content_type, \"application/json\");\n";
 	out << "\tresp.prepare_payload();\n";
 	out << "\tsession->send(std::move(resp));\n";
 	out << "}\n";

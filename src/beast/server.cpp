@@ -84,10 +84,14 @@ void ServerBase::Session::do_read() {
 		do_close();
 		return;
 	}
-	_request = {};
+	parser_.emplace();
+	if (_config.max_body_size > 0)
+		parser_->body_limit(_config.max_body_size);
+	else
+		parser_->body_limit(boost::none);
 	if (_config.read_timeout > std::chrono::milliseconds::zero())
 		_stream.expires_after(_config.read_timeout);
-	http::async_read(_stream, _buffer, _request, [self = shared_from_this()](ec_t ec, std::size_t bytes) {
+	http::async_read(_stream, _buffer, *parser_, [self = shared_from_this()](ec_t ec, std::size_t bytes) {
 		self->on_read(ec, bytes);
 	});
 }
@@ -98,14 +102,28 @@ void ServerBase::Session::on_read(ec_t ec, std::size_t) {
 		if (!is_writing_) do_close();
 		return;
 	}
+	if (ec == http::error::body_limit) {
+		unsigned ver = parser_->get().version();
+		http::response<http::string_body> resp{http::status::payload_too_large, ver};
+		resp.body() = R"({"error":"request body too large"})";
+		resp.set(http::field::content_type, "application/json");
+		resp.keep_alive(false);
+		resp.prepare_payload();
+		send(std::move(resp));
+		parser_.reset();
+		return;
+	}
 	if (ec) {
 		return fail("on_read", ec);
 	}
 
-	auto req = std::move(_request);
+	auto req = parser_->release();
+	parser_.reset();
 
 	if (response_queue_.size() >= max_responses_) {
 		http::response<http::string_body> resp{http::status::too_many_requests, req.version()};
+		resp.body() = R"({"error":"too many requests"})";
+		resp.set(http::field::content_type, "application/json");
 		resp.keep_alive(false);
 		resp.prepare_payload();
 		send(std::move(resp));

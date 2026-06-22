@@ -13,9 +13,11 @@
 #include <boost/beast/core/tcp_stream.hpp>
 #include <boost/beast/http.hpp>
 #include <boost/beast/http/message_generator.hpp>
+#include <boost/beast/http/parser.hpp>
 #include <boost/beast/http/read.hpp>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <queue>
 
 namespace siesta::beast {
@@ -32,6 +34,7 @@ public:
 	struct Config {
 		std::chrono::milliseconds read_timeout{std::chrono::hours{1}};
 		std::chrono::milliseconds write_timeout{std::chrono::seconds{30}};
+		std::uint64_t max_body_size{1024 * 1024};
 	};
 
 	class Session : public std::enable_shared_from_this<Session> {
@@ -56,7 +59,7 @@ public:
 		ServerBase& _parent;
 		stream_type _stream;
 		::boost::beast::flat_buffer _buffer;
-		request _request;
+		std::optional<::boost::beast::http::request_parser<::boost::beast::http::string_body>> parser_;
 		Config _config;
 		uint64_t _id;
 
