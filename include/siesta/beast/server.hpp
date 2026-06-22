@@ -87,7 +87,9 @@ public:
 
 		std::queue<::boost::beast::http::message_generator> response_queue_;
 		bool is_writing_ = false;
-		bool should_close_ = false;
+
+		enum class CloseState : uint8_t { open, draining, closing };
+		CloseState close_state_ = CloseState::open;
 
 		static stream_type& tcp_of(stream_type& s) { return s; }
 		static stream_type& tcp_of(ssl_stream_type& s) { return s.next_layer(); }

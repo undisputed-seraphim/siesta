@@ -76,7 +76,10 @@ ServerBase::Session::Session(ServerBase& parent, any_stream stream, Config confi
 	, _config(std::move(config))
 	, _id(id) {}
 
-ServerBase::Session::~Session() noexcept { do_close(); }
+ServerBase::Session::~Session() noexcept {
+	ec_t ec;
+	tcp_layer().socket().close(ec);
+}
 
 void ServerBase::Session::run() {
 	if (auto* ssl = std::get_if<ssl_stream_type>(&_stream)) {
@@ -122,8 +125,8 @@ void ServerBase::Session::do_read() {
 }
 
 void ServerBase::Session::on_read(ec_t ec, std::size_t) {
-	if (ec == http::error::end_of_stream) {
-		should_close_ = true;
+	if (ec == http::error::end_of_stream || ec == asio::ssl::error::stream_truncated) {
+		close_state_ = CloseState::draining;
 		if (!is_writing_) do_close();
 		return;
 	}
@@ -174,7 +177,7 @@ void ServerBase::Session::on_read(ec_t ec, std::size_t) {
 void ServerBase::Session::do_write() {
 	if (response_queue_.empty()) {
 		is_writing_ = false;
-		if (should_close_ || _parent._shutting_down) do_close();
+		if (close_state_ == CloseState::draining || _parent._shutting_down) do_close();
 		return;
 	}
 	is_writing_ = true;
@@ -195,7 +198,17 @@ void ServerBase::Session::do_write() {
 }
 
 void ServerBase::Session::do_close() {
-	tcp_layer().close();
+	if (close_state_ == CloseState::closing) return;
+	close_state_ = CloseState::closing;
+
+	if (auto* ssl = std::get_if<ssl_stream_type>(&_stream)) {
+		tcp_of(*ssl).expires_after(std::chrono::seconds{30});
+		ssl->async_shutdown([self = shared_from_this()](ec_t ec) {
+			self->tcp_layer().close();
+		});
+	} else {
+		tcp_layer().close();
+	}
 }
 
 namespace __detail {

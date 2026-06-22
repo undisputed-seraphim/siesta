@@ -1,6 +1,7 @@
 #include "echo_stubs.hpp"
 
 #include <boost/asio.hpp>
+#include <boost/asio/ssl.hpp>
 #include <csignal>
 #include <cstdio>
 #include <iostream>
@@ -35,8 +36,18 @@ static void handle_signal(int) {
 #endif
 
 int main(int argc, char* argv[]) {
-	std::string host = argc > 1 ? argv[1] : "127.0.0.1";
-	uint16_t port = argc > 2 ? static_cast<uint16_t>(std::stoi(argv[2])) : 9900;
+	std::string host = "127.0.0.1";
+	uint16_t port = 9900;
+	bool use_tls = false;
+
+	int pos = 0;
+	for (int i = 1; i < argc; i++) {
+		std::string arg = argv[i];
+		if (arg == "--tls") { use_tls = true; continue; }
+		if (pos == 0) host = arg;
+		else if (pos == 1) port = static_cast<uint16_t>(std::stoi(arg));
+		++pos;
+	}
 
 #ifdef ENABLE_PROFILER
 	const char* profile_path = getenv("CPUPROFILE");
@@ -48,13 +59,22 @@ int main(int argc, char* argv[]) {
 #endif
 
 	asio::io_context ctx;
+	std::unique_ptr<asio::ssl::context> ssl;
+	if (use_tls) {
+		ssl = std::make_unique<asio::ssl::context>(asio::ssl::context::tls_server);
+		ssl->use_certificate_chain_file(SIESTA_TEST_CERT_DIR "/server.pem");
+		ssl->use_private_key_file(SIESTA_TEST_CERT_DIR "/server.key", asio::ssl::context::pem);
+	}
+
 	siesta::beast::ServerBase::Config conf;
 	conf.read_timeout = std::chrono::milliseconds::zero();
 	conf.write_timeout = std::chrono::milliseconds::zero();
 	conf.idle_timeout = std::chrono::milliseconds::zero();
+	if (use_tls) conf.ssl_ctx = ssl.get();
 	EchoServer server(ctx, conf);
 	server.start(asio::ip::make_address(host), port);
-	std::cout << "echo-server listening on " << host << ":" << port << std::endl;
+	std::cout << "echo-server listening on " << host << ":" << port
+	          << (use_tls ? " (TLS)" : "") << std::endl;
 	ctx.run();
 
 #ifdef ENABLE_PROFILER

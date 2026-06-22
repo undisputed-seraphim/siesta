@@ -2,6 +2,7 @@
 #include "client.hpp"
 
 #include <boost/asio.hpp>
+#include <boost/asio/ssl.hpp>
 #include <boost/beast/http.hpp>
 #include <algorithm>
 #include <atomic>
@@ -183,6 +184,7 @@ int main(int argc, char* argv[]) {
 	uint16_t port = 19920;
 	std::string host;
 	bool external = false;
+	bool use_tls = false;
 
 	for (int i = 1; i < argc; i++) {
 		std::string arg = argv[i];
@@ -199,6 +201,8 @@ int main(int argc, char* argv[]) {
 		else if (arg == "--host" && i + 1 < argc) {
 			host = argv[++i];
 			external = true;
+		} else if (arg == "--tls") {
+			use_tls = true;
 		} else if (arg == "--help" || arg == "-h") {
 			std::cout << "Usage: echo_beast_benchmark [OPTIONS]\n"
 			          << "  -n, --requests N     Total requests (default: 100000)\n"
@@ -206,13 +210,28 @@ int main(int argc, char* argv[]) {
 			          << "      --pipeline N     Pipeline depth per connection (0=sequential)\n"
 			          << "      --warmup N       Warmup requests per connection (default: 100)\n"
 			          << "      --host H         Connect to external server (skip embedded)\n"
-			          << "      --port P         Server port (default: 19920)\n";
+			          << "      --port P         Server port (default: 19920)\n"
+			          << "      --tls            Enable TLS (sequential mode only)\n";
 			return 0;
 		}
 	}
 
 	auto addr = asio::ip::make_address(external ? host : "127.0.0.1");
 	tcp::endpoint endpoint(addr, port);
+
+	if (use_tls && pipeline_depth > 0) {
+		std::cerr << "error: --tls is not supported with --pipeline\n";
+		return 1;
+	}
+
+	std::unique_ptr<asio::ssl::context> srv_ssl, cli_ssl;
+	if (use_tls) {
+		srv_ssl = std::make_unique<asio::ssl::context>(asio::ssl::context::tls_server);
+		srv_ssl->use_certificate_chain_file(SIESTA_TEST_CERT_DIR "/server.pem");
+		srv_ssl->use_private_key_file(SIESTA_TEST_CERT_DIR "/server.key", asio::ssl::context::pem);
+		cli_ssl = std::make_unique<asio::ssl::context>(asio::ssl::context::tls_client);
+		cli_ssl->load_verify_file(SIESTA_TEST_CERT_DIR "/server.pem");
+	}
 
 	asio::io_context server_ctx;
 	std::unique_ptr<echo_testing::DefaultServer> server;
@@ -223,6 +242,7 @@ int main(int argc, char* argv[]) {
 		srv_conf.read_timeout = std::chrono::milliseconds::zero();
 		srv_conf.write_timeout = std::chrono::milliseconds::zero();
 		srv_conf.idle_timeout = std::chrono::milliseconds::zero();
+		if (use_tls) srv_conf.ssl_ctx = srv_ssl.get();
 		server = std::make_unique<echo_testing::DefaultServer>(server_ctx, srv_conf);
 		server->start(addr, port);
 		server_thread = std::thread([&] { server_ctx.run(); });
@@ -293,6 +313,7 @@ int main(int argc, char* argv[]) {
 		siesta::beast::ClientBase::Config cli_conf;
 		cli_conf.read_timeout = std::chrono::milliseconds::zero();
 		cli_conf.write_timeout = std::chrono::milliseconds::zero();
+		if (use_tls) cli_conf.ssl_ctx = cli_ssl.get();
 
 		std::vector<std::shared_ptr<Echo_API::Client>> clients;
 		for (int i = 0; i < concurrency; i++) {

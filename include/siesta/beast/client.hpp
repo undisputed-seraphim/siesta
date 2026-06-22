@@ -58,6 +58,10 @@ public:
 
 	void stop() {
 		_resolver.cancel();
+		if (auto* ssl = std::get_if<ssl_stream_type>(&_stream)) {
+			error_type ec;
+			ssl->shutdown(ec);
+		}
 		tcp_layer().close();
 	}
 

@@ -94,22 +94,26 @@ add_executable(echo_beast_server ${BEAST_SERVER_SRC})
 target_link_libraries(echo_beast_server PRIVATE echo_gen)
 target_compile_options(echo_beast_server PRIVATE ${FLAGS_RELEASE})
 target_link_options(echo_beast_server PRIVATE ${LINK_FLAGS_RELEASE})
+target_compile_definitions(echo_beast_server PRIVATE SIESTA_TEST_CERT_DIR="${SIESTA_CERT_DIR}")
+add_dependencies(echo_beast_server siesta_test_certs)
 
 # -- echo_beast_server_prof (debug + profiling, optional) ----------
 find_library(PROFILER_LIB profiler)
 if(PROFILER_LIB)
 	add_executable(echo_beast_server_prof ${BEAST_SERVER_SRC})
 	target_link_libraries(echo_beast_server_prof PRIVATE echo_gen)
-	target_compile_definitions(echo_beast_server_prof PRIVATE ENABLE_PROFILER)
+	target_compile_definitions(echo_beast_server_prof PRIVATE ENABLE_PROFILER SIESTA_TEST_CERT_DIR="${SIESTA_CERT_DIR}")
 	target_compile_options(echo_beast_server_prof PRIVATE ${FLAGS_PROFILING})
 	target_link_options(echo_beast_server_prof PRIVATE ${LINK_FLAGS_PROFILING})
 	target_link_libraries(echo_beast_server_prof PRIVATE ${PROFILER_LIB})
+	add_dependencies(echo_beast_server_prof siesta_test_certs)
 
 	add_executable(echo_beast_server_prof_o2 ${BEAST_SERVER_SRC})
 	target_link_libraries(echo_beast_server_prof_o2 PRIVATE echo_gen)
-	target_compile_definitions(echo_beast_server_prof_o2 PRIVATE ENABLE_PROFILER)
+	target_compile_definitions(echo_beast_server_prof_o2 PRIVATE ENABLE_PROFILER SIESTA_TEST_CERT_DIR="${SIESTA_CERT_DIR}")
 	target_compile_options(echo_beast_server_prof_o2 PRIVATE -O2 -g -fno-omit-frame-pointer)
 	target_link_libraries(echo_beast_server_prof_o2 PRIVATE ${PROFILER_LIB})
+	add_dependencies(echo_beast_server_prof_o2 siesta_test_certs)
 else()
 	message(STATUS "gperftools not found — profiling targets disabled")
 endif()
@@ -119,6 +123,8 @@ add_executable(echo_beast_server_bench ${BEAST_SERVER_SRC})
 target_link_libraries(echo_beast_server_bench PRIVATE echo_gen)
 target_compile_options(echo_beast_server_bench PRIVATE ${FLAGS_BENCHMARK})
 target_link_options(echo_beast_server_bench PRIVATE ${LINK_FLAGS_BENCHMARK})
+target_compile_definitions(echo_beast_server_bench PRIVATE SIESTA_TEST_CERT_DIR="${SIESTA_CERT_DIR}")
+add_dependencies(echo_beast_server_bench siesta_test_certs)
 
 # ══════════════════════════════════════════════════════════════════
 #  Beast self-contained integration test (embedded server + client)
@@ -141,6 +147,8 @@ add_executable(echo_beast_benchmark
 	"${CMAKE_CURRENT_SOURCE_DIR}/echo/benchmark_beast.cpp")
 target_link_libraries(echo_beast_benchmark PRIVATE echo_gen siesta::siesta)
 target_compile_options(echo_beast_benchmark PRIVATE -O2 -DNDEBUG)
+target_compile_definitions(echo_beast_benchmark PRIVATE SIESTA_TEST_CERT_DIR="${SIESTA_CERT_DIR}")
+add_dependencies(echo_beast_benchmark siesta_test_certs)
 
 # ══════════════════════════════════════════════════════════════════
 #  Library unit tests

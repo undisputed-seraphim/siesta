@@ -87,8 +87,10 @@ build_target() {
 
 start_server() {
 	local server_bin="$1"
+	local tls_flag=""
+	if [[ "${TLS:-}" == "1" ]]; then tls_flag="--tls"; fi
 	log "starting echo server on ${SERVE}:${PORT}"
-	"$server_bin" "$SERVE" "$PORT" >/dev/null 2>&1 &
+	"$server_bin" "$SERVE" "$PORT" $tls_flag >/dev/null 2>&1 &
 	SRV_PID=$!
 
 	for _ in $(seq 1 10); do
@@ -105,9 +107,11 @@ start_server() {
 start_profiled_server() {
 	local server_bin="$1"
 	local prof_file="$2"
+	local tls_flag=""
+	if [[ "${TLS:-}" == "1" ]]; then tls_flag="--tls"; fi
 	log "starting profiled server on ${SERVE}:${PORT}"
 	CPUPROFILE="$prof_file" CPUPROFILE_FREQUENCY=500 \
-		"$server_bin" "$SERVE" "$PORT" >/dev/null 2>&1 &
+		"$server_bin" "$SERVE" "$PORT" $tls_flag >/dev/null 2>&1 &
 	SRV_PID=$!
 
 	for _ in $(seq 1 10); do
@@ -140,10 +144,12 @@ stop_server() {
 run_benchmark_traffic() {
 	local bench_bin="$BUILD/tests/echo_beast_benchmark"
 	require_binary "$bench_bin" echo_beast_benchmark
+	local tls_flag=""
+	if [[ "${TLS:-}" == "1" ]]; then tls_flag="--tls"; fi
 	"$bench_bin" \
 		--host "$SERVE" --port "$PORT" \
 		--requests "${REQUESTS}" --concurrency "${CONCURRENCY:-1}" \
-		--warmup 100
+		--warmup 100 $tls_flag
 }
 
 generate_profile_report() {
@@ -177,19 +183,24 @@ mode_server() {
 	local bin="$BUILD/tests/echo_beast_server"
 	build_target echo_beast_server
 	require_binary "$bin" echo_beast_server
+	local tls_flag=""
+	if [[ "${TLS:-}" == "1" ]]; then tls_flag="--tls"; fi
 	log "starting echo server on ${SERVE}:${PORT} (foreground)"
-	exec "$bin" "$SERVE" "$PORT"
+	exec "$bin" "$SERVE" "$PORT" $tls_flag
 }
 
 mode_bench() {
 	local bin="$BUILD/tests/echo_beast_benchmark"
 	build_target echo_beast_benchmark
 	require_binary "$bin" echo_beast_benchmark
+	local tls_flag=""
+	if [[ "${TLS:-}" == "1" ]]; then tls_flag="--tls"; fi
 	"$bin" \
 		--requests "${REQUESTS:-100000}" \
 		--concurrency "${CONCURRENCY:-1}" \
 		--warmup 100 \
-		--port "$PORT"
+		--port "$PORT" \
+		$tls_flag
 }
 
 run_profile() {
