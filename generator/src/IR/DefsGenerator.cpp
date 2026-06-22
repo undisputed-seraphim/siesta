@@ -418,9 +418,10 @@ void DefsGenerator::emitStruct(std::ostream& out, const schema::StructType& s) {
 		std::string type_name = cppTypeName(field.type);
 		out << "    " << type_name << " " << field.name;
 
-		// Default value
 		if (field.default_value) {
 			out << " = " << *field.default_value;
+		} else {
+			out << "{}";
 		}
 		out << ";\n";
 	}
