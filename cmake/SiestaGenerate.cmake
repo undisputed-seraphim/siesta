@@ -110,7 +110,7 @@ function(siesta_generate)
 
 	# Wire into user's target
 	target_include_directories(${SG_TARGET} PRIVATE "${_gen_dir}")
-	target_link_libraries(${SG_TARGET} PUBLIC ${_siesta_lib} ${SG_TARGET}_defs)
+	target_link_libraries(${SG_TARGET} PUBLIC ${_siesta_lib} ${SG_TARGET}_defs ZLIB::ZLIB)
 
 	if(SG_MODE STREQUAL "SERVER" OR SG_MODE STREQUAL "BOTH")
 		target_sources(${SG_TARGET} PRIVATE "${_gen_dir}/server.cpp")

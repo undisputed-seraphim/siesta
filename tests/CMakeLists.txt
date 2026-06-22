@@ -165,3 +165,14 @@ target_link_libraries(siesta_test
 	Catch2::Catch2WithMain
 )
 catch_discover_tests(siesta_test)
+
+# ══════════════════════════════════════════════════════════════════
+#  Consumer smoke test (dogfoods installed cmake packaging)
+# ══════════════════════════════════════════════════════════════════
+
+add_test(NAME consumer_smoke
+	COMMAND ${CMAKE_COMMAND}
+		-DBUILD_DIR=${CMAKE_BINARY_DIR}
+		-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/consumer
+		-P ${CMAKE_CURRENT_SOURCE_DIR}/consumer/run_test.cmake
+)

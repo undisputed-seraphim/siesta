@@ -1,6 +1,14 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
+
+# SSL/TLS — any OpenSSL-compatible library (LibreSSL, WolfSSL, BoringSSL).
+# Set OPENSSL_ROOT_DIR to point to an alternative provider's installation.
+find_dependency(OpenSSL)
+
+# Compression
+find_dependency(ZLIB)
+
 set(Boost_USE_STATIC_LIBS ON)
 set(Boost_USE_STATIC_RUNTIME ON)
 find_dependency(Boost 1.83 COMPONENTS json)
