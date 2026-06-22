@@ -13,6 +13,13 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION ON)
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake")
 
+option(SIESTA_ENABLE_ASAN "Enable AddressSanitizer" OFF)
+if(SIESTA_ENABLE_ASAN)
+	add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
+	add_link_options(-fsanitize=address)
+	set(CMAKE_INTERPROCEDURAL_OPTIMIZATION OFF)
+endif()
+
 find_package(Python 3.10 REQUIRED COMPONENTS Interpreter Development)
 find_package(nanobind 2.12 QUIET)
 

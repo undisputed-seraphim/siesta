@@ -53,6 +53,8 @@ Modes:
   --bench         C++ benchmark with embedded server (default: 100k req, 1 conn)
   --profile       CPU profile with -O0 server (line-level, 50k req)
   --profile-o2    CPU profile with -O2 server (function-level, 50k req)
+  --heap-profile  Heap allocation profile (50k req, gperftools tcmalloc)
+  --valgrind      Run short benchmark under valgrind memcheck (1k req)
   --server        start server in foreground (manual testing)
   --load          Python load test only (assumes server running)
 
@@ -235,6 +237,86 @@ mode_load() {
 		--warmup 50
 }
 
+mode_heap_profile() {
+	local bin="$BUILD/tests/echo_beast_server"
+	build_target echo_beast_server
+	require_binary "$bin" echo_beast_server
+	: "${REQUESTS:=50000}"
+
+	local prof_dir="$SCRIPT_DIR/load_test/profiles"
+	rm -rf "$prof_dir"
+	mkdir -p "$prof_dir"
+
+	local tls_flag=""
+	if [[ "${TLS:-}" == "1" ]]; then tls_flag="--tls"; fi
+
+	local tcmalloc_lib
+	tcmalloc_lib=$(find /usr/lib -name 'libtcmalloc.so.4' 2>/dev/null | head -1)
+	if [[ -z "$tcmalloc_lib" ]]; then
+		fail "libtcmalloc.so.4 not found — install libgoogle-perftools-dev"
+		return 1
+	fi
+
+	log "starting heap-profiled server on ${SERVE}:${PORT}"
+	LD_PRELOAD="$tcmalloc_lib" \
+		HEAPPROFILE="$prof_dir/heap" \
+		HEAP_PROFILE_ALLOCATION_INTERVAL=$((512*1024)) \
+		"$bin" "$SERVE" "$PORT" $tls_flag 2>"$prof_dir/heap_stderr.log" &
+	SRV_PID=$!
+
+	for _ in $(seq 1 10); do
+		if python3 -c "import socket; s=socket.socket(); s.settimeout(1); s.connect(('${SERVE}',${PORT})); s.close()" 2>/dev/null; then
+			break
+		fi
+		sleep 0.3
+	done
+
+	run_benchmark_traffic
+	stop_server
+
+	local latest_heap
+	latest_heap=$(ls -t "$prof_dir"/heap.*.heap 2>/dev/null | head -1)
+	if [[ -z "$latest_heap" ]]; then
+		info "no heap profile data found"
+		cat "$prof_dir/heap_stderr.log" 2>/dev/null
+		return
+	fi
+
+	log "generating heap profile reports"
+	google-pprof --text "$bin" "$latest_heap" \
+		> "$prof_dir/heap_text.txt" 2>/dev/null
+	google-pprof --text "$bin" "$latest_heap" \
+		2>/dev/null | head -30 > "$prof_dir/heap_top.txt"
+	echo ""
+	info "Heap profile — top 15 allocation sites:"
+	head -16 "$prof_dir/heap_top.txt"
+	echo ""
+	info "Full report: $prof_dir/heap_text.txt"
+	info "Heap dumps: $(ls "$prof_dir"/heap.*.heap 2>/dev/null | wc -l) snapshots"
+}
+
+mode_valgrind() {
+	local bin="$BUILD/tests/echo_beast_benchmark"
+	build_target echo_beast_benchmark
+	require_binary "$bin" echo_beast_benchmark
+
+	local tls_flag=""
+	if [[ "${TLS:-}" == "1" ]]; then tls_flag="--tls"; fi
+
+	log "running valgrind memcheck (${REQUESTS:-1000} requests)"
+	valgrind \
+		--leak-check=full \
+		--show-leak-kinds=all \
+		--track-origins=yes \
+		--error-exitcode=1 \
+		"$bin" \
+		--requests "${REQUESTS:-1000}" \
+		--concurrency 1 \
+		--warmup 10 \
+		--port "$PORT" \
+		$tls_flag
+}
+
 # ── Main ───────────────────────────────────────────────────────
 
 case "${1:-}" in
@@ -243,6 +325,8 @@ case "${1:-}" in
 	--bench)        mode_bench ;;
 	--profile)      mode_profile ;;
 	--profile-o2)   mode_profile_o2 ;;
+	--heap-profile) mode_heap_profile ;;
+	--valgrind)     mode_valgrind ;;
 	--load)         mode_load ;;
 	"")             usage ;;
 	*)              echo "Unknown flag: $1"; usage ;;
