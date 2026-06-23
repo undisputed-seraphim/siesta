@@ -52,6 +52,7 @@ struct Endpoint {
 	std::string body_content_type;
 	AuthType auth_type = AuthType::None;
 	std::string auth_header_name;
+	bool is_websocket = false;
 };
 
 // --- Shared helpers used during endpoint parsing ---

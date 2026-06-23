@@ -283,6 +283,7 @@ void BeastClientGenerator::generateClientHpp(std::ostream& out, const std::vecto
 	emitClassHeader(out);
 
 	for (const auto& ep : endpoints) {
+		if (ep.is_websocket) continue;
 		emitEndpoint(out, ep);
 	}
 

@@ -18,6 +18,7 @@
 #include <boost/beast/http/parser.hpp>
 #include <boost/beast/http/read.hpp>
 #include <boost/beast/ssl.hpp>
+#include <boost/beast/websocket.hpp>
 #include <concepts>
 #include <ctime>
 #include <functional>
@@ -65,6 +66,30 @@ public:
 		uint64_t id() const { return _id; }
 		bool is_tls() const { return std::holds_alternative<ssl_stream_type>(_stream); }
 
+		template <typename Handler>
+		void upgrade_to_websocket(const request& req, Handler&& handler) {
+			using namespace ::boost::beast;
+			ws_ = std::make_unique<websocket::stream<stream_type&>>(tcp_layer());
+			ws_->set_option(websocket::stream_base::timeout::suggested(role_type::server));
+			auto req_c = req;
+			req_c.set(::boost::beast::http::field::host,
+				req[::boost::beast::http::field::host]);
+			req_c.set(::boost::beast::http::field::upgrade, "websocket");
+			req_c.set(::boost::beast::http::field::connection, "upgrade");
+			::boost::asio::defer(*_parent._ctx,
+				[self = shared_from_this(), req_c = std::move(req_c),
+				 h = std::forward<Handler>(handler)]() mutable {
+					ec_t ec;
+					self->ws_->accept(req_c, ec);
+					if (ec) return;
+					::boost::asio::post(self->tcp_layer().get_executor(),
+						[self, req_c = std::move(req_c),
+						 h = std::move(h)]() mutable {
+							h(*self->ws_, std::move(req_c), self);
+						});
+				});
+		}
+
 		template <class Body, class Fields>
 		void send(::boost::beast::http::response<Body, Fields>&& msg) {
 			if (!_config.server_name.empty())
@@ -108,6 +133,8 @@ public:
 		State state_ = State::reading;
 		bool accepts_gzip_ = false;
 		bool head_request_ = false;
+
+		std::unique_ptr<::boost::beast::websocket::stream<stream_type&>> ws_;
 
 		static stream_type& tcp_of(stream_type& s) { return s; }
 		static stream_type& tcp_of(ssl_stream_type& s) { return s.next_layer(); }

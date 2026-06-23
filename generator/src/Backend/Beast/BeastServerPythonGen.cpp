@@ -120,6 +120,7 @@ void BeastServerPythonGenerator::emitServerPy(std::ostream& out, const std::vect
 	out << "\n";
 
 	for (const auto& ep : endpoints) {
+		if (ep.is_websocket) continue;
 		if (!ep.summary.empty()) {
 			write_multiline_comment(out, ep.summary, "\t");
 		}

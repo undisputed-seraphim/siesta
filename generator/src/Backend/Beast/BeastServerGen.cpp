@@ -39,6 +39,7 @@ void BeastServerGenerator::emitServerHpp(std::ostream& out, const std::vector<En
 	out << "#include <boost/asio/ip/tcp.hpp>\n";
 	out << "#include <boost/beast/core.hpp>\n";
 	out << "#include <boost/beast/http.hpp>\n";
+	out << "#include <boost/beast/websocket.hpp>\n";
 	out << "#include <functional>\n";
 	out << "#include <memory>\n";
 	out << "#include <string>\n";
@@ -60,6 +61,18 @@ void BeastServerGenerator::emitServerHpp(std::ostream& out, const std::vector<En
 	out << "\n";
 
 	for (const auto& ep : endpoints) {
+		if (ep.is_websocket) {
+			if (!ep.summary.empty()) {
+				write_multiline_comment(out, ep.summary, "\t");
+			}
+			out << "\tvirtual void " << ep.function_name << "(\n";
+			out << "\t\t::boost::beast::websocket::stream<\n";
+			out << "\t\t\t::siesta::beast::ServerBase::stream_type&>& ws,\n";
+			out << "\t\tconst request,\n";
+			out << "\t\tSession::Ptr) = 0;\n";
+			out << "\n";
+			continue;
+		}
 		if (!ep.summary.empty()) {
 			write_multiline_comment(out, ep.summary, "\t");
 		}
@@ -91,6 +104,7 @@ void BeastServerGenerator::emitServerCpp(std::ostream& out, const std::vector<En
 	std::vector<const Endpoint*> static_eps;
 	std::vector<const Endpoint*> param_eps;
 	for (const auto& ep : endpoints) {
+		if (ep.is_websocket) continue;
 		if (ep.path_template.find("{}") != std::string::npos) {
 			param_eps.push_back(&ep);
 		} else {
@@ -152,6 +166,27 @@ void BeastServerGenerator::emitServerCpp(std::ostream& out, const std::vector<En
 	out << "\tif (auto q = target.find('?'); q != std::string_view::npos) target = target.substr(0, q);\n";
 	out << "\tconst auto method = req.method();\n";
 	out << "\n";
+
+	// WebSocket upgrade dispatch
+	auto ws_endpoints = std::vector<const Endpoint*>();
+	for (const auto& ep : endpoints) {
+		if (ep.is_websocket) ws_endpoints.push_back(&ep);
+	}
+	if (!ws_endpoints.empty()) {
+		out << "\t// WebSocket upgrade\n";
+		out << "\tif (::boost::beast::websocket::is_upgrade(req)) {\n";
+		for (const auto* ep : ws_endpoints) {
+			out << "\t\tif (target == \"" << escapeCppString(ep->path) << "\"sv) {\n";
+			out << "\t\t\tsession->upgrade_to_websocket(req,\n";
+			out << "\t\t\t\t[this](auto& ws, const request& req, auto session) {\n";
+			out << "\t\t\t\t\t" << ep->function_name << "(ws, req, std::move(session));\n";
+			out << "\t\t\t\t});\n";
+			out << "\t\t\treturn;\n";
+			out << "\t\t}\n";
+		}
+		out << "\t}\n";
+		out << "\n";
+	}
 
 	if (!static_eps.empty()) {
 		out << "\tif (auto it = STATIC_PATHS.find({target, method}); it != STATIC_PATHS.end()) {\n";

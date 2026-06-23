@@ -4,6 +4,7 @@
 #include <boost/asio.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/asio/use_future.hpp>
+#include <boost/beast/websocket.hpp>
 #include <boost/json.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
@@ -17,6 +18,7 @@
 
 namespace asio = boost::asio;
 namespace http = boost::beast::http;
+namespace beast = boost::beast;
 
 static constexpr uint16_t TEST_PORT = 19910;
 static const auto TEST_ADDR = asio::ip::make_address("127.0.0.1");
@@ -935,6 +937,58 @@ TEST_CASE("no compression without Accept-Encoding", "[integration][beast]") {
 	REQUIRE(result.message == "plain");
 
 	sock.close();
+	srv.shutdown();
+	srv_thread.join();
+}
+
+// ── WebSocket ────────────────────────────────────────────────────
+
+TEST_CASE("websocket echo round-trip", "[integration][beast]") {
+	static constexpr uint16_t WS_PORT = 19922;
+
+	asio::io_context srv_ctx;
+	siesta::beast::ServerBase::Config conf;
+	conf.idle_timeout = std::chrono::milliseconds::zero();
+	conf.write_timeout = std::chrono::milliseconds::zero();
+	echo_testing::DefaultServer srv(srv_ctx, conf);
+	srv.start(TEST_ADDR, WS_PORT);
+	std::thread srv_thread([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	asio::ip::tcp::socket sock(ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, WS_PORT));
+
+	beast::websocket::stream<asio::ip::tcp::socket> ws(std::move(sock));
+	ws.handshake("localhost", "/ws/echo");
+
+	// Small text message
+	ws.write(asio::buffer(std::string("hello")));
+	beast::flat_buffer buf;
+	ws.read(buf);
+	REQUIRE(ws.got_text());
+	REQUIRE(beast::buffers_to_string(buf.data()) == "hello");
+
+	// Larger payload
+	std::string big(4096, 'x');
+	ws.write(asio::buffer(big));
+	buf.clear();
+	ws.read(buf);
+	REQUIRE(ws.got_text());
+	REQUIRE(beast::buffers_to_string(buf.data()) == big);
+
+	// Multiple rounds
+	for (int i = 0; i < 5; i++) {
+		auto msg = "round_" + std::to_string(i);
+		ws.write(asio::buffer(msg));
+		buf.clear();
+		ws.read(buf);
+		REQUIRE(ws.got_text());
+		REQUIRE(beast::buffers_to_string(buf.data()) == msg);
+	}
+
+	boost::system::error_code ec;
+	ws.close(beast::websocket::close_code::normal, ec);
 	srv.shutdown();
 	srv_thread.join();
 }

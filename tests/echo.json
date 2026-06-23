@@ -9,6 +9,9 @@
     { "url": "http://localhost:8002/v1" }
   ],
   "paths": {
+    "/ws/echo": {
+      "x-websocket": true
+    },
     "/echo": {
       "get": {
         "description": "Returns the 'message' to the caller",

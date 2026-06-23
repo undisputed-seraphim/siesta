@@ -85,53 +85,67 @@ std::vector<Endpoint> parseEndpoints(const openapi::v3::OpenAPIv3& spec) {
 	for (const auto& [path_sv, path_obj] : paths) {
 		std::string path(path_sv);
 
-		// Path-level parameters
-		auto path_params_list = path_obj.parameters();
-		for (const auto& param : path_params_list) {
-			ClientParam cp = resolveParameter(param, fetched_params);
-			path_params_map[cp.name] = cp;
-		}
-
-		// Operations
-		auto path_ops = path_obj.operations();
-		for (const auto& [method_sv, op_obj] : path_ops) {
+		if (path_obj.HasKey("x-websocket")) {
 			ColOp co;
 			co.path = path;
-			co.method = std::string(method_sv);
-			try {
-				auto sum = op_obj.summary();
-				if (!sum.empty()) co.summary = std::string(sum);
-				auto desc = op_obj.description();
-				if (!desc.empty()) co.description = std::string(desc);
-			} catch (...) {}
+			co.method = "ws";
+			collected.push_back(std::move(co));
+			continue;
+		}
 
-			auto op_params_list = op_obj.parameters();
-			for (const auto& param : op_params_list) {
-				co.op_params.push_back(resolveParameter(param, fetched_params));
+		// Path-level parameters
+		try {
+			auto path_params_list = path_obj.parameters();
+			for (const auto& param : path_params_list) {
+				ClientParam cp = resolveParameter(param, fetched_params);
+				path_params_map[cp.name] = cp;
 			}
+		} catch (...) {}
 
-			auto req_body = op_obj.requestBody();
-			if (req_body) {
-				co.hasRequestBody = true;
-				auto ref_opt = req_body.TryGetRef();
-				if (ref_opt.has_value()) {
-					co.bodyRef.is_ref = true;
-					co.bodyRef.ref_comp = refComponentName(ref_opt.value());
-				} else {
-					auto content = req_body.content();
-					for (const auto& [ct, mt] : content) {
-						co.bodyContentType = std::string(ct);
-						auto schema = mt.schema();
-						if (schema) co.bodyType = schemaToCppType(schema);
-						if (co.bodyType.empty()) co.bodyType = "std::string";
-						break;
+		// Operations
+		try {
+			auto path_ops = path_obj.operations();
+			for (const auto& [method_sv, op_obj] : path_ops) {
+				ColOp co;
+				co.path = path;
+				co.method = std::string(method_sv);
+				try {
+					auto sum = op_obj.summary();
+					if (!sum.empty()) co.summary = std::string(sum);
+					auto desc = op_obj.description();
+					if (!desc.empty()) co.description = std::string(desc);
+				} catch (...) {}
+
+				auto op_params_list = op_obj.parameters();
+				for (const auto& param : op_params_list) {
+					co.op_params.push_back(resolveParameter(param, fetched_params));
+				}
+
+				auto req_body = op_obj.requestBody();
+				if (req_body) {
+					co.hasRequestBody = true;
+					auto ref_opt = req_body.TryGetRef();
+					if (ref_opt.has_value()) {
+						co.bodyRef.is_ref = true;
+						co.bodyRef.ref_comp = refComponentName(ref_opt.value());
+					} else {
+						auto content = req_body.content();
+						for (const auto& [ct, mt] : content) {
+							co.bodyContentType = std::string(ct);
+							auto schema = mt.schema();
+							if (schema) co.bodyType = schemaToCppType(schema);
+							if (co.bodyType.empty()) co.bodyType = "std::string";
+							break;
+						}
 					}
 				}
+
+				try { co.hasOpSecurity = op_obj.HasKey("security"); } catch (...) {}
+
+				collected.push_back(std::move(co));
 			}
-
-			try { co.hasOpSecurity = op_obj.HasKey("security"); } catch (...) {}
-
-			collected.push_back(std::move(co));
+		} catch (...) {
+			// Path has no recognizable HTTP operations (e.g. x-websocket only)
 		}
 	}
 
@@ -139,6 +153,22 @@ std::vector<Endpoint> parseEndpoints(const openapi::v3::OpenAPIv3& spec) {
 	for (auto& co : collected) {
 		std::string method = co.method;
 		std::transform(method.begin(), method.end(), method.begin(), ::tolower);
+
+		if (method == "ws") {
+			Endpoint ep;
+			ep.is_websocket = true;
+			ep.method = "ws";
+			ep.path = co.path;
+			std::string fn = "handle_ws";
+			for (char c : co.path) {
+				if (c == '/' || c == '-' || c == '.') fn += '_';
+				else if (c == '{' || c == '}') {}
+				else fn += c;
+			}
+			ep.function_name = std::move(fn);
+			endpoints.push_back(std::move(ep));
+			continue;
+		}
 
 		if (!isSupportedMethod(method)) continue;
 

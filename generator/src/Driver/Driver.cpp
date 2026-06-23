@@ -68,6 +68,9 @@ static int parsePaths(const openapi::v3::OpenAPIv3& spec, schema::NormalizedAST&
 
 	for (const auto& [path_sv, path_obj] : spec.paths()) {
 		std::string path(path_sv);
+
+		if (path_obj.HasKey("x-websocket")) continue;
+
 		auto path_ops = path_obj.operations();
 
 		for (const auto& [method_sv, op_obj] : path_ops) {

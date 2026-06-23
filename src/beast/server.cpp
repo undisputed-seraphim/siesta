@@ -77,6 +77,7 @@ ServerBase::Session::Session(ServerBase& parent, any_stream stream, Config confi
 	, _id(id) {}
 
 ServerBase::Session::~Session() noexcept {
+	ws_.reset();
 	ec_t ec;
 	tcp_layer().socket().close(ec);
 }
@@ -175,7 +176,7 @@ void ServerBase::Session::start_read_loop() {
 					[[fallthrough]];
 
 				case Phase::init:
-					if (_parent._shutting_down) {
+					if (_parent._shutting_down || ws_) {
 						self.complete({});
 						return;
 					}
@@ -201,6 +202,7 @@ void ServerBase::Session::start_read_loop() {
 }
 
 void ServerBase::Session::on_read_done(ec_t) {
+	if (ws_) return;
 	if (state_ == State::active)
 		state_ = State::draining;
 	else
@@ -235,7 +237,13 @@ void ServerBase::Session::do_close() {
 	if (state_ == State::closing) return;
 	state_ = State::closing;
 
-	if (auto* ssl = std::get_if<ssl_stream_type>(&_stream)) {
+	if (ws_) {
+		ws_->async_close(::boost::beast::websocket::close_code::normal,
+			[self = shared_from_this()](ec_t ec) {
+				self->tcp_layer().close();
+				self->state_ = State::closed;
+			});
+	} else if (auto* ssl = std::get_if<ssl_stream_type>(&_stream)) {
 		tcp_of(*ssl).expires_after(std::chrono::seconds{30});
 		ssl->async_shutdown([self = shared_from_this()](ec_t ec) {
 			self->tcp_layer().close();

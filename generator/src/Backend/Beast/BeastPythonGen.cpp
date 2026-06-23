@@ -224,6 +224,7 @@ void BeastPythonGenerator::emitModuleBody(std::ostream& out, const std::vector<E
 	out << "\t\t.def(\"stop\", &ClientWrapper::stop)\n";
 
 	for (size_t i = 0; i < endpoints.size(); ++i) {
+		if (endpoints[i].is_websocket) continue;
 		out << "\n";
 		emitEndpointWrapper(out, endpoints[i], i == endpoints.size() - 1);
 	}

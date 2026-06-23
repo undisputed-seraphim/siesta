@@ -150,6 +150,36 @@ struct DefaultServer : Echo_API::Server {
 		}, outcome);
 		reply_json(req, std::move(s), boost::json::serialize(boost::json::value_from(outcome)));
 	}
+
+	void handle_ws_ws_echo(
+		::boost::beast::websocket::stream<
+			::siesta::beast::ServerBase::stream_type&>& ws,
+		const request req,
+		Session::Ptr session) override {
+		struct Echo : std::enable_shared_from_this<Echo> {
+			::boost::beast::websocket::stream<
+				::siesta::beast::ServerBase::stream_type&>* w;
+			::boost::beast::flat_buffer buf;
+			Session::Ptr session;
+			Echo(decltype(w) w_, decltype(buf) b, decltype(session) s)
+				: w(w_), buf(std::move(b)), session(std::move(s)) {}
+			void start() {
+				w->async_read(buf,
+					[self = shared_from_this()](ec_t ec, std::size_t) {
+						if (ec) return;
+						self->w->text(self->w->got_text());
+						self->w->async_write(self->buf.data(),
+							[self](ec_t ec, std::size_t) {
+								if (ec) return;
+								self->buf.clear();
+								self->start();
+							});
+					});
+			}
+		};
+		auto e = std::make_shared<Echo>(&ws, ::boost::beast::flat_buffer{}, session);
+		e->start();
+	}
 };
 
 } // namespace echo_testing
