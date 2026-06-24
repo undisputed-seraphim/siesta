@@ -172,7 +172,8 @@ void BeastClientGenerator::emitQueryParams(std::ostream& out, const std::vector<
 
 void BeastClientGenerator::emitRequestBody(std::ostream& out, const Endpoint& ep) {
 	if (!ep.has_request_body) return;
-	out << "\t\treq.body() = boost::json::serialize(boost::json::value_from(body));\n";
+	out << "\t\tauto sp = json_storage();\n";
+	out << "\t\treq.body() = boost::json::serialize(boost::json::value_from(body, sp));\n";
 	out << "\t\treq.set(::boost::beast::http::field::content_type, \"" << ep.body_content_type << "\");\n";
 	out << "\t\treq.prepare_payload();\n";
 }

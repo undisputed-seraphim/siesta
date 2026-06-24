@@ -176,6 +176,8 @@ void ServerBase::Session::start_read_loop() {
 					[[fallthrough]];
 
 				case Phase::init:
+					json_pool_ = ::boost::json::make_shared_resource<
+						::boost::json::monotonic_resource>(4096);
 					if (_parent._shutting_down || ws_) {
 						self.complete({});
 						return;

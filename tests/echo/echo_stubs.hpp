@@ -90,24 +90,26 @@ struct DefaultServer : Echo_API::Server {
 	void get__items(const request req, Session::Ptr s) override {
 		auto limit_str = extract_query_param(req.target(), "limit");
 		int limit = limit_str.empty() ? 3 : std::stoi(limit_str);
-		boost::json::array arr;
+		auto sp = s->json_storage();
+		boost::json::array arr(sp);
 		for (int i = 0; i < limit; i++) {
 			Echo_API::Item item;
 			item.id = i;
 			item.name = "item_" + std::to_string(i);
 			item.tags = std::vector<std::string>{"tag_a", "tag_b"};
 			item.status = Echo_API::ItemStatus::active;
-			arr.push_back(boost::json::value_from(item));
+			arr.push_back(boost::json::value_from(item, sp));
 		}
 		reply_json(req, std::move(s), boost::json::serialize(arr));
 	}
 
 	void post__items(const request req, Session::Ptr s) override {
-		auto jv = boost::json::parse(req.body());
+		auto sp = s->json_storage();
+		auto jv = boost::json::parse(req.body(), sp);
 		auto item = boost::json::value_to<Echo_API::Item>(jv);
 		item.name = "processed:" + item.name;
 		item.tags.push_back("server-added");
-		reply_json(req, std::move(s), boost::json::serialize(boost::json::value_from(item)));
+		reply_json(req, std::move(s), boost::json::serialize(boost::json::value_from(item, sp)));
 	}
 
 	void get__items_search(const request req, Session::Ptr s) override {
@@ -124,22 +126,25 @@ struct DefaultServer : Echo_API::Server {
 
 	void put__items__id(const request req, Session::Ptr s) override {
 		auto id = extract_path_segment(req.target(), 1);
-		auto jv = boost::json::parse(req.body());
+		auto sp = s->json_storage();
+		auto jv = boost::json::parse(req.body(), sp);
 		auto item = boost::json::value_to<Echo_API::Item>(jv);
 		item.description = "updated:" + id;
-		reply_json(req, std::move(s), boost::json::serialize(boost::json::value_from(item)));
+		reply_json(req, std::move(s), boost::json::serialize(boost::json::value_from(item, sp)));
 	}
 
 	void post__items_detailed(const request req, Session::Ptr s) override {
-		auto jv = boost::json::parse(req.body());
+		auto sp = s->json_storage();
+		auto jv = boost::json::parse(req.body(), sp);
 		auto item = boost::json::value_to<Echo_API::DetailedItem>(jv);
 		item.detail = "processed:" + item.detail;
 		item.rating += 1.0;
-		reply_json(req, std::move(s), boost::json::serialize(boost::json::value_from(item)));
+		reply_json(req, std::move(s), boost::json::serialize(boost::json::value_from(item, sp)));
 	}
 
 	void post__outcome(const request req, Session::Ptr s) override {
-		auto jv = boost::json::parse(req.body());
+		auto sp = s->json_storage();
+		auto jv = boost::json::parse(req.body(), sp);
 		auto outcome = boost::json::value_to<Echo_API::Outcome>(jv);
 		std::visit([](auto& alt) {
 			using T = std::decay_t<decltype(alt)>;
@@ -148,7 +153,7 @@ struct DefaultServer : Echo_API::Server {
 			else if constexpr (std::is_same_v<T, Echo_API::Error>)
 				alt.message = "visited:" + alt.message;
 		}, outcome);
-		reply_json(req, std::move(s), boost::json::serialize(boost::json::value_from(outcome)));
+		reply_json(req, std::move(s), boost::json::serialize(boost::json::value_from(outcome, sp)));
 	}
 
 	void handle_ws_ws_echo(

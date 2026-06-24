@@ -20,6 +20,14 @@ if(NOT rc EQUAL 0)
 	message(FATAL_ERROR "Install failed:\n${out}\n${err}")
 endif()
 
+# Propagate sanitizer flags from parent build
+file(STRINGS "${BUILD_DIR}/CMakeCache.txt" _asan_line REGEX "^SIESTA_ENABLE_ASAN:BOOL=ON$")
+set(_extra_args "")
+if(_asan_line)
+	list(APPEND _extra_args "-DCMAKE_CXX_FLAGS=-fsanitize=address")
+	list(APPEND _extra_args "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address")
+endif()
+
 # Step 2: Configure consumer project
 file(REMOVE_RECURSE "${CONSUMER_BUILD}")
 execute_process(
@@ -28,6 +36,7 @@ execute_process(
 		-S "${SOURCE_DIR}"
 		-DCMAKE_PREFIX_PATH=${INSTALL_PREFIX}
 		-DCMAKE_BUILD_TYPE=Release
+		${_extra_args}
 		-GNinja
 	RESULT_VARIABLE rc
 	OUTPUT_VARIABLE out

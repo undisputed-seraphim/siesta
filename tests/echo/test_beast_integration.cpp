@@ -39,7 +39,8 @@ struct StubServer : echo_testing::DefaultServer {
 	void get__items(const request req, Session::Ptr session) override {
 		auto limit_str = echo_testing::extract_query_param(req.target(), "limit");
 		auto status_str = echo_testing::extract_query_param(req.target(), "status");
-		boost::json::object obj;
+		auto sp = session->json_storage();
+		boost::json::object obj(sp);
 		obj["id"] = 1;
 		obj["name"] = "test-item";
 		if (!limit_str.empty())  obj["description"] = "limit=" + limit_str;
@@ -61,10 +62,11 @@ struct StubServer : echo_testing::DefaultServer {
 
 	void put__items__id(const request req, Session::Ptr session) override {
 		auto id_str = echo_testing::extract_path_segment(req.target(), 1);
-		auto jv = boost::json::parse(req.body());
+		auto sp = session->json_storage();
+		auto jv = boost::json::parse(req.body(), sp);
 		auto item = boost::json::value_to<Echo_API::Item>(jv);
 		item.description = "updated:" + id_str;
-		reply_json(req, std::move(session), boost::json::serialize(boost::json::value_from(item)));
+		reply_json(req, std::move(session), boost::json::serialize(boost::json::value_from(item, sp)));
 	}
 };
 

@@ -37,6 +37,7 @@ struct Runner : std::enable_shared_from_this<Runner> {
 	std::vector<double> latencies;
 	bench_clock::time_point req_start;
 	std::function<void()> on_done;
+	std::function<void(Echo_API::Client&, std::function<void()>)> call;
 
 	void start() {
 		latencies.reserve(remaining);
@@ -50,13 +51,12 @@ struct Runner : std::enable_shared_from_this<Runner> {
 		}
 		--remaining;
 		req_start = bench_clock::now();
-		client->get__echo("benchmark_payload", std::nullopt,
-			[self = shared_from_this()](auto) {
-				auto us = std::chrono::duration_cast<std::chrono::microseconds>(
-					bench_clock::now() - self->req_start).count();
-				self->latencies.push_back(static_cast<double>(us));
-				self->send_next();
-			});
+		call(*client, [self = shared_from_this()] {
+			auto us = std::chrono::duration_cast<std::chrono::microseconds>(
+				bench_clock::now() - self->req_start).count();
+			self->latencies.push_back(static_cast<double>(us));
+			self->send_next();
+		});
 	}
 };
 
@@ -147,7 +147,7 @@ static std::string format_rps(double rps) {
 }
 
 static void print_results(const std::vector<double>& all_latencies, double wall_s,
-                          int concurrency, int pipeline_depth) {
+                          int concurrency, int pipeline_depth, std::string_view mode) {
 	int ok = static_cast<int>(all_latencies.size());
 	double rps = ok / wall_s;
 
@@ -159,6 +159,7 @@ static void print_results(const std::vector<double>& all_latencies, double wall_
 	};
 
 	std::cout << "Beast Benchmark";
+	if (!mode.empty()) std::cout << " [" << mode << "]";
 	if (pipeline_depth > 0) std::cout << " (pipeline depth: " << pipeline_depth << ")";
 	std::cout << "\n";
 	std::cout << "════════════════════════════════════════\n";
@@ -176,6 +177,61 @@ static void print_results(const std::vector<double>& all_latencies, double wall_
 	std::cout << "════════════════════════════════════════\n";
 }
 
+static std::function<void(Echo_API::Client&, std::function<void()>)>
+make_echo_callable() {
+	return [](Echo_API::Client& c, std::function<void()> done) {
+		c.get__echo("benchmark_payload", std::nullopt,
+			[d = std::move(done)](auto) mutable { d(); });
+	};
+}
+
+static std::function<void(Echo_API::Client&, std::function<void()>)>
+make_post_item_callable() {
+	auto item = Echo_API::Item{};
+	item.id = 42;
+	item.name = "benchmark_item";
+	item.description = "A benchmark item with tags and status";
+	item.tags = {"cpp", "benchmark", "performance"};
+	item.status = Echo_API::ItemStatus::active;
+	return [item](Echo_API::Client& c, std::function<void()> done) {
+		c.post__items(item,
+			[d = std::move(done)](auto) mutable { d(); });
+	};
+}
+
+static std::function<void(Echo_API::Client&, std::function<void()>)>
+make_post_detailed_callable() {
+	auto item = Echo_API::DetailedItem{};
+	item.id = 7;
+	item.name = "benchmark_detailed";
+	item.description = "A detailed benchmark item";
+	item.tags = {"cpp", "benchmark", "allof"};
+	item.status = Echo_API::ItemStatus::active;
+	item.detail = "detailed benchmark payload";
+	item.rating = 4.5;
+	return [item](Echo_API::Client& c, std::function<void()> done) {
+		c.post__items_detailed(item,
+			[d = std::move(done)](auto) mutable { d(); });
+	};
+}
+
+static std::function<void(Echo_API::Client&, std::function<void()>)>
+make_post_outcome_callable() {
+	auto outcome = Echo_API::Outcome{Echo_API::EchoResponse{"benchmark_variant"}};
+	return [outcome](Echo_API::Client& c, std::function<void()> done) {
+		c.post__outcome(outcome,
+			[d = std::move(done)](auto) mutable { d(); });
+	};
+}
+
+static std::function<void(Echo_API::Client&, std::function<void()>)>
+make_callable_for_mode(std::string_view mode) {
+	if (mode == "post-item")     return make_post_item_callable();
+	if (mode == "post-detailed") return make_post_detailed_callable();
+	if (mode == "post-outcome")  return make_post_outcome_callable();
+	return make_echo_callable();
+}
+
 int main(int argc, char* argv[]) {
 	int total_requests = 100'000;
 	int concurrency = 1;
@@ -183,6 +239,7 @@ int main(int argc, char* argv[]) {
 	int pipeline_depth = 0;
 	uint16_t port = 19920;
 	std::string host;
+	std::string mode = "echo";
 	bool external = false;
 	bool use_tls = false;
 
@@ -203,12 +260,19 @@ int main(int argc, char* argv[]) {
 			external = true;
 		} else if (arg == "--tls") {
 			use_tls = true;
+		} else if (arg == "--mode" && i + 1 < argc) {
+			mode = argv[++i];
 		} else if (arg == "--help" || arg == "-h") {
 			std::cout << "Usage: echo_beast_benchmark [OPTIONS]\n"
 			          << "  -n, --requests N     Total requests (default: 100000)\n"
 			          << "  -c, --concurrency C  Persistent connections (default: 1)\n"
 			          << "      --pipeline N     Pipeline depth per connection (0=sequential)\n"
 			          << "      --warmup N       Warmup requests per connection (default: 100)\n"
+			          << "      --mode M         Benchmark mode:\n"
+			          << "                         echo          GET /echo (string concat)\n"
+			          << "                         post-item     POST /items (parse+value_to+serialize)\n"
+			          << "                         post-detailed POST /items/detailed (allOf inheritance)\n"
+			          << "                         post-outcome  POST /outcome (variant dispatch)\n"
 			          << "      --host H         Connect to external server (skip embedded)\n"
 			          << "      --port P         Server port (default: 19920)\n"
 			          << "      --tls            Enable TLS (sequential mode only)\n";
@@ -256,6 +320,7 @@ int main(int argc, char* argv[]) {
 	std::signal(SIGTERM, sigint_handler);
 
 	if (pipeline_depth > 0) {
+		// Pipelined mode always uses GET /echo — unaffected by --mode
 		std::vector<std::shared_ptr<PipelinedRunner>> runners;
 		int per_conn = total_requests / concurrency;
 		int remainder = total_requests % concurrency;
@@ -306,10 +371,12 @@ int main(int argc, char* argv[]) {
 		for (auto& r : runners)
 			all_latencies.insert(all_latencies.end(), r->latencies.begin(), r->latencies.end());
 		std::sort(all_latencies.begin(), all_latencies.end());
-		print_results(all_latencies, wall_s, concurrency, pipeline_depth);
+		print_results(all_latencies, wall_s, concurrency, pipeline_depth, mode);
 
 		for (auto& r : runners) r->socket.close();
 	} else {
+		auto call = make_callable_for_mode(mode);
+
 		siesta::beast::ClientBase::Config cli_conf;
 		cli_conf.read_timeout = std::chrono::milliseconds::zero();
 		cli_conf.write_timeout = std::chrono::milliseconds::zero();
@@ -332,6 +399,7 @@ int main(int argc, char* argv[]) {
 				auto r = std::make_shared<Runner>();
 				r->client = clients[i];
 				r->remaining = warmup;
+				r->call = call;
 				r->on_done = [&] { if (++warm_done == concurrency) client_ctx.stop(); };
 				warm_runners.push_back(r);
 			}
@@ -345,6 +413,7 @@ int main(int argc, char* argv[]) {
 
 		std::cerr << "  running " << total_requests << " requests over "
 		          << concurrency << " connection" << (concurrency > 1 ? "s" : "")
+		          << " [" << mode << "]"
 		          << (external ? " (external " + host + ":" + std::to_string(port) + ")" : "")
 		          << " ... " << std::flush;
 
@@ -354,6 +423,7 @@ int main(int argc, char* argv[]) {
 		for (int i = 0; i < concurrency; i++) {
 			auto r = std::make_shared<Runner>();
 			r->client = clients[i];
+			r->call = call;
 			r->remaining = per_client + (i < remainder ? 1 : 0);
 			r->on_done = [&] { if (++done_count == concurrency) client_ctx.stop(); };
 			runners.push_back(r);
@@ -370,7 +440,7 @@ int main(int argc, char* argv[]) {
 		for (auto& r : runners)
 			all_latencies.insert(all_latencies.end(), r->latencies.begin(), r->latencies.end());
 		std::sort(all_latencies.begin(), all_latencies.end());
-		print_results(all_latencies, wall_s, concurrency, pipeline_depth);
+		print_results(all_latencies, wall_s, concurrency, pipeline_depth, mode);
 	}
 
 	if (!external) {

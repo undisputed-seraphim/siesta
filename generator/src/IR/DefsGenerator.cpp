@@ -609,13 +609,14 @@ void DefsGenerator::emitMapAlias(std::ostream& out, const std::string& name, con
 void DefsGenerator::emitStructSerialization(std::ostream& out, const schema::StructType& s) {
 	// to_json (value_from)
 	out << "void tag_invoke(boost::json::value_from_tag, boost::json::value& jv, const " << s.name << "& v) {\n";
-	out << "    boost::json::object obj;\n";
+	out << "    auto sp = jv.storage();\n";
+	out << "    boost::json::object obj(sp);\n";
 
 	// Serialize base classes first
 	if (!s.allOf_bases.empty()) {
 		for (const auto& base : s.allOf_bases) {
 			out << "    { \n        auto base_jv = boost::json::value_from(static_cast<const " << cppTypeName(base)
-				<< "&>(v));\n";
+				<< "&>(v), sp);\n";
 			out << "        auto base_obj = base_jv.get_object();\n";
 			out << "        for (auto& [key, val] : base_obj) {\n";
 			out << "            obj[key] = val;\n";
@@ -626,7 +627,7 @@ void DefsGenerator::emitStructSerialization(std::ostream& out, const schema::Str
 
 	// Serialize fields
 	for (const auto& field : s.fields) {
-		out << "    obj[\"" << field.name << "\"] = boost::json::value_from(v." << field.name << ");\n";
+		out << "    obj[\"" << field.name << "\"] = boost::json::value_from(v." << field.name << ", sp);\n";
 	}
 
 	out << "    jv = std::move(obj);\n";
@@ -687,8 +688,9 @@ void DefsGenerator::emitVariantSerialization(std::ostream& out, const schema::Va
 
 	// to_json
 	out << "void tag_invoke(boost::json::value_from_tag, boost::json::value& jv, const " << v.name << "& val) {\n";
+	out << "    auto sp = jv.storage();\n";
 	out << "    std::visit([&](const auto& inner) {\n";
-	out << "        jv = boost::json::value_from(inner);\n";
+	out << "        jv = boost::json::value_from(inner, sp);\n";
 	out << "    }, val);\n";
 	out << "}\n\n";
 

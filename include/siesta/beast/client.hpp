@@ -10,6 +10,7 @@
 #include <boost/beast/http.hpp>
 #include <boost/beast/ssl.hpp>
 #include <boost/json.hpp>
+#include <boost/json/monotonic_resource.hpp>
 #include <boost/outcome/std_outcome.hpp>
 #include <cstring>
 #include <functional>
@@ -56,6 +57,13 @@ public:
 	::boost::asio::io_context& context() { return _ctx; }
 	bool is_tls() const { return std::holds_alternative<ssl_stream_type>(_stream); }
 
+	// Per-request JSON arena — shared between request serialization
+	// and response parsing. Reset at start of async_submit_request.
+	// Do not hold references across async boundaries.
+	::boost::json::storage_ptr json_storage() {
+		return _json_pool_;
+	}
+
 	void stop() {
 		_resolver.cancel();
 		if (auto* ssl = std::get_if<ssl_stream_type>(&_stream)) {
@@ -77,7 +85,8 @@ protected:
 
 	std::string _host_value;
 
-	std::array<unsigned char, 1024 + 256 + 128> _json_buffer;
+	::boost::json::storage_ptr _json_pool_{
+		::boost::json::make_shared_resource<::boost::json::monotonic_resource>(4096)};
 
 	static stream_type& tcp_of(stream_type& s) { return s; }
 	static stream_type& tcp_of(ssl_stream_type& s) { return s.next_layer(); }
@@ -97,9 +106,8 @@ protected:
 	template <typename T>
 		requires ::boost::json::has_value_to<T>::value
 	void extract_object(response_type& resp, T& t) {
-		namespace json = ::boost::json;
-		json::monotonic_resource json_rsc(_json_buffer.data(), _json_buffer.size());
-		t = T(json::value_to<T>(json::parse(resp.body(), &json_rsc)));
+		t = T(::boost::json::value_to<T>(
+			::boost::json::parse(resp.body(), _json_pool_)));
 	}
 
 	template <typename Stream, ::boost::asio::completion_token_for<void(outcome_type)> CompletionToken>
@@ -146,6 +154,8 @@ protected:
 	auto async_submit_request(request_type req, CompletionToken&& token) {
 		_request = std::move(req);
 		_request.set(::boost::beast::http::field::host, _host_value);
+		_json_pool_ = ::boost::json::make_shared_resource<
+			::boost::json::monotonic_resource>(4096);
 		return with_stream([&](auto& s) {
 			return do_submit(s, std::forward<CompletionToken>(token));
 		});

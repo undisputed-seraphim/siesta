@@ -19,6 +19,7 @@
 #include <boost/beast/http/read.hpp>
 #include <boost/beast/ssl.hpp>
 #include <boost/beast/websocket.hpp>
+#include <boost/json/monotonic_resource.hpp>
 #include <concepts>
 #include <ctime>
 #include <functional>
@@ -65,6 +66,14 @@ public:
 		void run();
 		uint64_t id() const { return _id; }
 		bool is_tls() const { return std::holds_alternative<ssl_stream_type>(_stream); }
+
+		// Per-request JSON arena — created fresh each request so
+		// pool memory from one handler never overlaps the next.
+		// Handler code MUST NOT stash boost::json::value references
+		// beyond the handler return; the pool is released afterward.
+		::boost::json::storage_ptr json_storage() {
+			return json_pool_;
+		}
 
 		template <typename Handler>
 		void upgrade_to_websocket(const request& req, Handler&& handler) {
@@ -133,6 +142,9 @@ public:
 		State state_ = State::reading;
 		bool accepts_gzip_ = false;
 		bool head_request_ = false;
+
+		::boost::json::storage_ptr json_pool_{
+			::boost::json::make_shared_resource<::boost::json::monotonic_resource>(4096)};
 
 		std::unique_ptr<::boost::beast::websocket::stream<stream_type&>> ws_;
 
