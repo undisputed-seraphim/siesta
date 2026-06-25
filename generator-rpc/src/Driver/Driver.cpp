@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: Apache-2.0
-/// RPC generator driver — materialises simdjson data then processes.
-/// simdjson dom iterators are single-pass; all extraction must happen
-/// in one sweep.  Materialise methods + schemas into plain C++ structs,
-/// then parse types, build deps, and sort.
 
 #include "Driver.hpp"
 
 #include "Frontend/AST.hpp"
 #include "Frontend/SchemaParser.hpp"
 #include "Frontend/OpenRPC/openrpc.hpp"
+#include "Frontend/Proto/Parser.hpp"
+#include "Frontend/Proto/ProtoBridge.hpp"
 #include "IR/DependencyGraph.hpp"
 #include "IR/RPCIR.hpp"
 #include "Support/Utils.hpp"
 #include "Backend/Mock/MockBackend.hpp"
 
 #include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 
 using codegen::sanitize;
 using codegen::escapeCppString;
@@ -25,7 +25,37 @@ namespace fs = std::filesystem;
 
 namespace driver {
 
-// ── Phase 1: Parse component schemas into NormalizedAST ─────────
+// ══════════════════════════════════════════════════════════════════════
+//  Shared phases: deps + sort + mock dump
+// ══════════════════════════════════════════════════════════════════════
+
+static void runDebugPipeline(
+	schema::NormalizedAST& ast,
+	const std::vector<codegen::rpc::RPCMethod>& methods) {
+
+	auto dep_graph = analysis::DependencyGraph::buildFromAST(ast);
+	auto order = analysis::sortTypes(ast);
+	if (order.has_cycles) {
+		std::cerr << "Error: Circular dependencies detected\n";
+		for (auto& cycle : order.cycles) {
+			std::cerr << "  Cycle:";
+			for (auto& t : cycle) std::cerr << " " << t;
+			std::cerr << "\n";
+		}
+	}
+
+	int notifications = 0;
+	for (auto& m : methods) if (m.is_notification) notifications++;
+
+	std::cout << "  Methods: " << methods.size()
+	          << " (" << notifications << " notifications)\n";
+	std::cout << "Phase 4: Mock backend debug output.\n";
+	backend::mock::debug_print(ast, methods);
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  OpenRPC path (existing)
+// ══════════════════════════════════════════════════════════════════════
 
 static void parseComponentSchemas(
 	const std::vector<std::pair<std::string, openrpc::JsonSchema>>& schemas,
@@ -51,10 +81,6 @@ static void parseComponentSchemas(
 	std::cout << "  Component schemas: " << struct_count << " types\n";
 }
 
-// ── Phase 2: Materialise methods from simdjson into plain IR ────
-// All simdjson DOM access happens here, in one sweep.  The result
-// is plain C++ structs with no simdjson references.
-
 static std::vector<codegen::rpc::RPCMethod> materialiseMethods(
 	const openrpc::Methods& methods) {
 
@@ -64,14 +90,11 @@ static std::vector<codegen::rpc::RPCMethod> materialiseMethods(
 
 	std::vector<RPCMethod> result;
 
-	// simdjson dom objects + arrays are single-pass.  Iterate each
-	// method's keys in document order via raw dom::object, sub-arrays
-	// via raw dom::array — never reuse a wrapper that has been consumed.
-	const simdjson::dom::array& arr = methods;  // ListAdaptor IS a dom::array
+	const simdjson::dom::array& arr = methods;
 	for (auto method_elem : arr) {
 		simdjson::dom::object method_obj(method_elem);
 		RPCMethod rm;
-		rm.is_notification = true;   // default: absent result
+		rm.is_notification = true;
 
 		for (auto [key, val] : method_obj) {
 			if (key == "name")
@@ -107,7 +130,6 @@ static std::vector<codegen::rpc::RPCMethod> materialiseMethods(
 				}
 			} else if (key == "result") {
 				rm.is_notification = false;
-				// result can be a ContentDescriptor or a Reference ($ref)
 				simdjson::dom::object rs_obj(val);
 				auto ref = rs_obj.at_key("$ref");
 				if (openapi::__detail::simdjson_noerror(ref)) {
@@ -117,12 +139,10 @@ static std::vector<codegen::rpc::RPCMethod> materialiseMethods(
 						cpath = cpath.substr(sizeof("contentDescriptors/") - 1);
 					rm.result_type.name = cpath;
 				} else {
-					// Inline ContentDescriptor
 					openrpc::ContentDescriptor rs(val);
 					auto schema = rs.schema();
-					if (schema.IsRef()) {
+					if (schema.IsRef())
 						rm.result_type.name = sanitize(component_path(schema.ref()));
-					}
 				}
 			} else if (key == "errors") {
 				for (auto e_elem : simdjson::dom::array(val)) {
@@ -141,17 +161,14 @@ static std::vector<codegen::rpc::RPCMethod> materialiseMethods(
 	return result;
 }
 
-// ── Main entry point ────────────────────────────────────────────
-
 bool generateFromOpenRPC(const fs::path& input_path,
-                          const fs::path& output_path) {
+                          const fs::path& /*output_path*/) {
 	openrpc::OpenRPC spec;
 	if (!spec.Load(input_path.string())) {
 		std::cerr << "Failed to load " << input_path << "\n";
 		return false;
 	}
 
-	// Phase 0: Materialise simdjson DOM → plain C++ containers.
 	std::cout << "Phase 0: Materialising simdjson...\n";
 
 	auto methods_raw = spec.methods();
@@ -165,32 +182,57 @@ bool generateFromOpenRPC(const fs::path& input_path,
 	std::cout << "  Schemas: " << schemas_vec.size()
 	          << ", Methods: " << methods_vec.size() << "\n";
 
-	// Phase 1: Parse component schemas into NormalizedAST
 	schema::NormalizedAST ast;
 	std::cout << "Phase 1: Parsing component schemas...\n";
 	parseComponentSchemas(schemas_vec, ast);
 
-	// Phase 2: Dependency graph
 	std::cout << "Phase 2: Building dependency graph...\n";
-	auto dep_graph = analysis::DependencyGraph::buildFromAST(ast);
-
-	// Phase 3: Topological sort
 	std::cout << "Phase 3: Topological sort...\n";
-	auto order = analysis::sortTypes(ast);
-	if (order.has_cycles) {
-		std::cerr << "Error: Circular dependencies detected\n";
+
+	runDebugPipeline(ast, methods_vec);
+	return true;
+}
+
+// ══════════════════════════════════════════════════════════════════════
+//  Proto path (new)
+// ══════════════════════════════════════════════════════════════════════
+
+bool generateFromProto(const fs::path& input_path,
+                        const fs::path& /*output_path*/) {
+	std::ifstream in(input_path);
+	if (!in) {
+		std::cerr << "Failed to open " << input_path << "\n";
 		return false;
 	}
 
-	// Phase 4: Mock backend debug output
-	int notifications = 0;
-	for (const auto& m : methods_vec)
-		if (m.is_notification) notifications++;
+	std::ostringstream oss;
+	oss << in.rdbuf();
+	auto source = oss.str();
 
-	std::cout << "  Methods: " << methods_vec.size()
-	          << " (" << notifications << " notifications)\n";
-	std::cout << "Phase 4: Mock backend debug output.\n";
-	backend::mock::debug_print(ast, methods_vec);
+	std::cout << "Phase 0: Parsing proto3 source...\n";
+	auto result = siesta::protobuf::parse_proto(source);
+	if (!result.ok) {
+		std::cerr << result.error << "\n";
+		return false;
+	}
+
+	auto& pf = result.file;
+	std::cout << "  Package: " << pf.package << "\n";
+	std::cout << "  Messages: " << pf.messages.size()
+	          << ", Enums: " << pf.enums.size()
+	          << ", Services: " << pf.services.size() << "\n";
+
+	std::cout << "Phase 1: Converting to AST + RPC IR...\n";
+	schema::NormalizedAST ast;
+	std::vector<codegen::rpc::RPCMethod> methods;
+	proto::convertFile(pf, ast, methods);
+	std::cout << "  AST types: " << ast.getTypes().size()
+	          << ", RPC methods: " << methods.size() << "\n";
+
+	std::cout << "Phase 2: Building dependency graph...\n";
+	std::cout << "Phase 3: Topological sort...\n";
+
+	runDebugPipeline(ast, methods);
 	return true;
 }
 

@@ -24,5 +24,4 @@ target_link_libraries(siesta-openrpc-generator PRIVATE
 	Boost::boost
 	Boost::program_options
 	Boost::json
-	Boost::system
 )

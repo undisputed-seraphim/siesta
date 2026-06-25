@@ -6,7 +6,12 @@
 
 namespace driver {
 
+enum class InputFormat { OpenRPC, Proto };
+
 bool generateFromOpenRPC(const std::filesystem::path& input_path,
                           const std::filesystem::path& output_path);
+
+bool generateFromProto(const std::filesystem::path& input_path,
+                        const std::filesystem::path& output_path);
 
 } // namespace driver
