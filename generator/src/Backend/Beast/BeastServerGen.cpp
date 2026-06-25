@@ -9,7 +9,7 @@
 namespace codegen {
 
 void BeastServerGenerator::operator()(const CodegenArgs& args, const std::filesystem::path& output_dir) {
-	if (!args.spec || !args.endpoints || args.endpoints->empty()) {
+	if (!args.endpoints || args.endpoints->empty()) {
 		return;
 	}
 

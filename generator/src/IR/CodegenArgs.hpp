@@ -1,4 +1,3 @@
-// SPDX-License-Identifier: Apache-2.0
 #pragma once
 
 #include "IR/DependencyGraph.hpp"
@@ -6,16 +5,11 @@
 #include "Frontend/AST.hpp"
 #include <filesystem>
 
-namespace openapi::v3 {
-class OpenAPIv3;
-}
-
 namespace codegen {
 
 struct CodegenArgs {
 	const schema::NormalizedAST& ast;
 	const analysis::TopologicalOrder& order;
-	const openapi::v3::OpenAPIv3* spec = nullptr;
 	std::string module_name = "siesta_bindings";
 	std::string ns = "api";
 	const std::vector<Endpoint>* endpoints = nullptr;
