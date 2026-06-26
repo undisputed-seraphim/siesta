@@ -53,14 +53,17 @@ void emitMatchPath(std::ostream& out) {
 
 void emitStaticPathMap(std::ostream& out, const DispatchSets& ds) {
 	if (ds.static_eps.empty()) return;
-	out << "const std::unordered_map<std::pair<std::string_view, http::verb>, fnptr_t,\n";
+	out << "const std::unordered_map<std::pair<std::string_view, http::verb>,\n";
+	out << "    std::pair<fnptr_t, std::string_view>,\n";
 	out << "    ::siesta::beast::__detail::MapHash> STATIC_PATHS = {\n";
 	for (const auto* ep : ds.static_eps) {
 		out << "\t{{\"" << escapeCppString(ep->path) << "\"sv, http::verb::" << ep->cpp_verb
-			<< "}, &Server::" << ep->function_name << "},\n";
+			<< "}, {&Server::" << ep->function_name << ", \""
+			<< escapeCppString(ep->function_name) << "\"sv}},\n";
 		if (ep->cpp_verb == "get") {
 			out << "\t{{\"" << escapeCppString(ep->path) << "\"sv, http::verb::head"
-				<< "}, &Server::" << ep->function_name << "},\n";
+				<< "}, {&Server::" << ep->function_name << ", \""
+				<< escapeCppString(ep->function_name) << "\"sv}},\n";
 		}
 	}
 	out << "};\n\n";
@@ -68,13 +71,16 @@ void emitStaticPathMap(std::ostream& out, const DispatchSets& ds) {
 
 void emitParamPathArray(std::ostream& out, const DispatchSets& ds) {
 	if (ds.param_eps.empty()) return;
-	out << "const std::pair<std::string_view, std::pair<http::verb, fnptr_t>> PARAM_PATHS[] = {\n";
+	out << "const std::pair<std::string_view, std::pair<http::verb,\n";
+	out << "    std::pair<fnptr_t, std::string_view>>> PARAM_PATHS[] = {\n";
 	for (const auto* ep : ds.param_eps) {
 		out << "\t{\"" << escapeCppString(ep->path_template) << "\"sv, {http::verb::" << ep->cpp_verb
-			<< ", &Server::" << ep->function_name << "}},\n";
+			<< ", {&Server::" << ep->function_name << ", \""
+			<< escapeCppString(ep->function_name) << "\"sv}}},\n";
 		if (ep->cpp_verb == "get") {
 			out << "\t{\"" << escapeCppString(ep->path_template) << "\"sv, {http::verb::head"
-				<< ", &Server::" << ep->function_name << "}},\n";
+				<< ", {&Server::" << ep->function_name << ", \""
+				<< escapeCppString(ep->function_name) << "\"sv}}},\n";
 		}
 	}
 	out << "};\n\n";
@@ -99,7 +105,13 @@ void emitWebSocketDispatch(std::ostream& out, const DispatchSets& ds) {
 void emitStaticDispatch(std::ostream& out, const DispatchSets& ds) {
 	if (ds.static_eps.empty()) return;
 	out << "\tif (auto it = STATIC_PATHS.find({target, method}); it != STATIC_PATHS.end()) {\n";
-	out << "\t\treturn (this->*(it->second))(req, std::move(session));\n";
+	out << "\t\tauto& [fn, name] = it->second;\n";
+	out << "\t\tServer::request_context _rctx{&req, std::move(session), name};\n";
+	out << "\t\tif (!this->run_interceptors(_rctx)) {\n";
+	out << "\t\t\tif (_rctx.error_response) _rctx.session->send(std::move(*_rctx.error_response));\n";
+	out << "\t\t\treturn;\n";
+	out << "\t\t}\n";
+	out << "\t\treturn (this->*(fn))(req, std::move(_rctx.session));\n";
 	out << "\t}\n\n";
 }
 
@@ -107,7 +119,13 @@ void emitParamDispatch(std::ostream& out, const DispatchSets& ds) {
 	if (ds.param_eps.empty()) return;
 	out << "\tfor (const auto& [pattern, verb_fn] : PARAM_PATHS) {\n";
 	out << "\t\tif (match_path(pattern, target) && verb_fn.first == method) {\n";
-	out << "\t\t\treturn (this->*(verb_fn.second))(req, std::move(session));\n";
+	out << "\t\t\tauto& [fn, name] = verb_fn.second;\n";
+	out << "\t\t\tServer::request_context _rctx{&req, std::move(session), name};\n";
+	out << "\t\t\tif (!this->run_interceptors(_rctx)) {\n";
+	out << "\t\t\t\tif (_rctx.error_response) _rctx.session->send(std::move(*_rctx.error_response));\n";
+	out << "\t\t\t\treturn;\n";
+	out << "\t\t\t}\n";
+	out << "\t\t\treturn (this->*(fn))(req, std::move(_rctx.session));\n";
 	out << "\t\t}\n";
 	out << "\t}\n\n";
 }

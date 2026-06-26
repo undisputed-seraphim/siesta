@@ -51,6 +51,13 @@ void ServerBase::shutdown() {
 	_acceptor.close(ec);
 }
 
+bool ServerBase::run_interceptors(request_context& ctx) {
+	for (const auto& f : _interceptors) {
+		if (!f(ctx)) return false;
+	}
+	return true;
+}
+
 void ServerBase::on_accept(const ec_t& ec, protocol::socket socket) {
 	if (ec) {
 		return fail("on_accept", ec);

@@ -169,6 +169,13 @@ public:
 		static std::string rfc7231_date();
 	};
 
+	struct request_context {
+		const request* req = nullptr;
+		Session::Ptr session;
+		std::string_view method_name;           // e.g. "CreatePet", "get_pets"
+		std::optional<response> error_response; // set to short-circuit the handler
+	};
+
 	ServerBase(boost::asio::io_context&);
 	ServerBase(boost::asio::io_context&, Config);
 
@@ -178,14 +185,20 @@ public:
 
 	virtual void handle_request(const request, Session::Ptr) = 0;
 
+	using Interceptor = std::function<bool(request_context&)>;
+
+	void add_interceptor(Interceptor f) { _interceptors.push_back(std::move(f)); }
+
 protected:
 	Config _conf;
 	boost::asio::io_context* _ctx{nullptr};
 	protocol::acceptor _acceptor;
 	std::atomic<uint64_t> _client_id{0};
 	std::atomic<bool> _shutting_down{false};
+	std::vector<Interceptor> _interceptors;
 
 	void on_accept(const ec_t&, protocol::socket);
+	bool run_interceptors(request_context& ctx);
 };
 
 namespace __detail {
