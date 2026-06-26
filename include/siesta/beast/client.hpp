@@ -22,6 +22,15 @@
 
 namespace siesta::beast {
 
+struct RetryConfig {
+	int max_attempts = 1;                         // 1 = single attempt, no retry
+	std::chrono::milliseconds initial_backoff{100};
+	std::chrono::milliseconds max_backoff{5000};
+	float backoff_multiplier = 2.0f;
+
+	bool enabled() const { return max_attempts > 1; }
+};
+
 class ClientBase : public std::enable_shared_from_this<ClientBase> {
 public:
 	using request_type = ::boost::beast::http::request<::boost::beast::http::string_body>;
@@ -73,6 +82,9 @@ public:
 		tcp_layer().close();
 	}
 
+	void set_retry(RetryConfig r) { _retry = std::move(r); }
+	const RetryConfig& retry() const { return _retry; }
+
 protected:
 	Config _conf;
 	::boost::asio::io_context& _ctx;
@@ -84,6 +96,7 @@ protected:
 	response_type _response;
 
 	std::string _host_value;
+	RetryConfig _retry;
 
 	::boost::json::storage_ptr _json_pool_{
 		::boost::json::make_shared_resource<::boost::json::monotonic_resource>(4096)};
