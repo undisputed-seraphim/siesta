@@ -231,6 +231,7 @@ OpenAPI::OpenAPI(OpenAPI&& other) noexcept
 // Should return false if JSON parsing fails or if file is not an OpenAPI swagger file.
 bool OpenAPI::Load(const std::string& path) noexcept {
 	_json = _parser.load(path).get_object();
+	_is_valid = true;
 	return true;
 }
 

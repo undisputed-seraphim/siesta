@@ -191,23 +191,9 @@ public:
 
 // ── Top-level document ──────────────────────────────────────────
 
-class OpenRPC : public __detail::Object<OpenRPC> {
-protected:
-	simdjson::dom::parser _parser;
-
+class OpenRPC : public openapi::OpenAPI {
 public:
-	OpenRPC() noexcept = default;
-	OpenRPC(const OpenRPC&) = delete;
-	OpenRPC(OpenRPC&&) noexcept = default;
-
-	bool Load(const std::string& path) {
-		try {
-			_json = _parser.load(path).get_object();
-			return true;
-		} catch (...) {
-			return false;
-		}
-	}
+	using openapi::OpenAPI::OpenAPI;
 
 	using Servers = __detail::ListAdaptor<Server>;
 

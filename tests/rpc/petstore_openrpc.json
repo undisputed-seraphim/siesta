@@ -1,0 +1,64 @@
+{
+  "openrpc": "1.2.6",
+  "info": {
+    "title": "PetStoreOpenRPC",
+    "version": "1.0.0"
+  },
+  "methods": [
+    {
+      "name": "CreatePet",
+      "summary": "Create a new pet",
+      "params": [
+        {
+          "name": "pet",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/Pet"
+          }
+        }
+      ],
+      "result": {
+        "name": "pet",
+        "schema": {
+          "$ref": "#/components/schemas/Pet"
+        }
+      }
+    },
+    {
+      "name": "GetPet",
+      "summary": "Get a pet by name",
+      "params": [
+        {
+          "name": "request",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/GetPetRequest"
+          }
+        }
+      ],
+      "result": {
+        "name": "pet",
+        "schema": {
+          "$ref": "#/components/schemas/Pet"
+        }
+      }
+    }
+  ],
+  "components": {
+    "schemas": {
+      "Pet": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "kind": { "type": "string" }
+        }
+      },
+      "GetPetRequest": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" }
+        }
+      }
+    }
+  }
+}

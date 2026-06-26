@@ -145,19 +145,20 @@ public:
 	inline operator bool() const noexcept { return _is_valid; }
 
 	// Test if a json object has a key.
-	bool HasKey(std::string_view key) const noexcept { return simdjson_noerror(_json.at_key(key)); }
+	bool HasKey(std::string_view key) const noexcept { return _is_valid && simdjson_noerror(_json.at_key(key)); }
 
 	// Test if that key is of type T. Assumes key is present.
 	// Use HasKey to test for presence first if necessary.
 	template <simdjson_element U>
 	bool KeyIsType(std::string_view key) const noexcept {
-		return _json.at_key(key).is<U>();
+		return _is_valid && _json.at_key(key).is<U>();
 	}
 
 protected:
 	// For complex types (objects, arrays)
 	template <typename U>
 	U _GetObjectIfExist(std::string_view key) const noexcept {
+		if (!_is_valid) return U();
 		const auto& v = _json.at_key(key);
 		return simdjson_noerror(v) ? U(v.value_unsafe()) : U();
 	}
@@ -165,6 +166,7 @@ protected:
 	// For 'primitive types' (strings, numbers)
 	template <json_primitive U>
 	U _GetValueIfExist(std::string_view key) const noexcept {
+		if (!_is_valid) return U();
 		const auto& v = _json.at_key(key);
 		if (simdjson_noerror(v) && v.is<U>()) {
 			return v.get<U>().value_unsafe();
