@@ -334,6 +334,23 @@ Generated code links against `siesta::beast`:
 | `encoding.hpp` | `url_encode()` + `query_value()` overloads — included by generated headers |
 | `python_util.hpp` | `json_to_python()` + `extract_response_json()` — shared by generated Python modules |
 
+### Runtime vs Generated — split convention
+
+All new features must decide where their logic lives. The rule:
+
+**Runtime library** (`include/siesta/`, `src/`): Any code that would be identical
+regardless of the input schema — connection lifecycle, retry/hedging loops,
+deadline timers, WebSocket frame I/O primitives, CORS, compression, error
+envelope helpers, interceptor chains, health-check responder, `is_transient()`.
+
+**Generated code** (`Backend/Beast/` emitter output): Schema-specific code —
+type definitions, route-to-handler dispatch tables, method signatures, parameter
+extraction, auth header names, per-endpoint retry/deadline config, per-endpoint
+streaming mode.
+
+**Rule of thumb**: If you can type the code without looking at a `.proto` or
+`.json` file, it belongs in the runtime library.
+
 ---
 
 ## Data Flow
