@@ -36,6 +36,10 @@ struct AuthInfo {
 	std::string name;
 };
 
+// --- Streaming mode for RPC endpoints ---
+
+enum class StreamingMode { None, ServerStream, ClientStream, Bidirectional };
+
 // --- Unified endpoint IR consumed by all backends ---
 
 struct Endpoint {
@@ -53,6 +57,7 @@ struct Endpoint {
 	AuthType auth_type = AuthType::None;
 	std::string auth_header_name;
 	bool is_websocket = false;
+	StreamingMode streaming_mode = StreamingMode::None;
 };
 
 // --- Shared helpers used during endpoint parsing ---

@@ -9,6 +9,17 @@
 
 namespace codegen {
 
+namespace {
+constexpr StreamingMode mapStreaming(rpc::StreamingMode m) {
+	switch (m) {
+	case rpc::StreamingMode::ServerStreaming: return StreamingMode::ServerStream;
+	case rpc::StreamingMode::ClientStreaming: return StreamingMode::ClientStream;
+	case rpc::StreamingMode::Bidirectional:   return StreamingMode::Bidirectional;
+	default:                                   return StreamingMode::None;
+	}
+}
+} // anonymous namespace
+
 inline void rpcToEndpoints(
 	const std::vector<rpc::RPCMethod>& rpcs,
 	std::vector<Endpoint>& out) {
@@ -31,6 +42,7 @@ inline void rpcToEndpoints(
 		}
 		ep.body_content_type = "application/json";
 		ep.is_websocket  = (m.streaming != rpc::StreamingMode::None);
+		ep.streaming_mode = mapStreaming(m.streaming);
 		ep.auth_type     = AuthType::None;
 
 		out.push_back(std::move(ep));
