@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package petstore;
+
+message Pet {
+  string name = 1;
+  string kind = 2;
+}
+
+message GetPetRequest {
+  string name = 1;
+}
+
+service PetStore {
+  rpc CreatePet(Pet) returns (Pet);
+  rpc GetPet(GetPetRequest) returns (Pet);
+}

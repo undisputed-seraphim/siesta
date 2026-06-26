@@ -176,3 +176,22 @@ add_test(NAME consumer_smoke
 		-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/consumer
 		-P ${CMAKE_CURRENT_SOURCE_DIR}/consumer/run_test.cmake
 )
+
+# ══════════════════════════════════════════════════════════════════
+#  RPC integration test (proto-generated client + embedded server)
+# ══════════════════════════════════════════════════════════════════
+
+add_library(rpc_gen STATIC EXCLUDE_FROM_ALL)
+siesta_generate(
+	TARGET rpc_gen
+	SCHEMA "${CMAKE_CURRENT_SOURCE_DIR}/rpc/petstore.proto"
+	MODE BOTH
+	BACKEND beast
+	NO_PYTHON
+)
+
+add_executable(rpc_beast_integration
+	"${CMAKE_CURRENT_SOURCE_DIR}/rpc/test_rpc_integration.cpp")
+target_link_libraries(rpc_beast_integration PRIVATE rpc_gen siesta::siesta ZLIB::ZLIB Catch2::Catch2WithMain)
+target_compile_options(rpc_beast_integration PRIVATE ${FLAGS_RELEASE})
+catch_discover_tests(rpc_beast_integration)

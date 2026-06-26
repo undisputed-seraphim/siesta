@@ -3,7 +3,8 @@
 # siesta_generate(TARGET <name> SCHEMA <path> [MODE CLIENT|SERVER|BOTH]
 #                 [BACKEND beast|nghttp3|...] [MODULE_NAME <name>] [NO_PYTHON])
 #
-# Runs siesta-generator on the OpenAPI schema. Appends the generated C++
+# Runs siesta-generator on the API schema. The generator auto-detects the
+# input format (.proto, OpenAPI JSON, OpenRPC JSON). Appends the generated C++
 # sources to <name> and creates nanobind modules for Python bindings.
 #
 # BACKEND:          HTTP backend to target (default: beast)
