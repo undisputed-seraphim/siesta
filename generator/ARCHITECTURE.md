@@ -2,232 +2,337 @@
 
 ## Overview
 
-The siesta generator is a C++23 compiler-like tool that transforms OpenAPI v3 JSON schemas into production-grade C++ client code and Python extension modules. It uses simdjson for zero-copy parsing, boost::json for runtime JSON, boost::asio for async I/O, and nanobind for Python bindings.
+The siesta generator is a multi-frontend C++23 transpiler that reads API schema definitions
+and emits production-grade HTTP client/server code and Python extension modules.
+
+Three input formats are supported, auto-detected by file extension and content:
 
 ```
-OpenAPI v3 JSON ──▶ Frontend ──▶ IR/Analysis ──▶ Backend ──▶ .hpp / .cpp / .py
+.proto  ──▶ ProtoFrontend (Spirit X3)
+.json   ──▶ OpenAPIFrontend (simdjson)  or  OpenRPCFrontend (simdjson)
 ```
 
-### Compiler-like structure
+All frontends converge on a shared intermediate representation, then pass through a common
+back-end pipeline. The compiler is structured in three layers:
+
+```
+Frontend           Middle-end (IR)              Backend
+─────────          ───────────────              ───────
+parsing +          NormalizedAST                ICodeGenerator
+format-specific    EndpointIR                   ├─ DefsGenerator
+→ NormalizedAST    DependencyGraph              ├─ BeastClientGen
+→ Endpoint IR      DefsGenerator                ├─ BeastServerGen
+                   RPCEndpointBridge            ├─ BeastPythonGen
+                                                └─ BeastServerPythonGen
+```
+
+Key libraries: simdjson (JSON parsing), Spirit X3 (proto parsing), boost::json (runtime
+ser/des), boost::asio + beast (async I/O), nanobind (Python bindings).
+
+---
+
+## Directory Layout
 
 ```
 generator/src/
-├── Driver/                Thin conductor — CLI entry + phase orchestration
-├── Frontend/              OpenAPI → AST (simdjson parsing, schema normalization)
-├── IR/                    Intermediate representation (types, endpoints, deps)
-├── Backend/Beast/         boost::beast code generation backends
-└── Support/               Shared utilities (sanitize, logging, filename constants)
+├── Driver/                    CLI entry + phase orchestration
+├── Frontend/
+│   ├── IFrontend.hpp/.cpp     Virtual interface + auto-detect factory
+│   ├── AST.hpp/.cpp           NormalizedAST (shared type IR)
+│   ├── SchemaParser.hpp/.cpp  JSON schema → AST node parser
+│   ├── openapi.hpp/.cpp       simdjson DOM wrappers, ListAdaptor, MapAdaptor
+│   ├── openapi3.hpp/.cpp      OpenAPI v3 typed views
+│   ├── OpenAPI/               OpenAPI frontend
+│   │   └── OpenAPIFrontend.hpp/.cpp
+│   ├── OpenRPC/               OpenRPC frontend
+│   │   ├── openrpc.hpp        simdjson OpenRPC views
+│   │   └── OpenRPCFrontend.hpp/.cpp
+│   └── Proto/                 Proto3 frontend
+│       ├── AST.hpp            Proto-specific AST types
+│       ├── Parser.hpp/.cpp    Spirit X3 grammar
+│       ├── Skipper.hpp        Comment-aware skipper
+│       ├── ProtoBridge.hpp    ProtoFile → NormalizedAST + RPCMethod
+│       └── ProtoFrontend.hpp/.cpp
+├── IR/
+│   ├── CodegenArgs.hpp        CodegenArgs struct + ICodeGenerator interface
+│   ├── EndpointIR.hpp/.cpp    Endpoint struct, parseEndpoints(), detectAuth()
+│   ├── RPCIR.hpp              RPCMethod, StreamingMode, RPCParam, RPCError
+│   ├── RPCEndpointBridge.hpp  RPCMethod → Endpoint converter
+│   ├── DependencyGraph.hpp/.cpp  Build + topological sort (Kahn) + cycle detection
+│   └── DefsGenerator.hpp/.cpp Type definitions + JSON ser/des codegen
+├── Backend/
+│   └── Beast/                 boost::beast backends
+│       ├── BeastClientGen.hpp/.cpp
+│       ├── BeastServerGen.hpp/.cpp
+│       ├── BeastPythonGen.hpp/.cpp
+│       └── BeastServerPythonGen.hpp/.cpp
+└── Support/
+    ├── Utils.hpp/.cpp          sanitize, escapeCppString, primitiveToCpp, logging
+    └── Filenames.hpp           Output path constants (constexpr string_view)
 ```
 
-| Output File | Content |
-|-------------|---------|
-| `openapi_defs.hpp` | Type definitions (structs, variants, enums, using-aliases), forward declarations, `tag_invoke` signatures |
-| `openapi_defs.cpp` | `tag_invoke` bodies for boost::json serialization/deserialization |
-| `client.hpp` | Async HTTP client class extending `siesta::beast::ClientBase` with one endpoint method per OpenAPI operation |
-| `server.hpp` / `server.cpp` | Abstract server class with virtual methods + dispatch table (static-path O(1) lookup, parameterised-path segment matching) |
-| `py_module.cpp` | Nanobind Python extension module wrapping the C++ client synchronously via `boost::asio::use_future` |
-| `server_py.cpp` | Nanobind trampoline class for Python-side server subclassing |
+### Output files (all formats)
 
-All backends implement `ICodeGenerator` (`IR/CodegenArgs.hpp`). Endpoints are parsed once by `IR/EndpointIR.hpp` → `parseEndpoints()` and passed to backends via `CodegenArgs::endpoints`.
-
----
-
-## File Index
-
-### Generator (`generator/src/`)
-
-#### Driver — Orchestration
-
-| File | Role |
-|------|------|
-| `Driver/main.cpp` | CLI entry point, argument parsing (`--input`, `--output`, `--mode`, `--backend`, `--namespace`, `--no-python`, `--print-module-names`) |
-| `Driver/Driver.hpp` / `.cpp` | Thin conductor — `generateFromOpenAPI()` invokes all phases sequentially |
-
-#### Frontend — OpenAPI → AST
-
-| File | Role |
-|------|------|
-| `Frontend/openapi.hpp` / `.cpp` | simdjson wrapper, base OpenAPI accessors, `ListAdaptor` / `MapAdaptor` |
-| `Frontend/openapi3.hpp` / `.cpp` | OpenAPI v3-specific parsed types (schemas, paths, operations, components) |
-| `Frontend/AST.hpp` / `.cpp` | Normalized AST definitions (`StructType`, `VariantType`, `ArrayType`, etc.) + validation |
-| `Frontend/SchemaParser.hpp` / `.cpp` | `SchemaParser` — converts raw JsonSchema → AST nodes. Top-level `parseSchema` dispatches to focused sub-parsers |
-
-#### IR — Intermediate Representation + Analysis
-
-| File | Role |
-|------|------|
-| `IR/DependencyGraph.hpp` / `.cpp` | `DependencyGraph` + Kahn's topological sort + cycle detection |
-| `IR/EndpointIR.hpp` / `.cpp` | Shared endpoint IR: `Endpoint` struct, `ClientParam`, `AuthType`, `AuthInfo`, plus `detectAuth()` and `parseEndpoints()` — parsed once, consumed by all backends |
-| `IR/CodegenArgs.hpp` | `CodegenArgs` struct + `ICodeGenerator` abstract interface |
-| `IR/DefsGenerator.hpp` / `.cpp` | `DefsGenerator : ICodeGenerator` — emits type definitions + ser/des (backend-independent, shared by all backends) |
-
-#### Backend — Per-library Code Generation
-
-| File | Role |
-|------|------|
-| `Backend/Beast/BeastClientGen.hpp` / `.cpp` | `BeastClientGenerator : ICodeGenerator` — emits async client class |
-| `Backend/Beast/BeastServerGen.hpp` / `.cpp` | `BeastServerGenerator : ICodeGenerator` — emits abstract server class |
-| `Backend/Beast/BeastPythonGen.hpp` / `.cpp` | `BeastPythonGenerator : ICodeGenerator` — emits nanobind client module |
-| `Backend/Beast/BeastServerPythonGen.hpp` / `.cpp` | `BeastServerPythonGenerator : ICodeGenerator` — emits nanobind server trampoline |
-
-#### Support — Shared Utilities
-
-| File | Role |
-|------|------|
-| `Support/Utils.hpp` / `.cpp` | Shared utilities: `sanitize` (O(1) keyword lookup via `unordered_set`), `escapeCppString`, `primitiveToCpp`, logging macros |
-| `Support/Filenames.hpp` | Output filename constants (`SERVER_HPP`, `CLIENT_HPP`, etc.) — `constexpr string_view` |
-
-### Runtime (`include/siesta/`)
-
-| File | Role |
-|------|------|
-| `encoding.hpp` | Shared `url_encode()` + `query_value()` overloads — included by every generated `openapi_defs.hpp` |
-| `beast/client.hpp/.cpp` | `ClientBase` — async HTTP/1.1 client with strand-serialized I/O, `async_submit_request` 3-state FSM, `_host_value` auto-populated from `start()`. `is_transient()` error classifier. |
-| `beast/server.hpp/.cpp` | `ServerBase` + `Session` — async TCP acceptor, per-connection request/response pipeline, configurable read/write timeouts |
-| `beast/python_util.hpp` | Shared nanobind helpers: `json_to_python()` + `extract_response_json()` — included by all generated `py_module.cpp` |
-| `beast/error.hpp` | Outcome/error_code adaptors |
+| File | Content |
+|------|---------|
+| `openapi_defs.hpp` | Type definitions, forward declarations, `tag_invoke` signatures |
+| `openapi_defs.cpp` | `tag_invoke` bodies for boost::json ser/des |
+| `client.hpp` | Async HTTP client class extending `siesta::beast::ClientBase` |
+| `server.hpp` / `server.cpp` | Abstract server class with virtual methods + dispatch |
+| `py_module.cpp` | Nanobind Python client module |
+| `server_py.cpp` | Nanobind Python server trampoline |
 
 ---
 
-## Phase 1: Frontend — Schema Normalization
+## Layer 1: Frontend — Input Parsing
 
-**Entry**: `Driver/Driver.cpp::generateFromOpenAPI()` → `buildAST()` → `parseSchemas()` + `parsePaths()`
+### IFrontend (virtual interface)
 
-1. `openapi::OpenAPI::Load()` reads the JSON file into simdjson's on-demand DOM
-2. `static_cast<const openapi::v3::OpenAPIv3&>` casts to a v3-specific typed view
-3. `parseSchemas()` iterates `components/schemas`, calling `SchemaParser::parseSchema()` for each entry
-4. `parsePaths()` collects path/operation metadata into `PathItem` objects
-5. Result: `schema::NormalizedAST` containing all types and paths
-
-### SchemaParser (`schema_parser.hpp` + `.cpp`)
-
-Parses `components/schemas` entries by dispatching on `JsonSchema::Type_()`. The former 255-line `parseSchema` switch has been decomposed into focused sub-parsers: `parseObjectSchema`, `parseArraySchema`, `parsePrimitiveSchema`, `parseUnknownSchema`, plus `parseImplicitObject` and `buildVariant`. The top-level `parseSchema` is now a ~20-line dispatch switch.
-
-| Input Pattern | AST Output | Notes |
-|---------------|------------|-------|
-| `object` with `properties` / `allOf` | `StructType` | Direct or explicit-object path |
-| `object` with `oneOf` / `anyOf` | `VariantType` | Polymorphic object — overrides struct treatment |
-| `unknown` type with `properties` / `allOf` | `StructType` | Implicit object (no explicit `"type": "object"`) |
-| `unknown` type with `oneOf` / `anyOf` | `VariantType` | Discriminator metadata NOT currently captured |
-| `allOf` with `$ref` | `StructType::allOf_bases` | C++ multiple inheritance base |
-| `allOf` with inline schema | Mangled `{name}_base_{n}` struct + base ref | Inline base extracted as standalone struct |
-| `array` items | `ArrayType` | Recursive parse; unnamed arrays get `ArrayEntry_{N}` |
-| `string` / `integer` with `enum` values | `PrimitiveType` with `enum_values` | Emitted as `enum class` later |
-| Nested object (inline struct in property) | `Parent_Child` struct | Flat name, not `Parent::Child` |
-| Nested variant alternative | `{name}_alt_{n}` struct | Flattened if alternative is itself a variant |
-| `$ref` anywhere | `TypeRef{name, is_inline=false}` | Name is sanitized from the last path component |
-
----
-
-## Phase 2: Middle-end — Dependency Analysis
-
-**Entry**: `analysis::DependencyGraph::buildFromAST()` + `analysis::sortTypes()`
-
-1. Iterates all AST types, visiting each `SchemaType` variant
-2. For `StructType`: adds `DepKind::Value` edges for field types, `DepKind::Base` for `allOf` bases
-3. For `VariantType`: adds `DepKind::Variant` edges for alternatives
-4. For `ArrayType` / `MapType`: adds `DepKind::ArrayElem` / `DepKind::MapValue` edges
-5. Skips synthetic C++ types (`std::string`, `int64_t`, etc.) via `isSyntheticCppType()`
-6. Cycle detection via DFS with recursion-stack tracking
-7. Topological sort via Kahn's algorithm (deterministic ordering from `std::queue`)
-8. Sorted result filtered to only real AST types (synthetic nodes removed)
-
-### `TopologicalOrder`
+All frontends implement a common interface. The factory auto-detects the format:
 
 ```cpp
-struct TopologicalOrder {
-    std::vector<std::string> ordered_types;
-    bool has_cycles;
-    std::vector<std::vector<std::string>> cycles;
-    bool isValid() const { return !has_cycles && !ordered_types.empty(); }
+class IFrontend {
+public:
+    virtual ~IFrontend() = default;
+    virtual bool parse(const std::filesystem::path& input) = 0;
+
+    virtual const schema::NormalizedAST& ast() const = 0;
+    virtual const std::vector<Endpoint>& endpoints() const = 0;
+    virtual std::string module_name() const = 0;
+
+    static std::unique_ptr<IFrontend> create(
+        const std::filesystem::path& input,
+        std::string_view format_hint = "");
 };
 ```
 
-Cyclic schemas are a hard error — value-semantic types cannot express cycles. The generator aborts with a clear error listing all cycle paths.
+**Auto-detection logic:**
+
+```
+file extension
+  ├── .proto ──────────────────────▶ ProtoFrontend
+  └── .json ──▶ try OpenAPIFrontend::parse(input)
+                    ├── succeeds ▶ return it
+                    └── fails ──▶ try OpenRPCFrontend::parse(input)
+                                      ├── succeeds ▶ return it
+                                      └── fails    ▶ error
+```
+
+### OpenAPIFrontend
+
+Wraps the existing OpenAPI v3 parsing pipeline:
+
+1. `openapi::OpenAPI::Load()` reads JSON into simdjson's on-demand DOM
+2. `static_cast<const openapi::v3::OpenAPIv3&>` casts to a typed view
+3. Iterates `components/schemas`, calls `SchemaParser::parseSchema()` for each entry
+4. Calls `parseEndpoints(spec)` to produce `vector<Endpoint>`
+5. Returns: `NormalizedAST` + `vector<Endpoint>`
+
+### SchemaParser
+
+Converts raw `JsonSchema` objects (simdjson DOM views) into `NormalizedAST` nodes:
+
+| Input Pattern | AST Output |
+|---------------|------------|
+| `object` with `properties` / `allOf` | `StructType` |
+| `object` with `oneOf` / `anyOf` | `VariantType` |
+| `unknown` type with `properties` / `allOf` | `StructType` (implicit object) |
+| `unknown` type with `oneOf` / `anyOf` | `VariantType` |
+| `allOf` with `$ref` | `StructType::allOf_bases` (multiple inheritance) |
+| `allOf` with inline schema | Extracted as `{name}_base_{N}` standalone struct |
+| `array` items | `ArrayType` |
+| `additionalProperties` on object | `MapType` |
+| `string` / `integer` with `enum` | `PrimitiveType` with `enum_values` |
+| `$ref` | `TypeRef{name, is_inline=false}` |
+
+### OpenRPCFrontend
+
+Wraps the OpenRPC JSON parsing pipeline:
+
+1. `openrpc::OpenRPC::Load()` reads JSON into simdjson DOM
+2. `materialiseMethods()` extracts methods into `vector<RPCMethod>` (flat C++ structs, no simdjson refs)
+3. Iterates `components/schemas`, calls `SchemaParser::parseSchema()` for each entry
+4. Calls `rpcToEndpoints()` to convert `RPCMethod` → `Endpoint`
+5. Returns: `NormalizedAST` + `vector<Endpoint>`
+
+### ProtoFrontend
+
+Wraps the proto3 parsing pipeline:
+
+1. Reads file into string, calls `parse_proto(source)` (Spirit X3 grammar)
+2. `ProtoBridge::convertFile()` converts `ProtoFile` → `NormalizedAST` (messages → structs, enums → enums, oneofs → variants, maps → MapTypes)
+3. Calls `rpcToEndpoints()` to convert service RPCs → `Endpoint`
+4. Returns: `NormalizedAST` + `vector<Endpoint>`
+
+The Spirit X3 grammar (~330 lines) covers proto3 syntax including: messages, enums, oneofs,
+map fields, reserved, options (opaque), services with streaming RPCs, nested messages,
+comments (// and /* */), imports, and package declarations.
 
 ---
 
-## Phase 3: Backend — Code Generation
+## Layer 2: Middle-end — Shared IR + Analysis
 
-Endpoints are parsed once into a shared `std::vector<Endpoint>` IR (`IR/EndpointIR.hpp/.cpp`), then passed to all backends via `CodegenArgs`. Backends consume the IR — they no longer re-parse the OpenAPI spec independently.
+### NormalizedAST (`Frontend/AST.hpp`)
+
+The format-agnostic type system. All frontends populate it, all backends consume it:
+
+| Type | Represents | Examples |
+|------|-----------|----------|
+| `StructType` | Record/object with named fields | `message`, `object` schema |
+| `VariantType` | Discriminated union | `oneof`, `oneOf`/`anyOf` |
+| `ArrayType` | Homogeneous list | `repeated`, `array` |
+| `MapType` | String-keyed dictionary | `map<K,V>`, `additionalProperties` |
+| `EnumType` | Named integer constants | `enum` |
+| `PrimitiveType` | Scalar with optional format and enum values | `string`, `int32`, etc. |
+
+`TypeRef` links types to each other: `{name, is_inline}`. Inline types carry the C++ type directly (e.g. `"std::string"`); named types reference other AST entries.
+
+### EndpointIR (`IR/EndpointIR.hpp`)
+
+The format-agnostic HTTP operation descriptor. One `Endpoint` per operation/RPC method:
+
+```cpp
+struct Endpoint {
+    std::string method;           // HTTP verb string
+    std::string path;             // URL path
+    std::string path_template;    // path with {} placeholders
+    std::string function_name;    // C++ method name
+    std::string cpp_verb;         // beast verb constant name
+    std::vector<ClientParam> params;  // path/query/header params
+    bool has_request_body;
+    std::string body_type;        // C++ type of request body
+    std::string body_content_type;
+    bool is_websocket;            // true for streaming RPCs
+    AuthType auth_type;
+};
+```
+
+REST (OpenAPI) endpoints populate path/query/header params. RPC (proto/OpenRPC) endpoints
+set params empty — everything is body-only POST.
+
+### RPCIR (`IR/RPCIR.hpp`)
+
+RPC-specific metadata before conversion to `Endpoint`. Frontends produce this as an
+intermediate step, then `RPCEndpointBridge` converts to `Endpoint`:
+
+```cpp
+struct RPCMethod {
+    std::string name;             // "Service/Method"
+    std::vector<RPCParam> params;
+    TypeRef result_type;
+    bool is_notification;         // no response expected
+    StreamingMode streaming;      // None, Server, Client, Bidirectional
+};
+```
+
+### RPCEndpointBridge (`IR/RPCEndpointBridge.hpp`)
+
+Converts `RPCMethod` → `Endpoint`. A single `~30-line` function:
+
+```
+RPCMethod                      Endpoint
+─────────                      ────────
+name: "Service/Method"   →     path: "/rpc/Service/Method"
+                               function_name: "Service_Method"
+                               method: "post", cpp_verb: "post"
+                               params: {}  (empty)
+                               has_request_body: true
+                               body_type: first param's cpp_type
+                               is_websocket: streaming != None
+```
+
+### DependencyGraph (`IR/DependencyGraph.hpp`)
+
+Builds a directed graph over `NormalizedAST` types:
+- `StructType` → edges from field types (`DepKind::Value`) and allOf bases (`DepKind::Base`)
+- `VariantType` → edges from alternatives (`DepKind::Variant`)
+- `ArrayType` → edge from element type
+- `MapType` → edge from value type
+- Synthetic types (`std::string`, `int64_t`, etc.) excluded via `isSyntheticCppType()`
+
+Cycle detection via DFS with recursion-stack tracking. Topological sort via Kahn's
+algorithm with deterministic ordering (`std::queue`). Cyclic schemas are a hard error —
+value-semantic types cannot express cycles.
+
+### DefsGenerator (`IR/DefsGenerator.hpp`)
+
+Implements `ICodeGenerator`. Emits type definitions and boost::json `tag_invoke` ser/des
+bodies in topological order. Key behaviors:
+
+- `allOf` → C++ inheritance with merged base-class serialization
+- `oneOf`/`anyOf` → `using Name = std::variant<A, B, C>;`
+- Variant deduplication: identical signatures become `using` aliases
+- Single-alternative non-nullable variants collapse to typedefs
+- `additionalProperties` → `using Name = std::map<std::string, T>;`
+- Top-level arrays → `using Name = std::vector<T>;`
+- Enum primitives → `enum class Name : int { ... };`
+- Struct serialization: construct `object(sp)` with propagated `storage_ptr`, merge
+  allOf bases then emit fields
+- Variant deserialization: try each alternative in order via `try/catch`
+
+---
+
+## Layer 3: Backend — Code Generation
+
+### ICodeGenerator (`IR/CodegenArgs.hpp`)
+
+All backends share a single abstract interface:
 
 ```cpp
 struct CodegenArgs {
     const schema::NormalizedAST& ast;
     const analysis::TopologicalOrder& order;
-    const openapi::v3::OpenAPIv3* spec = nullptr;
-    std::string module_name = "siesta_bindings";
-    std::string ns = "api";
-    const std::vector<Endpoint>* endpoints = nullptr;  // pre-parsed endpoint IR
+    std::string module_name;
+    std::string ns;
+    const std::vector<Endpoint>* endpoints;
 };
 
 class ICodeGenerator {
 public:
     virtual ~ICodeGenerator() = default;
-    virtual void operator()(const CodegenArgs& args, const std::filesystem::path& output_dir) = 0;
+    virtual void operator()(const CodegenArgs& args,
+                            const std::filesystem::path& output_dir) = 0;
 };
 ```
 
-### 3a. DefsGenerator → `openapi_defs.hpp` + `openapi_defs.cpp`
+Backends consume only `NormalizedAST` (type shapes) and `vector<Endpoint>` (operations).
+They have no knowledge of the input format.
 
-**Header**: forward declarations → structs/aliases → `tag_invoke` declarations, all in topological order.
+### BeastClientGenerator → `client.hpp`
 
-**Source**: `tag_invoke` bodies for every type.
+Emits `class Client : public ::siesta::beast::ClientBase` with one templated
+completion-token method per endpoint. Method body emission decomposes into:
+`emitPathParams` (find+replace of `{}` placeholders), `emitQueryParams` (query string
+building), `emitRequestBody` (JSON serialization with pool-backed `storage_ptr`),
+`emitHeaderParams`. RPC endpoints hit the degenerate path — no path params, no query
+params, body-only.
 
-Key behaviors:
-- `allOf` becomes C++ inheritance: `struct Derived : Base { ... }`
-- `oneOf`/`anyOf` become `using Name = std::variant<A, B, C>;`
-- `additionalProperties` (object-as-map) becomes `using Name = std::map<std::string, T>;`
-- Top-level arrays become `using Name = std::vector<T>;`
-- Enum primitives become `enum class Name : int { ... };`
-- Struct serialization merges base JSON objects before adding derived fields
-- Variant deserialization tries each alternative in order via try/catch
+### BeastServerGenerator → `server.hpp` + `server.cpp`
 
-### 3b. BeastClientGenerator → `client.hpp`
+Emits abstract `Server` class with one pure-virtual method per endpoint. The dispatch
+table uses:
+- **Static paths**: O(1) hash lookup (`std::unordered_map<pair<path, verb>, fnptr>`)
+- **Parameterised paths**: segment-by-segment `match_path()` algorithm over a linear array
+- **WebSocket**: `upgrade_to_websocket()` dispatch for streaming endpoints
 
-Consumes the pre-parsed `Endpoint` IR. Generates `class Client : public ::siesta::beast::ClientBase` with one templated completion-token method per endpoint. Method body emission is decomposed into focused functions: `emitPathParams`, `emitQueryParams`, `emitRequestBody`, `emitHeaderParams`.
+RPC endpoints are static-path entries with `POST /rpc/Service/Method`.
 
-```cpp
-auto get__api_v3_ping(
-    std::optional<int64_t> param_limit,
-    std::string param_symbol,
-    ::boost::asio::completion_token_for<void(outcome_type)> auto&& token
-);
-```
+### BeastPythonGenerator / BeastServerPythonGenerator
 
-Parameter handling:
-- **Path params**: `std::string::find` + `replace` of `{}` placeholders in a `std::string target_path`
-- **Query params**: all params (required + optional) built into a single `std::string query` buffer via a `_sep` lambda (`[&]{ if (!query.empty()) query += '&'; }`). Required params emit unconditionally; optional params emit inside `if (param.has_value())`. The `?` prefix and append to `target_path` happens once at the end. No separate buffer for optional params, no `target_has_query` flag.
-- **`query_value`**: type-specialized overloads for `int32_t`–`bool` use `std::to_string()` / literal booleans; `const std::string&` delegates to `url_encode`. Enum types get per-type `query_value(EnumClass)` overloads emitted by the DefsGenerator. A catch-all template fires a `static_assert(sizeof(T)==0, ...)` at compile time for unsupported types rather than a silent JSON round-trip.
-- **Header params**: `req.set(name, value)`
-- **HTTP verb**: uses `ep.cpp_verb` from the endpoint IR (pre-computed during `parseEndpoints()` — `"delete"` → `"delete_"`)
-- **Auth**: `HttpBearer` token is pre-computed as `_auth_header("Bearer "+token)` in the constructor and reused per-endpoint as a stored `std::string` member rather than allocated per call. `ApiKey` uses the raw key member directly.
-- **Parameter sanitization**: C++ keyword names get `param_` prefix; brackets and special chars become `_`
+Nanobind modules: `ClientWrapper` for synchronous client usage (via `boost::asio::use_future`) and `PyServer` trampoline for Python-side server subclassing.
 
-### 3c. BeastServerGenerator → `server.hpp` + `server.cpp`
+---
 
-Consumes the pre-parsed `Endpoint` IR. Produces an abstract `openapi::Server` class with one pure-virtual method per endpoint. The `.cpp` file contains the dispatch table:
+## Runtime Library (`include/siesta/`)
 
-- **Static paths**: `std::unordered_map<std::pair<std::string_view, http::verb>, fnptr_t>` for O(1) lookup
-- **Parameterised paths**: `match_path()` segment-by-segment algorithm over a linear array of patterns
-- **404 fallback**: returns `http::status::not_found` when no route matches
+Generated code links against `siesta::beast`:
 
-### 3d. BeastPythonGenerator → `py_module.cpp`
-
-Consumes the pre-parsed `Endpoint` IR. Generates a nanobind module containing:
-- `#include <siesta/beast/python_util.hpp>` for `json_to_python()` and `extract_response_json()` — these live in the shared siesta runtime header rather than being duplicated in every generated module.
-- `ClientWrapper` struct: owns `openapi::Client` + `boost::asio::io_context`
-- `NB_MODULE(siesta_bindings, m)` with `nb::class_<ClientWrapper>` wrapping every endpoint
-
-Synchronous execution model:
-1. Call async client method with `boost::asio::use_future` as last argument
-2. Run `ctx.run()` to drain the io_context
-3. `future.get()` retrieves the outcome
-4. Convert response body to Python via `extract_response_json()`
-
-### 3e. BeastServerPythonGenerator → `server_py.cpp`
-
-Consumes the pre-parsed `Endpoint` IR. Generates a nanobind trampoline class (`PyServer`) enabling Python-side subclassing of the C++ server. Each virtual method dispatches to a Python override via `nb::detail::ticket`. The module exposes `listen()` and `shutdown()` on the `Server` class.
+| Component | Role |
+|-----------|------|
+| `ClientBase` | Async HTTP/1.1 client: strand-serialized I/O, 3-state FSM (send→recv→done), connection pooling, WebSocket upgrade, per-request JSON pool |
+| `ServerBase` + `Session` | Async TCP acceptor, per-connection request/response pipeline, configurable timeouts, WebSocket upgrade, per-request JSON pool |
+| `encoding.hpp` | `url_encode()` + `query_value()` overloads — included by generated headers |
+| `python_util.hpp` | `json_to_python()` + `extract_response_json()` — shared by generated Python modules |
 
 ---
 
@@ -235,165 +340,74 @@ Consumes the pre-parsed `Endpoint` IR. Generates a nanobind trampoline class (`P
 
 ```
 Driver/main.cpp
-  └─ Driver/Driver.cpp::generateFromOpenAPI()
-       ├─ Frontend/openapi::OpenAPI::Load()                  [simdjson]
-       ├─ buildAST()
-       │    ├─ parseSchemas()  ──▶ Frontend/SchemaParser × N
-       │    └─ parsePaths()
-       │         └─ Frontend/AST.hpp :: NormalizedAST
-       ├─ ast.validate()
-       ├─ IR/DependencyGraph::buildFromAST()
-       ├─ sortTypes()  ──▶ TopologicalOrder
-       ├─ IR/EndpointIR.hpp :: parseEndpoints()  ──▶ std::vector<Endpoint>
-       └─ Phase 4: for each backend
-            CodegenArgs args{ast, order, &spec, name, ns, &eps};
-            IR/DefsGenerator{}(args, out_dir);                    // openapi_defs.hpp/.cpp
-            BeastClientGenerator{}(args, out_dir);               // client.hpp
-            BeastServerGenerator{}(args, out_dir);               // server.hpp/.cpp
-            BeastPythonGenerator{}(args, out_dir);               // py_module.cpp
-            BeastServerPythonGenerator{}(server_args, out_dir);  // server_py.cpp
+  │
+  └─ IFrontend::create(input)
+       │
+       ├─ .proto  → ProtoFrontend::parse()
+       │               ├─ Spirit X3 → ProtoFile
+       │               ├─ ProtoBridge → NormalizedAST + RPCMethod
+       │               └─ rpcToEndpoints → vector<Endpoint>
+       │
+       ├─ .json → OpenAPIFrontend::parse()
+       │            ├─ simdjson → OpenAPI v3 DOM
+       │            ├─ SchemaParser → NormalizedAST
+       │            └─ parseEndpoints → vector<Endpoint>
+       │
+       └─ .json → OpenRPCFrontend::parse()
+                    ├─ simdjson → OpenRPC DOM
+                    ├─ materialiseMethods → vector<RPCMethod>
+                    ├─ SchemaParser → NormalizedAST
+                    └─ rpcToEndpoints → vector<Endpoint>
+  │
+  ├─ analysis::DependencyGraph::buildFromAST(ast)
+  ├─ analysis::sortTypes(ast) → TopologicalOrder
+  │
+  └─ for each ICodeGenerator:
+       CodegenArgs{ast, order, module_name, ns, &endpoints}
+       generator(args, output_dir)
 ```
-
----
-
-## Siesta Runtime Library
-
-The generated code depends on `siesta::beast::{ClientBase,ServerBase,Session}` in `include/siesta/beast/`. These provide the async I/O layer.
-
-### ClientBase
-
-- **Ownership**: `ClientBase` holds an `io_context&` reference (does not own). The caller provides lifetime. `enable_shared_from_this` is used as a lifetime guard in all async callbacks — clients must be heap-allocated in a `shared_ptr`.
-- **I/O model**: A single `strand` wraps both resolver and TCP stream. All I/O is serialized through the strand even if multiple threads run the io_context.
-- **`start(address, port)`**: initiates DNS resolution → TCP connect. Stores the connected host as `_host_value` (used later as the `Host` header).
-- **`async_submit_request(req, token)`**: the sole public async entry point. Uses `asio::async_compose` with a 3-state FSM (send → recv → done) that is local to the compose lambda (no shared mutable state on the class). Sets `Host` header from `_host_value` before sending. Completes with `outcome_type` (either the HTTP response or an error).
-- **Config**: `connect_timeout`, `write_timeout`, `read_timeout` (default 1000 ms each).
-
-### ServerBase
-
-- **Ownership**: stores `io_context* _ctx` (pointer, not reference — stored in constructor, used in `start()`). No `shared_from_this` requirement at this level.
-- **`start(address, port)`**: opens, binds, and listens on the acceptor. Takes no `io_context&` parameter — uses the stored `*_ctx`. Starts the `async_accept` loop with strand-serialized completion handlers.
-- **`handle_request(const request, Session::Ptr)`**: pure virtual. Derived classes implement request dispatch.
-- **Config**: `read_timeout` (default 1 hour) and `write_timeout` (default 30 seconds).
-
-### Session
-
-- **Lifecycle**: per-connection, always heap-allocated (`make_shared`). Inherits `enable_shared_from_this<Session>`.
-- **Request pipeline**: `do_read()` → `on_read()` calls `parent.handle_request(move(request), shared_from_this())` → handler fills `get_response()` → calls `write()` → `on_write()` loops back to `do_read()`. `shared_from_this()` keeps the session alive while the handler holds the shared pointer.
-- **I/O**: runs on the socket's native executor (no explicit strand). `run()` uses `asio::post` for guaranteed deferred dispatch. All async callbacks use lambdas with `[self = shared_from_this()]` capture.
-- **Timeouts**: read timeout and write timeout are applied before `async_read`/`async_write` respectively. Configured via `ServerBase::Config`.
-- **Close**: `do_close()` performs `shutdown(send)` on the socket. The destructor calls `do_close()` via RAII.
 
 ---
 
 ## Design Decisions
 
-### 1. allOf → C++ Inheritance
-`allOf` with `$ref` bases becomes C++ multiple inheritance: `struct Derived : Base { ... }`. Serialization merges base JSON objects into the derived object. `allOf` with inline schemas extracts them as standalone structs (`{name}_base_{N}`).
+### 1. Frontend polymorphism via IFrontend
+Frontends implement a virtual interface. The Driver knows only `IFrontend` — format-specific
+parsing is isolated in per-format subdirectories (`OpenAPI/`, `OpenRPC/`, `Proto/`). Adding
+a new format means adding a new directory with a single class implementing `IFrontend`.
 
-### 2. Nested Types → Flat Naming
-Inline structs within parent types use `Parent_Child` naming (not `Parent::Child`). This simplifies dependency tracking — C++ `::` would require qualification that makes forward-declaration ordering fragile.
+### 2. Endpoint as the universal operation IR
+Both REST (path+verb+params) and RPC (body-only POST) map to `Endpoint`. RPC methods set
+params empty and use a flat path. The same backends handle both identically — RPC is just
+a degenerate REST endpoint.
 
-### 3. Variant Deduplication
-Duplicate `std::variant<A, B>` signatures become `using` aliases. The first variant with a given signature wins; subsequent identical signatures become `using TypeB = TypeA;`. A `typedef_chain_` map tracks these aliases for recursive resolution. Signatures are canonicalised by resolving typedef chains on alternatives first, giving a stable string like `variant<int64_t,std::string>`.
+### 3. Two-tier RPC IR (RPCMethod → Endpoint bridge)
+RPC-specific metadata (streaming mode, notification flag, structured errors) lives in
+`RPCMethod`, which frontends produce. A ~30-line bridge converts to `Endpoint`, which
+backends consume. This keeps RPC concepts out of the transport layer.
 
-### 4. Single-Alternative Variant Collapse
-A variant with exactly one alternative and no null marker collapses to a typedef: `using X = std::string;`. This handles OpenAPI schemas that declare a single-allowed-type via `oneOf`. The collapse is tracked in `typedef_chain_` so downstream types that reference the variant resolve to the concrete type.
+### 4. allOf → C++ inheritance
+`allOf` with `$ref` bases becomes C++ multiple inheritance with merged serialization.
+Inline `allOf` components are extracted as standalone `{name}_base_{N}` structs.
 
-### 5. Synthetic Type Filtering
-`isSyntheticCppType()` gates the dependency graph — any type starting with `std::` or matching a C++ primitive keyword (`int`, `double`, `bool`, etc.) is excluded from dependency tracking and topological sort. Without this, the dep graph would balloon with synthetic edges between `std::vector` and `std::string`, etc.
+### 5. Nested types → flat naming
+Inline structs within parent types use `Parent_Child` naming (not `Parent::Child`) to
+avoid forward-declaration ordering fragility in C++.
 
-### 6. Enum from Primitives
-String/integer primitives with `enum` values in the OpenAPI spec are emitted as `enum class Name : int { ... }` rather than simple `using` typedefs. This provides type safety at the C++ level. Enum value identifiers pass through `sanitize_enum_identifier()` which handles dots, leading digits, and C++ reserved words.
+### 6. Variant deduplication and collapse
+Duplicate variant signatures become `using` aliases tracked in a typedef chain.
+Single-alternative non-nullable variants collapse to typedefs. Signatures are canonicalised
+by resolving typedef chains before comparison.
 
-### 7. Parameter Sanitization
-Parameter names that collide with C++ keywords (`token`, `result`, `error`, `next`, `type`, `metadata`, `include`, `order`, `event_types`) get a `param_` prefix. Brackets, parentheses, dots, and commas are replaced with `_`.
+### 7. Synthetic type filtering
+Types matching C++ primitives (`int`, `double`, `std::string`, etc.) are excluded from
+the dependency graph via `isSyntheticCppType()`, preventing ballooning with synthetic edges.
 
-### 8. GCC/Clang Predefined Macros
-Names matching GCC/Clang predefined macros (`unix`, `linux`, `x86_64`, `__unix__`, etc.) get a trailing `_` appended by `sanitize()`. Without this, they silently expand to `1` at compile time, producing cryptic errors.
+### 8. Output filename constants
+Output path constants are centralized in `Support/Filenames.hpp` as `constexpr string_view`
+rather than hardcoded across generator files.
 
-### 9. Path Construction via find+replace
-Path templates use `std::string::find` + `replace` instead of `std::format`. This avoids requiring `<format>` (and `<regex>`) in generated client headers, keeping the generated code compatible with older standard library implementations.
-
-### 10. ICodeGenerator Interface
-All backends share a single abstract interface. All data needed for generation flows in through `operator()(const CodegenArgs&, const fs::path&)`. This separates configuration from execution and lets the pipeline call every generator through the same polymorphic pattern. The `CodegenArgs::ns` field carries the C++ namespace (derived from the spec title or `--namespace` flag) — all types, client, server, and Python bindings live in the same namespace per schema.
-
-### 11. Utility Organization
-Utility functions live in `namespace codegen` and `namespace codegen::filenames`. Output path constants (`SERVER_HPP`, `CLIENT_HPP`, `DEFS_HPP`, etc.) are centralized in `Support/Filenames.hpp` as `constexpr string_view` rather than hardcoded across five generator files. The `siesta/encoding.hpp` runtime header provides shared `url_encode()` + `query_value()` overloads so they are not duplicated in every generated `client.hpp`.
-
----
-
-## Edge Cases & Limitations
-
-### Currently Handled
-
-| Case | Mechanism |
-|------|-----------|
-| Empty variant (no alternatives, not nullable) | Emitted as `std::monostate` |
-| Single-alternative variant (not nullable) | Collapses to typedef (`using X = string;`) — tracked in `typedef_chain_` |
-| Duplicate variant signatures | Second occurrence becomes `using New = Existing;` |
-| Variant with `std::nullptr_t` (nullable) | `nullptr_t` added as final alternative — NOT collapsed even if singleton |
-| Nested variant alternatives | Flattened into the parent variant (`buildVariant` checks for `VariantType` in alternatives) |
-| `allOf` with both `$ref` and inline properties | ref → base class; inline → struct field |
-| `allOf` with inline object | Object extracted as `{name}_base_{N}` standalone struct |
-| Implicit object (no `"type"`, but has properties/allOf) | Treated as `StructType` via `parseImplicitObject()` |
-| `additionalProperties` on an object | Treated as `std::map<std::string, ValueType>` |
-| String enum values with dots/special chars | `sanitize_enum_identifier()` replaces dots with `_`, adds `_` prefix for leading digits |
-| Reserved C++ identifiers as type/param names | `sanitize()` appends `_`; `sanitizeParamName()` adds `param_` prefix |
-| Path parameters with `{}` format specifiers | Placeholder replaced with `{}` for `find`+`replace` at call site |
-| `delete` HTTP verb | Emitted as `boost::beast::http::verb::delete_` |
-| `$ref` to component parameters | Resolved via pre-fetched `fetched_params` map |
-| Operation-level params overriding path-level params | `op_overrides` map + `lookup` lambda prefers operation-level |
-
-### Known Limitations
-
-1. **Cyclic dependencies**: Not supported — value semantics prohibit cycles. The generator detects them and aborts with a clear error.
-2. **Polymorphic dispatch**: `oneOf` / `anyOf` generates `std::variant` but does not emit runtime discriminator-based dispatch. The schema `discriminator.propertyName` field is parsed but not acted upon.
-3. **Schema validation**: Minimal OpenAPI spec validation. Invalid schemas may produce confusing errors rather than early rejection.
-4. **Complex `$ref` chains**: Multi-hop `$ref` chains in parameters (e.g., `$ref` → `$ref` → inline) may not fully resolve.
-5. **Request body content types**: Only the first content-type entry is used for generated request body code.
-6. **Server URLs / authentication**: Not generated — the client class accepts host/port at construction but does not parse OpenAPI `servers` or `securitySchemes`.
-7. **Response type generation**: All endpoints return `siesta::beast::ClientBase::outcome_type` (a `boost::system::result` of the HTTP response). Structured response types from the schema are not generated or validated.
-8. **Query parameter arrays of non-string types**: Multi-valued query params for non-primitive arrays use `query_value()` which serializes each element as JSON — this may not match all server expectations.
-9. **simdjson single-pass ranges**: simdjson's `dom::object` / `dom::array` iterators are single-pass — re-entering `begin()` on an already-consumed range triggers a debug assertion (`tape.usable()`). The fix is pre-fetching all component data (parameters, request bodies, security schemes) and endpoint data into C++ containers before iterating paths. The `endpoint_ir.cpp` `parseEndpoints()` iterates paths exactly once, materialising all extracted data before returning.
-
----
-
-## Logging
-
-All logging goes to stderr. Phase tags enable filtering:
-
-```bash
-./siesta-generator --input spec.json --output out/ 2>&1 | grep '\[EMIT\]'
-./siesta-generator --input spec.json --output out/ 2>&1 | grep '\[DEP\]'
-```
-
-Tags: `PARSE`, `DEP`, `SORT`, `EMIT`
-
----
-
-## Build & Test
-
-```bash
-# Build generator
-cd build && ninja siesta-generator
-
-# Build + run all integration tests
-ninja && ctest --test-dir build/tests --output-on-failure
-
-# Benchmark (optional)
-cd tests/echo && ./benchmark_beast.sh --bench
-```
-
-### Quick Sanity Check
-
-```bash
-./build/generator/siesta-generator --input tests/echo.json --output /tmp/test/ 2>&1 | grep -E '(AST summary|Path endpoints|types present|WARNING|cycle)'
-```
-
-### Debugging Compilation Errors
-
-1. Search for undefined type names in `openapi_defs.hpp` — types referenced but not forward-declared
-2. Check the C++ namespace — all generated types, client, server, and Python bindings live in a single namespace (derived from the spec title or `--namespace`). No separate `api` vs `openapi` namespaces.
-3. Check C++ keyword conflicts — `delete`, `class`, `template`, `operator` in identifiers
-4. Check variant ordering — variant alternatives must be defined before the variant that references them
-5. Verify `NB_MODULE` name matches CMake target name for Python import
+### 9. Per-concern utility organization
+`sanitize()` handles C++ keyword conflicts, GCC predefined macros, and special-character
+replacement in a single O(1) lookup function. `query_value()` overloads for URL encoding
+live in the runtime header `encoding.hpp`, shared by all generated clients.
