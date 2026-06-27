@@ -16,6 +16,12 @@ if(DEFINED ENV{CONCURRENCY})
 else()
 	set(BM_CONCURRENCY 1)
 endif()
+if(NOT DEFINED BM_WS_REQUESTS)
+	set(BM_WS_REQUESTS 50000)
+endif()
+if(NOT DEFINED BM_WS_SIZE)
+	set(BM_WS_SIZE 100)
+endif()
 set(BM_HOST "127.0.0.1")
 
 # --- Beast REST (echo.json) ---
@@ -28,6 +34,16 @@ if(TARGET echo_beast_benchmark)
 		DEPENDS echo_beast_benchmark
 		WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 		COMMENT "Beast REST benchmark (${BM_REQUESTS} req, ${BM_CONCURRENCY} conn)"
+	)
+
+	add_custom_target(bench_beast_rest_ws
+		COMMAND $<TARGET_FILE:echo_beast_benchmark>
+			--host ${BM_HOST} --port 19913
+			--requests "${BM_WS_REQUESTS}" --concurrency ${BM_CONCURRENCY}
+			--warmup 100 --mode ws-echo --ws-size ${BM_WS_SIZE}
+		DEPENDS echo_beast_benchmark
+		WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+		COMMENT "Beast WS benchmark (${BM_WS_REQUESTS} req, ${BM_WS_SIZE} byte payload)"
 	)
 endif()
 

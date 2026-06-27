@@ -2,8 +2,11 @@
 #include "client.hpp"
 
 #include <boost/asio.hpp>
+#include <boost/asio/awaitable.hpp>
+#include <boost/asio/co_spawn.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/beast/http.hpp>
+#include <boost/beast/websocket.hpp>
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -20,6 +23,7 @@
 
 namespace asio = boost::asio;
 namespace http = boost::beast::http;
+namespace beast = boost::beast;
 using bench_clock = std::chrono::steady_clock;
 using tcp = asio::ip::tcp;
 
@@ -232,11 +236,130 @@ make_callable_for_mode(std::string_view mode) {
 	return make_echo_callable();
 }
 
+// ── WebSocket benchmark payload ──────────────────────────────────
+
+static std::string make_ws_payload(size_t target_bytes) {
+	std::string json = "{\"items\":[";
+	size_t i = 0;
+	while (json.size() < target_bytes) {
+		if (i > 0) json += ",";
+		// Each item ~170 bytes with repeating pattern
+		json += "{\"id\":" + std::to_string(i)
+		     + ",\"name\":\"benchmark_item_"
+		     + std::string(40, 'x')
+		     + "\",\"tags\":[\"c"
+		     + std::to_string(i % 4)
+		     + "\",\"b"
+		     + std::to_string(i % 7)
+		     + "\",\"p"
+		     + std::to_string(i % 13)
+		     + "\"],\"desc\":\""
+		     + std::string(60, 'y')
+		     + std::to_string(i % 1000)
+		     + "\"}";
+		i++;
+	}
+	json += "]}";
+	return json;
+}
+
+// ── WebSocket benchmark runner ───────────────────────────────────
+
+static void run_ws_benchmark(asio::io_context& ctx,
+                             const tcp::endpoint& endpoint,
+                             int total, int concurrency, int warmup,
+                             int ws_size) {
+	auto payload = std::make_shared<std::string>(make_ws_payload(ws_size));
+	auto latency_data = std::make_shared<std::vector<double>>();
+	latency_data->reserve(total);
+
+	// Benchmark loop using async I/O — one connection does N requests sequentially
+	int remaining = total;
+	std::mutex lat_mutex;
+	auto t_start = bench_clock::now();
+
+	struct Conn : std::enable_shared_from_this<Conn> {
+		asio::io_context& ctx;
+		tcp::socket sock;
+		beast::websocket::stream<tcp::socket&> ws;
+		beast::flat_buffer buf;
+		bench_clock::time_point req_start;
+		std::shared_ptr<std::string> payload;
+		int remaining;
+		std::shared_ptr<std::vector<double>> latency_data;
+		std::mutex* lat_mutex;
+		int* total_remaining;
+		int concurrency;
+		int my_id;
+
+		Conn(asio::io_context& c, const tcp::endpoint& ep,
+		     std::shared_ptr<std::string> p, int n,
+		     std::shared_ptr<std::vector<double>> ld, std::mutex* lm,
+		     int* tr, int cc, int id)
+			: ctx(c), sock(c), ws(sock), payload(std::move(p)), remaining(n),
+			  latency_data(std::move(ld)), lat_mutex(lm), total_remaining(tr),
+			  concurrency(cc), my_id(id) {
+			sock.connect(ep);
+			ws.handshake("localhost", "/ws/echo");
+		}
+
+		void start() {
+			req_start = bench_clock::now();
+			ws.async_write(asio::buffer(*payload),
+				[self = shared_from_this()](boost::system::error_code ec, std::size_t) {
+					if (ec) { (*self->total_remaining)--; return; }
+					self->ws.async_read(self->buf,
+						[self](boost::system::error_code ec, std::size_t) {
+							if (ec) { (*self->total_remaining)--; return; }
+							auto us = std::chrono::duration_cast<std::chrono::microseconds>(
+								bench_clock::now() - self->req_start).count();
+							{
+								std::lock_guard lk(*self->lat_mutex);
+								self->latency_data->push_back(static_cast<double>(us));
+							}
+							self->buf.clear();
+							if (--self->remaining > 0) {
+								self->start();
+							} else {
+								(*self->total_remaining)--;
+								boost::system::error_code ec2;
+								self->ws.close(beast::websocket::close_code::normal, ec2);
+								self->sock.close();
+								if (*self->total_remaining <= 0)
+									self->ctx.stop();
+							}
+						});
+				});
+		}
+	};
+
+	std::atomic<int> started{0};
+	for (int c = 0; c < concurrency; c++) {
+		int n = total / concurrency + (c < total % concurrency ? 1 : 0);
+		auto conn = std::make_shared<Conn>(ctx, endpoint, payload, n,
+			latency_data, &lat_mutex, &remaining, concurrency, c);
+		asio::post(ctx, [conn] { conn->start(); });
+	}
+
+	std::cerr << "  running " << total << " requests over "
+	          << concurrency << " connection" << (concurrency > 1 ? "s" : "")
+	          << " [ws-echo] ... " << std::flush;
+	ctx.run();
+
+	auto t_end = bench_clock::now();
+	double wall_s = std::chrono::duration<double>(t_end - t_start).count();
+	std::cerr << "done\n\n";
+
+	std::sort(latency_data->begin(), latency_data->end());
+	print_results(*latency_data, wall_s, concurrency, 0, "ws-echo");
+}
+
 int main(int argc, char* argv[]) {
 	int total_requests = 100'000;
 	int concurrency = 1;
 	int warmup = 100;
 	int pipeline_depth = 0;
+	int ws_size = 100;
 	uint16_t port = 19920;
 	std::string host;
 	std::string mode = "echo";
@@ -262,6 +385,8 @@ int main(int argc, char* argv[]) {
 			use_tls = true;
 		} else if (arg == "--mode" && i + 1 < argc) {
 			mode = argv[++i];
+		} else if (arg == "--ws-size" && i + 1 < argc) {
+			ws_size = std::stoi(argv[++i]);
 		} else if (arg == "--help" || arg == "-h") {
 			std::cout << "Usage: echo_beast_benchmark [OPTIONS]\n"
 			          << "  -n, --requests N     Total requests (default: 100000)\n"
@@ -269,10 +394,12 @@ int main(int argc, char* argv[]) {
 			          << "      --pipeline N     Pipeline depth per connection (0=sequential)\n"
 			          << "      --warmup N       Warmup requests per connection (default: 100)\n"
 			          << "      --mode M         Benchmark mode:\n"
-			          << "                         echo          GET /echo (string concat)\n"
-			          << "                         post-item     POST /items (parse+value_to+serialize)\n"
-			          << "                         post-detailed POST /items/detailed (allOf inheritance)\n"
-			          << "                         post-outcome  POST /outcome (variant dispatch)\n"
+		          << "                         echo          GET /echo (string concat)\n"
+		          << "                         post-item     POST /items (parse+value_to+serialize)\n"
+		          << "                         post-detailed POST /items/detailed (allOf inheritance)\n"
+		          << "                         post-outcome  POST /outcome (variant dispatch)\n"
+		          << "                         ws-echo       WebSocket echo (payload size via --ws-size)\n"
+		          << "      --ws-size N       WS payload size in bytes (default: 100)\n"
 			          << "      --host H         Connect to external server (skip embedded)\n"
 			          << "      --port P         Server port (default: 19920)\n"
 			          << "      --tls            Enable TLS (sequential mode only)\n";
@@ -307,6 +434,28 @@ int main(int argc, char* argv[]) {
 		srv_conf.write_timeout = std::chrono::milliseconds::zero();
 		srv_conf.idle_timeout = std::chrono::milliseconds::zero();
 		if (use_tls) srv_conf.ssl_ctx = srv_ssl.get();
+
+		if (mode == "ws-echo") {
+			auto bench_server = std::make_unique<echo_testing::BenchServer>(server_ctx, srv_conf);
+			bench_server->start(addr, port);
+			server_thread = std::thread([&] { server_ctx.run(); });
+			std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+			asio::io_context client_ctx;
+			g_server_ctx = &server_ctx;
+			g_client_ctx = &client_ctx;
+			std::signal(SIGINT, sigint_handler);
+			std::signal(SIGTERM, sigint_handler);
+
+			run_ws_benchmark(client_ctx, endpoint, total_requests, concurrency, warmup, ws_size);
+
+			server_ctx.stop();
+			server_thread.join();
+			g_server_ctx = nullptr;
+			g_client_ctx = nullptr;
+			return 0;
+		}
+
 		server = std::make_unique<echo_testing::DefaultServer>(server_ctx, srv_conf);
 		server->start(addr, port);
 		server_thread = std::thread([&] { server_ctx.run(); });

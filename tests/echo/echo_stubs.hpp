@@ -183,4 +183,38 @@ struct DefaultServer : Echo_API::Server {
 	}
 };
 
+struct BenchServer : DefaultServer {
+	using DefaultServer::DefaultServer;
+
+	void handle_ws_ws_echo(
+		::boost::beast::websocket::stream<
+			::siesta::beast::ServerBase::stream_type&>& ws,
+		const request req,
+		Session::Ptr session) override {
+		struct State : std::enable_shared_from_this<State> {
+			::boost::beast::websocket::stream<
+				::siesta::beast::ServerBase::stream_type&>* w;
+			::boost::beast::flat_buffer buf;
+			Session::Ptr session;
+			State(decltype(w) w_, decltype(buf) b, decltype(session) s)
+				: w(w_), buf(std::move(b)), session(std::move(s)) {}
+			void start() {
+				w->async_read(buf,
+					[self = shared_from_this()](ec_t ec, std::size_t) {
+						if (ec) return;
+						self->w->text(self->w->got_text());
+						self->w->async_write(self->buf.data(),
+							[self](ec_t ec, std::size_t) {
+								if (ec) return;
+								self->buf.clear();
+								self->start();
+							});
+					});
+			}
+		};
+		auto s = std::make_shared<State>(&ws, ::boost::beast::flat_buffer{}, session);
+		s->start();
+	}
+};
+
 } // namespace echo_testing

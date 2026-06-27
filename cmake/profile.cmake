@@ -21,6 +21,12 @@ endif()
 if(NOT DEFINED HEAP_INTERVAL)
 	set(HEAP_INTERVAL 524288)
 endif()
+if(NOT DEFINED PROFILE_WS_REQUESTS)
+	set(PROFILE_WS_REQUESTS 500)
+endif()
+if(NOT DEFINED BM_WS_SIZE)
+	set(BM_WS_SIZE 100)
+endif()
 
 if(NOT PROFILER_LIB)
 	add_custom_target(profile
@@ -68,6 +74,26 @@ if(TCMALLOC_LIB AND TARGET echo_beast_server AND TARGET echo_beast_benchmark)
 		DEPENDS echo_beast_server echo_beast_benchmark
 		WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
 		COMMENT "Heap profile beast/rest → ${PROFILES_DIR}/heap.*.heap"
+	)
+endif()
+
+# --- Beast REST WS CPU profile ---
+if(TARGET echo_beast_server_prof AND TARGET echo_beast_benchmark)
+	add_custom_target(profile_beast_rest_ws
+		COMMAND ${CMAKE_COMMAND} -E make_directory ${PROFILES_DIR}
+		COMMAND ${CMAKE_COMMAND} -E env
+			CPUPROFILE=${PROFILES_DIR}/cpu_ws.prof
+			CPUPROFILE_FREQUENCY=500
+			$<TARGET_FILE:echo_beast_server_prof> 127.0.0.1 19914
+			>/dev/null 2>&1 &
+		COMMAND ${CMAKE_COMMAND} -E sleep 0.5
+		COMMAND $<TARGET_FILE:echo_beast_benchmark>
+			--host 127.0.0.1 --port 19914 --mode ws-echo --ws-size ${BM_WS_SIZE}
+			--requests "${PROFILE_WS_REQUESTS}" --concurrency 1 --warmup 100
+		COMMAND pkill -INT -f echo_beast_server_prof 2>/dev/null || true
+		DEPENDS echo_beast_server_prof echo_beast_benchmark
+		WORKING_DIRECTORY ${CMAKE_BINARY_DIR}
+		COMMENT "CPU WS profile beast/rest → ${PROFILES_DIR}/cpu_ws.prof"
 	)
 endif()
 
