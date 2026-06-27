@@ -61,9 +61,13 @@ generator/src/
 │   ├── DependencyGraph.hpp/.cpp  Build + topological sort (Kahn) + cycle detection
 │   └── DefsGenerator.hpp/.cpp Type definitions + JSON ser/des codegen
 ├── Backend/
-│   └── Beast/                 boost::beast backends
+│   ├── Shared/                  Transport-agnostic emitters (reused by all backends)
+│   │   ├── MethodEmitter.hpp/.cpp  Signature, path/query/header param emission
+│   │   └── DispatchEmitter.hpp     Endpoint classification, match_path, table structs
+│   └── Beast/                   boost::beast backends
 │       ├── BeastClientGen.hpp/.cpp
 │       ├── BeastServerGen.hpp/.cpp
+│       ├── ServerEmitter.hpp/.cpp  Beast-specific dispatch, WS upgrade, 404
 │       ├── BeastPythonGen.hpp/.cpp
 │       └── BeastServerPythonGen.hpp/.cpp
 └── Support/

@@ -25,12 +25,9 @@ private:
 	void emitClassHeader(std::ostream& out);
 	void emitEndpoint(std::ostream& out, const Endpoint& ep);
 	void emitWebSocketEndpoint(std::ostream& out, const Endpoint& ep);
-	void emitMethodSignature(std::ostream& out, const Endpoint& ep);
 	void emitMethodBody(std::ostream& out, const Endpoint& ep);
 	void generateClientHpp(std::ostream& out, const std::vector<Endpoint>& endpoints);
 
-	void emitPathParams(std::ostream& out, const std::vector<const ClientParam*>& path_params);
-	void emitQueryParams(std::ostream& out, const std::vector<const ClientParam*>& params);
 	void emitRequestBody(std::ostream& out, const Endpoint& ep);
 	void emitHeaderParams(std::ostream& out, const std::vector<const ClientParam*>& params);
 
