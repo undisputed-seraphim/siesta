@@ -140,6 +140,11 @@ public:
 			}
 		}
 
+		// Set a hard I/O deadline on the underlying TCP socket.
+		void set_socket_timeout(std::chrono::milliseconds ms) {
+			std::visit([ms](auto& s) { tcp_of(s).expires_after(ms); }, _stream);
+		}
+
 	protected:
 		friend ServerBase;
 		static constexpr std::size_t max_responses_ = 64;
@@ -177,7 +182,7 @@ public:
 			return std::visit(std::forward<F>(f), _stream);
 		}
 
-		void start_read_loop();
+		void start_read_loop();  // protected
 		void on_read_done(ec_t);
 		void do_write();
 		void do_close();
@@ -215,6 +220,26 @@ protected:
 	void on_accept(const ec_t&, protocol::socket);
 	bool run_interceptors(request_context& ctx);
 };
+
+// Factory: interceptor that enforces the X-Deadline-Ms request header.
+// Reads the header value in milliseconds, sets a TCP socket timeout.
+// Returns false with 504 if the deadline is ≤ 0 (already expired).
+inline ServerBase::Interceptor make_deadline_interceptor() {
+	return [](ServerBase::request_context& ctx) -> bool {
+		auto it = ctx.req->base().find("X-Deadline-Ms");
+		if (it == ctx.req->base().end()) return true;
+		int ms = 0;
+		try { ms = std::stoi(std::string(it->value())); }
+		catch (...) { return true; }
+		if (ms <= 0) {
+			ctx.error_response = ctx.session->make_response(
+				504, R"({"error":"deadline exceeded"})");
+			return false;
+		}
+		ctx.session->set_socket_timeout(std::chrono::milliseconds(ms));
+		return true;
+	};
+}
 
 namespace __detail {
 struct MapHash {

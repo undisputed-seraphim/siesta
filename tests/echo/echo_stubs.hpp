@@ -5,6 +5,7 @@
 #include <boost/json.hpp>
 #include <string>
 #include <string_view>
+#include <thread>
 #include <variant>
 
 namespace echo_testing {
@@ -214,6 +215,17 @@ struct BenchServer : DefaultServer {
 		};
 		auto s = std::make_shared<State>(&ws, ::boost::beast::flat_buffer{}, session);
 		s->start();
+	}
+};
+
+// Server with a handler that intentionally takes >2000ms to respond,
+// used for testing deadline enforcement and client cancellation.
+struct SlowServer : DefaultServer {
+	using DefaultServer::DefaultServer;
+	void get__echo(const request, Session::Ptr s) override {
+		std::this_thread::sleep_for(std::chrono::milliseconds(2000));
+		auto resp = s->make_response(200, R"({"message":"slow"})");
+		s->send(std::move(resp));
 	}
 };
 

@@ -505,6 +505,7 @@ TEST_CASE("graceful shutdown drains and stops", "[integration][beast]") {
 	client->stop();
 
 	srv.shutdown();
+	srv_ctx.stop();
 	srv_thread.join();
 }
 
@@ -518,6 +519,7 @@ TEST_CASE("no new connections after shutdown", "[integration][beast]") {
 	std::this_thread::sleep_for(std::chrono::milliseconds(30));
 
 	srv.shutdown();
+	srv_ctx.stop();
 	srv_thread.join();
 
 	boost::system::error_code ec;
@@ -547,6 +549,7 @@ TEST_CASE("oversized body returns 413", "[integration][beast]") {
 
 	http::request<http::string_body> req{http::verb::post, "/echo", 11};
 	req.set(http::field::host, "localhost");
+	req.set(http::field::connection, "close");
 	req.set(http::field::content_type, "application/json");
 	req.body() = std::string(200, 'x');
 	req.prepare_payload();
@@ -560,6 +563,7 @@ TEST_CASE("oversized body returns 413", "[integration][beast]") {
 
 	sock.close();
 	srv.shutdown();
+	srv_ctx.stop();
 	srv_thread.join();
 }
 
@@ -592,6 +596,7 @@ TEST_CASE("body under limit succeeds", "[integration][beast]") {
 
 	client->stop();
 	srv.shutdown();
+	srv_ctx.stop();
 	srv_thread.join();
 }
 
@@ -614,6 +619,7 @@ TEST_CASE("idle connection times out", "[integration][beast]") {
 
 	http::request<http::string_body> req{http::verb::get, "/echo?message=hi", 11};
 	req.set(http::field::host, "localhost");
+	req.set(http::field::connection, "close");
 	req.prepare_payload();
 	http::write(sock, req);
 
@@ -638,6 +644,7 @@ TEST_CASE("idle connection times out", "[integration][beast]") {
 
 	sock.close();
 	srv.shutdown();
+	srv_ctx.stop();
 	srv_thread.join();
 }
 
@@ -661,6 +668,7 @@ TEST_CASE("CORS preflight returns allow headers", "[integration][beast]") {
 
 	http::request<http::string_body> req{http::verb::options, "/echo", 11};
 	req.set(http::field::host, "localhost");
+	req.set(http::field::connection, "close");
 	req.set(http::field::origin, "http://example.com");
 	req.prepare_payload();
 	http::write(sock, req);
@@ -676,6 +684,7 @@ TEST_CASE("CORS preflight returns allow headers", "[integration][beast]") {
 
 	sock.close();
 	srv.shutdown();
+	srv_ctx.stop();
 	srv_thread.join();
 }
 
@@ -698,6 +707,7 @@ TEST_CASE("responses include Date Server and CORS headers", "[integration][beast
 
 	http::request<http::string_body> req{http::verb::get, "/echo?message=hi", 11};
 	req.set(http::field::host, "localhost");
+	req.set(http::field::connection, "close");
 	req.prepare_payload();
 	http::write(sock, req);
 
@@ -712,6 +722,7 @@ TEST_CASE("responses include Date Server and CORS headers", "[integration][beast
 
 	sock.close();
 	srv.shutdown();
+	srv_ctx.stop();
 	srv_thread.join();
 }
 
@@ -759,6 +770,7 @@ TEST_CASE("TLS echo round-trip", "[integration][beast][tls]") {
 
 	client->stop();
 	srv.shutdown();
+	srv_ctx.stop();
 	srv_thread.join();
 }
 
@@ -784,6 +796,7 @@ TEST_CASE("plain client on TLS server fails", "[integration][beast][tls]") {
 
 	http::request<http::string_body> req{http::verb::get, "/echo?message=hi", 11};
 	req.set(http::field::host, "localhost");
+	req.set(http::field::connection, "close");
 	req.prepare_payload();
 
 	boost::system::error_code ec;
@@ -797,6 +810,7 @@ TEST_CASE("plain client on TLS server fails", "[integration][beast][tls]") {
 
 	sock.close();
 	srv.shutdown();
+	srv_ctx.stop();
 	srv_thread.join();
 }
 
@@ -832,6 +846,7 @@ TEST_CASE("HEAD returns headers without body", "[integration][beast]") {
 
 	http::request<http::string_body> req{http::verb::head, "/echo?message=headtest", 11};
 	req.set(http::field::host, "localhost");
+	req.set(http::field::connection, "close");
 	req.prepare_payload();
 	http::write(s, req);
 
@@ -888,6 +903,7 @@ TEST_CASE("gzip compression when Accept-Encoding set", "[integration][beast]") {
 
 	http::request<http::string_body> req{http::verb::get, "/echo?message=compressed", 11};
 	req.set(http::field::host, "localhost");
+	req.set(http::field::connection, "close");
 	req.set(http::field::accept_encoding, "gzip");
 	req.prepare_payload();
 	http::write(sock, req);
@@ -906,6 +922,7 @@ TEST_CASE("gzip compression when Accept-Encoding set", "[integration][beast]") {
 
 	sock.close();
 	srv.shutdown();
+	srv_ctx.stop();
 	srv_thread.join();
 }
 
@@ -927,6 +944,7 @@ TEST_CASE("no compression without Accept-Encoding", "[integration][beast]") {
 
 	http::request<http::string_body> req{http::verb::get, "/echo?message=plain", 11};
 	req.set(http::field::host, "localhost");
+	req.set(http::field::connection, "close");
 	req.prepare_payload();
 	http::write(sock, req);
 
@@ -943,6 +961,7 @@ TEST_CASE("no compression without Accept-Encoding", "[integration][beast]") {
 
 	sock.close();
 	srv.shutdown();
+	srv_ctx.stop();
 	srv_thread.join();
 }
 
@@ -995,6 +1014,7 @@ TEST_CASE("websocket echo round-trip", "[integration][beast]") {
 	boost::system::error_code ec;
 	ws.close(beast::websocket::close_code::normal, ec);
 	srv.shutdown();
+	srv_ctx.stop();
 	srv_thread.join();
 }
 
@@ -1031,5 +1051,199 @@ TEST_CASE("websocket echo via generated client", "[integration][rpc][ws]") {
 
 	client->stop();
 	srv.shutdown();
+	srv_ctx.stop();
 	srv_thread.join();
+}
+
+// ═══════════════════════════════════════════════════════════════
+//  Deadline + Cancellation tests
+// ═══════════════════════════════════════════════════════════════
+
+TEST_CASE("deadline interceptor rejects slow handler", "[integration][deadline]") {
+	static constexpr uint16_t PORT = 19940;
+
+	asio::io_context srv_ctx;
+	siesta::beast::ServerBase::Config conf;
+	conf.read_timeout = std::chrono::milliseconds::zero();
+	conf.write_timeout = std::chrono::milliseconds::zero();
+	echo_testing::SlowServer srv(srv_ctx, conf);
+	srv.add_interceptor(siesta::beast::make_deadline_interceptor());
+	srv.start(TEST_ADDR, PORT);
+	std::thread srv_thread([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	asio::ip::tcp::socket sock(ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+
+	http::request<http::string_body> req{http::verb::get, "/echo?message=hello", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::connection, "close");
+	req.set("X-Deadline-Ms", "10");
+	req.prepare_payload();
+	http::write(sock, req);
+
+	boost::beast::flat_buffer buf;
+	http::response<http::string_body> resp;
+	boost::system::error_code ec;
+	http::read(sock, buf, resp, ec);
+	REQUIRE(ec);
+
+	srv.shutdown();
+	srv_ctx.stop();
+	srv_thread.join();
+}
+
+TEST_CASE("deadline interceptor passes with generous deadline", "[integration][deadline]") {
+	static constexpr uint16_t PORT = 19941;
+
+	asio::io_context srv_ctx;
+	siesta::beast::ServerBase::Config conf;
+	conf.read_timeout = std::chrono::milliseconds::zero();
+	conf.write_timeout = std::chrono::milliseconds::zero();
+	echo_testing::SlowServer srv(srv_ctx, conf);
+	srv.add_interceptor(siesta::beast::make_deadline_interceptor());
+	srv.start(TEST_ADDR, PORT);
+	std::thread srv_thread([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	asio::ip::tcp::socket sock(ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+
+	http::request<http::string_body> req{http::verb::get, "/echo?message=hello", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::connection, "close");
+	req.set("X-Deadline-Ms", "5000");
+	req.prepare_payload();
+	http::write(sock, req);
+
+	boost::beast::flat_buffer buf;
+	http::response<http::string_body> resp;
+	boost::system::error_code ec;
+	http::read(sock, buf, resp, ec);
+	REQUIRE_FALSE(ec);
+	REQUIRE(resp.result() == http::status::ok);
+	REQUIRE(resp.body() == R"({"message":"slow"})");
+
+	srv.shutdown();
+	srv_ctx.stop();
+	srv_thread.join();
+}
+
+TEST_CASE("deadline interceptor ignores missing header", "[integration][deadline]") {
+	static constexpr uint16_t PORT = 19942;
+
+	asio::io_context srv_ctx;
+	siesta::beast::ServerBase::Config conf;
+	conf.read_timeout = std::chrono::milliseconds::zero();
+	conf.write_timeout = std::chrono::milliseconds::zero();
+	echo_testing::SlowServer srv(srv_ctx, conf);
+	srv.add_interceptor(siesta::beast::make_deadline_interceptor());
+	srv.start(TEST_ADDR, PORT);
+	std::thread srv_thread([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	asio::ip::tcp::socket sock(ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+
+	http::request<http::string_body> req{http::verb::get, "/echo?message=hello", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::connection, "close");
+	req.prepare_payload();
+	http::write(sock, req);
+
+	boost::beast::flat_buffer buf;
+	http::response<http::string_body> resp;
+	boost::system::error_code ec;
+	http::read(sock, buf, resp, ec);
+	REQUIRE_FALSE(ec);
+	REQUIRE(resp.result() == http::status::ok);
+	REQUIRE(resp.body() == R"({"message":"slow"})");
+
+	srv.shutdown();
+	srv_ctx.stop();
+	srv_thread.join();
+}
+
+TEST_CASE("deadline interceptor returns 504 for zero deadline", "[integration][deadline]") {
+	static constexpr uint16_t PORT = 19943;
+
+	asio::io_context srv_ctx;
+	siesta::beast::ServerBase::Config conf;
+	conf.read_timeout = std::chrono::milliseconds::zero();
+	conf.write_timeout = std::chrono::milliseconds::zero();
+	echo_testing::DefaultServer srv(srv_ctx, conf);
+	srv.add_interceptor(siesta::beast::make_deadline_interceptor());
+	srv.start(TEST_ADDR, PORT);
+	std::thread srv_thread([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	asio::ip::tcp::socket sock(ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+
+	http::request<http::string_body> req{http::verb::get, "/echo?message=hello", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::connection, "close");
+	req.set("X-Deadline-Ms", "0");
+	req.prepare_payload();
+	http::write(sock, req);
+
+	boost::beast::flat_buffer buf;
+	http::response<http::string_body> resp;
+	boost::system::error_code ec;
+	http::read(sock, buf, resp, ec);
+	REQUIRE_FALSE(ec);
+	REQUIRE(resp.result() == http::status::gateway_timeout);
+
+	srv.shutdown();
+	srv_ctx.stop();
+	srv_thread.join();
+}
+
+TEST_CASE("client cancel stops in-flight request", "[integration][cancel]") {
+	static constexpr uint16_t PORT = 19944;
+
+	asio::io_context srv_ctx;
+	siesta::beast::ServerBase::Config conf;
+	conf.read_timeout = std::chrono::milliseconds::zero();
+	conf.write_timeout = std::chrono::milliseconds::zero();
+	echo_testing::SlowServer srv(srv_ctx, conf);
+	srv.start(TEST_ADDR, PORT);
+	std::thread srv_thread([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	auto client = std::make_shared<Echo_API::Client>(ctx);
+	client->start(TEST_ADDR, PORT);
+	ctx.run();
+
+	std::promise<Echo_API::Client::outcome_type> promise;
+	auto fut = promise.get_future();
+
+	std::thread caller([&] {
+		auto outcome_future = client->get__echo("hello", std::nullopt, asio::use_future);
+		ctx.restart();
+		ctx.run();
+		promise.set_value(outcome_future.get());
+	});
+
+	std::this_thread::sleep_for(std::chrono::milliseconds(100));
+	client->cancel();
+
+	caller.join();
+	auto outcome = fut.get();
+	REQUIRE(outcome.has_error());
+
+	srv.shutdown();
+	srv_ctx.stop();
+	srv_thread.join();
+}
+
+TEST_CASE("cancel is safe on idle client", "[integration][cancel]") {
+	asio::io_context ctx;
+	Echo_API::Client client(ctx);
+	REQUIRE_NOTHROW(client.cancel());
 }

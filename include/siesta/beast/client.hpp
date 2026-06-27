@@ -81,6 +81,12 @@ public:
 	void set_retry(RetryConfig r) { _retry = std::move(r); }
 	const RetryConfig& retry() const { return _retry; }
 
+	// Cancel any in-flight request. Closes the TCP connection, causing
+	// pending async_submit_request calls to complete with an error.
+	void cancel() {
+		tcp_layer().close();
+	}
+
 	// WebSocket — creates stream from TCP layer on first call.
 	// Must be called after start() and before any WS I/O.
 	::boost::beast::websocket::stream<stream_type&>& websocket() {
