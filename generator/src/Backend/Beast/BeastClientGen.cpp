@@ -82,55 +82,80 @@ void BeastClientGenerator::emitWebSocketEndpoint(std::ostream& out, const Endpoi
 		write_multiline_comment(out, text, "\t");
 	}
 
-	auto streaming_note = [&]() -> std::string {
-		switch (ep.streaming_mode) {
-		case StreamingMode::ServerStream: return " server-streaming";
-		case StreamingMode::ClientStream: return " client-streaming";
-		case StreamingMode::Bidirectional: return " bidirectional";
-		default: return "";
-		}
-	}();
+	out << "\t// WebSocket"
+	    << (ep.streaming_mode == StreamingMode::ServerStream ? " server-streaming" :
+	        ep.streaming_mode == StreamingMode::ClientStream ? " client-streaming" :
+	        ep.streaming_mode == StreamingMode::Bidirectional ? " bidirectional" : "")
+	    << "\n";
 
-	out << "\t// WebSocket" << streaming_note << "\n";
-
-	// Signature: returns boost::asio::awaitable<outcome_type>
 	out << "\t::boost::asio::awaitable<outcome_type> " << ep.function_name << "(";
-	if (ep.has_request_body && !ep.body_type.empty()) {
+	bool has_body = ep.has_request_body && !ep.body_type.empty();
+	if (has_body) {
 		out << "const " << ep.body_type << "& body";
+	} else if (ep.streaming_mode == StreamingMode::None) {
+		out << "std::string_view message = {}";
 	}
 	out << ")\n";
 	out << "\t{\n";
 
-	// Upgrade to WebSocket
-	out << "\t\tauto ws = co_await this->upgrade_to_websocket(\n";
-	out << "\t\t\t\"" << escapeCppString(ep.path) << "\"sv);\n";
+	out << "\t\tauto& ws = this->websocket();\n";
+	out << "\t\tco_await this->ws_upgrade("
+	    << "\"" << escapeCppString(ep.path) << "\"sv,\n";
+	out << "\t\t\t::boost::asio::use_awaitable);\n";
 	out << "\n";
 
-	// Send initial request body if applicable
-	if (ep.has_request_body && !ep.body_type.empty()) {
+	if (has_body) {
 		out << "\t\t{\n";
 		out << "\t\t\tauto sp = json_storage();\n";
 		out << "\t\t\tauto jv = boost::json::value_from(body, sp);\n";
 		out << "\t\t\tws.text(true);\n";
 		out << "\t\t\tco_await ws.async_write(\n";
-		out << "\t\t\t\t::boost::asio::buffer(boost::json::serialize(jv)));\n";
+		out << "\t\t\t\t::boost::asio::buffer(boost::json::serialize(jv)),\n";
+		out << "\t\t\t\t::boost::asio::use_awaitable);\n";
+		out << "\t\t}\n";
+	} else if (ep.streaming_mode == StreamingMode::None) {
+		out << "\t\tif (!message.empty()) {\n";
+		out << "\t\t\tws.text(true);\n";
+		out << "\t\t\tco_await ws.async_write(\n";
+		out << "\t\t\t\t::boost::asio::buffer(message),\n";
+		out << "\t\t\t\t::boost::asio::use_awaitable);\n";
 		out << "\t\t}\n";
 	}
 
-	// Read loop for server-streaming / bidirectional
-	if (ep.streaming_mode == StreamingMode::ServerStream || ep.streaming_mode == StreamingMode::Bidirectional) {
+	if (ep.streaming_mode == StreamingMode::ServerStream
+	    || ep.streaming_mode == StreamingMode::None)
+	{
+		out << "\n\t\t::boost::beast::flat_buffer buf;\n";
+		out << "\t\tco_await ws.async_read(buf, ::boost::asio::use_awaitable);\n";
+		out << "\t\tresponse_type resp;\n";
+		out << "\t\tresp.result(boost::beast::http::status::ok);\n";
+		out << "\t\tresp.body() = ::boost::beast::buffers_to_string(buf.data());\n";
+		out << "\t\tresp.set(boost::beast::http::field::content_type, \"application/json\");\n";
+		out << "\t\tws.text(true);\n";
+		out << "\t\tco_await ws.async_close(::boost::beast::websocket::close_code::normal,\n";
+		out << "\t\t\t::boost::asio::use_awaitable);\n";
+		out << "\t\tco_return resp;\n";
+	} else if (ep.streaming_mode == StreamingMode::Bidirectional) {
 		out << "\n\t\t::boost::beast::flat_buffer buf;\n";
 		out << "\t\tfor (;;) {\n";
-		out << "\t\t\tco_await ws.async_read(buf);\n";
+		out << "\t\t\tco_await ws.async_read(buf, ::boost::asio::use_awaitable);\n";
 		out << "\t\t\tif (ws.got_text()) {\n";
-		out << "\t\t\t\tco_return outcome_type(boost::json::value_to<" << ep.body_type << ">(\n";
-		out << "\t\t\t\t\tboost::json::parse(::boost::beast::buffers_to_string(buf.data()))));\n";
+		out << "\t\t\t\tresponse_type resp;\n";
+		out << "\t\t\t\tresp.result(boost::beast::http::status::ok);\n";
+		out << "\t\t\t\tresp.body() = ::boost::beast::buffers_to_string(buf.data());\n";
+		out << "\t\t\t\tresp.set(boost::beast::http::field::content_type, \"application/json\");\n";
+		out << "\t\t\t\tws.text(true);\n";
+		out << "\t\t\t\tco_await ws.async_close(::boost::beast::websocket::close_code::normal,\n";
+		out << "\t\t\t\t\t::boost::asio::use_awaitable);\n";
+		out << "\t\t\t\tco_return resp;\n";
 		out << "\t\t\t}\n";
 		out << "\t\t\tbuf.clear();\n";
 		out << "\t\t}\n";
 	} else {
-		// Client streaming: just close the WebSocket
-		out << "\n\t\tco_await ws.async_close(::boost::beast::websocket::close_code::normal);\n";
+		out << "\n\t\tws.text(true);\n";
+		out << "\t\tco_await ws.async_close(::boost::beast::websocket::close_code::normal,\n";
+		out << "\t\t\t::boost::asio::use_awaitable);\n";
+		out << "\t\t		co_return response_type{};\n";
 	}
 
 	out << "\t}\n";
@@ -228,11 +253,19 @@ void BeastClientGenerator::emitMethodBody(std::ostream& out, const Endpoint& ep)
 }
 
 void BeastClientGenerator::generateClientHpp(std::ostream& out, const std::vector<Endpoint>& endpoints) {
+	bool has_ws = std::any_of(endpoints.begin(), endpoints.end(),
+		[](const Endpoint& e) { return e.is_websocket; });
+
 	out << "#pragma once\n";
 	out << "#include <boost/asio.hpp>\n";
 	out << "#include <boost/asio/ip/tcp.hpp>\n";
 	out << "#include <boost/beast/core.hpp>\n";
 	out << "#include <boost/beast/http.hpp>\n";
+	if (has_ws) {
+		out << "#include <boost/beast/websocket.hpp>\n";
+		out << "#include <boost/asio/awaitable.hpp>\n";
+		out << "#include <boost/asio/use_awaitable.hpp>\n";
+	}
 	out << "#include <boost/json.hpp>\n";
 	out << "#include <memory>\n";
 	out << "#include <optional>\n";
@@ -246,13 +279,19 @@ void BeastClientGenerator::generateClientHpp(std::ostream& out, const std::vecto
 	out << "namespace " << ns_ << " {\n";
 	out << "using siesta::url_encode;\n";
 	out << "using siesta::query_value;\n";
+	if (has_ws) {
+		out << "using std::literals::string_view_literals::operator\"\"sv;\n";
+	}
 	out << "\n";
 
 	emitClassHeader(out);
 
 	for (const auto& ep : endpoints) {
-		if (ep.is_websocket) continue; // TODO: enable after ClientBase gains upgrade_to_websocket
-		emitEndpoint(out, ep);
+		if (ep.is_websocket) {
+			emitWebSocketEndpoint(out, ep);
+		} else {
+			emitEndpoint(out, ep);
+		}
 	}
 
 	out << "}; // class Client\n";

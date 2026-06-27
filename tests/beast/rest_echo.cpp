@@ -2,6 +2,8 @@
 #include "client.hpp"
 
 #include <boost/asio.hpp>
+#include <boost/asio/awaitable.hpp>
+#include <boost/asio/co_spawn.hpp>
 #include <boost/asio/ssl.hpp>
 #include <boost/asio/use_future.hpp>
 #include <boost/beast/websocket.hpp>
@@ -9,6 +11,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
+#include <future>
 #include <memory>
 #include <siesta/beast/compression.hpp>
 #include <siesta/beast/pool.hpp>
@@ -991,6 +994,42 @@ TEST_CASE("websocket echo round-trip", "[integration][beast]") {
 
 	boost::system::error_code ec;
 	ws.close(beast::websocket::close_code::normal, ec);
+	srv.shutdown();
+	srv_thread.join();
+}
+
+TEST_CASE("websocket echo via generated client", "[integration][rpc][ws]") {
+	static constexpr uint16_t WS_PORT2 = 19923;
+
+	asio::io_context srv_ctx;
+	siesta::beast::ServerBase::Config conf;
+	conf.idle_timeout = std::chrono::milliseconds::zero();
+	echo_testing::DefaultServer srv(srv_ctx, conf);
+	srv.start(TEST_ADDR, WS_PORT2);
+	std::thread srv_thread([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	auto client = std::make_shared<Echo_API::Client>(ctx);
+	client->start(TEST_ADDR, WS_PORT2);
+	ctx.run();
+
+	std::promise<Echo_API::Client::outcome_type> promise;
+	auto fut = promise.get_future();
+	asio::co_spawn(ctx,
+		[client, p = std::move(promise)]() mutable -> asio::awaitable<void> {
+			auto outcome = co_await client->handle_ws_ws_echo("hello");
+			p.set_value(outcome);
+		},
+		asio::detached);
+	ctx.restart();
+	ctx.run();
+
+	auto outcome = fut.get();
+	REQUIRE(outcome.has_value());
+	REQUIRE(outcome.value().body() == "hello");
+
+	client->stop();
 	srv.shutdown();
 	srv_thread.join();
 }

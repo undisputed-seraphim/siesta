@@ -9,6 +9,7 @@
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
 #include <boost/beast/ssl.hpp>
+#include <boost/beast/websocket.hpp>
 #include <boost/json.hpp>
 #include <boost/json/monotonic_resource.hpp>
 #include <boost/outcome/std_outcome.hpp>
@@ -80,6 +81,42 @@ public:
 	void set_retry(RetryConfig r) { _retry = std::move(r); }
 	const RetryConfig& retry() const { return _retry; }
 
+	// WebSocket — creates stream from TCP layer on first call.
+	// Must be called after start() and before any WS I/O.
+	::boost::beast::websocket::stream<stream_type&>& websocket() {
+		if (!_ws) {
+			_ws = std::make_unique<::boost::beast::websocket::stream<stream_type&>>(
+				tcp_layer());
+		}
+		return *_ws;
+	}
+
+	// Perform client-side WebSocket upgrade handshake.
+	// Sends HTTP upgrade request, waits for 101 Switching Protocols.
+	template <::boost::asio::completion_token_for<void(outcome_type)> CompletionToken>
+	auto ws_upgrade(std::string_view target, CompletionToken&& token) {
+		return ::boost::asio::async_compose<CompletionToken, void(outcome_type)>(
+			[this, target = std::string(target), state = 0](
+				auto& self, ::boost::system::error_code error = {}, std::size_t = 0) mutable -> void {
+				if (error) {
+					self.complete(error);
+					return;
+				}
+				switch (state) {
+				case 0: {
+					state = 1;
+					_ws->async_handshake(_host_value, target, std::move(self));
+					return;
+				}
+				default: {
+					self.complete(::boost::system::error_code{});
+					return;
+				}
+				}
+			},
+			token);
+	}
+
 protected:
 	Config _conf;
 	::boost::asio::io_context& _ctx;
@@ -92,6 +129,7 @@ protected:
 
 	std::string _host_value;
 	RetryConfig _retry;
+	std::unique_ptr<::boost::beast::websocket::stream<stream_type&>> _ws;
 
 	::boost::json::storage_ptr _json_pool_{
 		::boost::json::make_shared_resource<::boost::json::monotonic_resource>(4096)};
