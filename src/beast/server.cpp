@@ -106,10 +106,7 @@ void ServerBase::Session::run() {
 }
 
 std::string ServerBase::Session::rfc7231_date() {
-	char buf[30];
-	std::time_t t = std::time(nullptr);
-	std::strftime(buf, sizeof(buf), "%a, %d %b %Y %H:%M:%S GMT", std::gmtime(&t));
-	return buf;
+	return siesta::rfc7231_date();
 }
 
 void ServerBase::Session::start_read_loop() {

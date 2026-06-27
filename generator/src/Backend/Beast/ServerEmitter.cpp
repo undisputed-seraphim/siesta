@@ -14,39 +14,10 @@ namespace codegen {
 
 namespace {
 
-void emitStaticPathMap(std::ostream& out, const DispatchSets& ds) {
-	if (ds.static_eps.empty()) return;
-	out << "const std::unordered_map<std::pair<std::string_view, http::verb>,\n";
-	out << "    std::pair<fnptr_t, std::string_view>,\n";
-	out << "    ::siesta::beast::__detail::MapHash> STATIC_PATHS = {\n";
-	for (const auto* ep : ds.static_eps) {
-		out << "\t{{\"" << escapeCppString(ep->path) << "\"sv, http::verb::" << ep->cpp_verb
-			<< "}, {&Server::" << ep->function_name << ", \""
-			<< escapeCppString(ep->function_name) << "\"sv}},\n";
-		if (ep->cpp_verb == "get") {
-			out << "\t{{\"" << escapeCppString(ep->path) << "\"sv, http::verb::head"
-				<< "}, {&Server::" << ep->function_name << ", \""
-				<< escapeCppString(ep->function_name) << "\"sv}},\n";
-		}
-	}
-	out << "};\n\n";
-}
-
-void emitParamPathArray(std::ostream& out, const DispatchSets& ds) {
-	if (ds.param_eps.empty()) return;
-	out << "const std::pair<std::string_view, std::pair<http::verb,\n";
-	out << "    std::pair<fnptr_t, std::string_view>>> PARAM_PATHS[] = {\n";
-	for (const auto* ep : ds.param_eps) {
-		out << "\t{\"" << escapeCppString(ep->path_template) << "\"sv, {http::verb::" << ep->cpp_verb
-			<< ", {&Server::" << ep->function_name << ", \""
-			<< escapeCppString(ep->function_name) << "\"sv}}},\n";
-		if (ep->cpp_verb == "get") {
-			out << "\t{\"" << escapeCppString(ep->path_template) << "\"sv, {http::verb::head"
-				<< ", {&Server::" << ep->function_name << ", \""
-				<< escapeCppString(ep->function_name) << "\"sv}}},\n";
-		}
-	}
-	out << "};\n\n";
+void emitTableData(std::ostream& out, const DispatchSets& ds) {
+	emitMatchPath(out);
+	emitStaticPathMap(out, ds, "http::", "::siesta::beast::__detail::MapHash");
+	emitParamPathArray(out, ds, "http::");
 }
 
 void emitWebSocketDispatch(std::ostream& out, const DispatchSets& ds) {
@@ -95,10 +66,7 @@ void emitParamDispatch(std::ostream& out, const DispatchSets& ds) {
 
 void emit404Fallback(std::ostream& out) {
 	out << "\t// 404 Not Found\n";
-	out << "\thttp::response<http::string_body> resp{http::status::not_found, req.version()};\n";
-	out << "\tresp.body() = \"{\\\"error\\\":\\\"not found\\\"}\";\n";
-	out << "\tresp.set(http::field::content_type, \"application/json\");\n";
-	out << "\tresp.prepare_payload();\n";
+	out << "\tauto resp = session->make_response(404, \"{\\\"error\\\":\\\"not found\\\"}\");\n";
 	out << "\tsession->send(std::move(resp));\n";
 }
 
@@ -194,9 +162,7 @@ void emitServerCpp(std::ostream& out, const std::vector<Endpoint>& endpoints, st
 	DispatchSets ds;
 	collectDispatchSets(endpoints, ds);
 
-	emitMatchPath(out);
-	emitStaticPathMap(out, ds);
-	emitParamPathArray(out, ds);
+	emitTableData(out, ds);
 
 	out << "} // anonymous namespace\n";
 	out << "\n";

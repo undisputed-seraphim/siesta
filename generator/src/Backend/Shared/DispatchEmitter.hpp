@@ -5,6 +5,7 @@
 /// and path matching.
 
 #include "IR/EndpointIR.hpp"
+#include "Support/Utils.hpp"
 #include <ostream>
 #include <string>
 #include <string_view>
@@ -48,6 +49,44 @@ inline void emitMatchPath(std::ostream& out) {
 	out << "\t}\n";
 	out << "\treturn pattern == target;\n";
 	out << "}\n\n";
+}
+
+// Transport-specific table emitters call these with their verb prefix + hash type.
+inline void emitStaticPathMap(std::ostream& out, const DispatchSets& ds,
+                              std::string_view verb_prefix, std::string_view hash_type) {
+	if (ds.static_eps.empty()) return;
+	out << "const std::unordered_map<std::pair<std::string_view, " << verb_prefix << "verb>,\n";
+	out << "    std::pair<fnptr_t, std::string_view>,\n";
+	out << "    " << hash_type << "> STATIC_PATHS = {\n";
+	for (const auto* ep : ds.static_eps) {
+		out << "\t{{\"" << escapeCppString(ep->path) << "\"sv, " << verb_prefix << "verb::" << ep->cpp_verb
+			<< "}, {&Server::" << ep->function_name << ", \""
+			<< escapeCppString(ep->function_name) << "\"sv}},\n";
+		if (ep->cpp_verb == "get") {
+			out << "\t{{\"" << escapeCppString(ep->path) << "\"sv, " << verb_prefix << "verb::head"
+				<< "}, {&Server::" << ep->function_name << ", \""
+				<< escapeCppString(ep->function_name) << "\"sv}},\n";
+		}
+	}
+	out << "};\n\n";
+}
+
+inline void emitParamPathArray(std::ostream& out, const DispatchSets& ds,
+                               std::string_view verb_prefix) {
+	if (ds.param_eps.empty()) return;
+	out << "const std::pair<std::string_view, std::pair<" << verb_prefix << "verb,\n";
+	out << "    std::pair<fnptr_t, std::string_view>>> PARAM_PATHS[] = {\n";
+	for (const auto* ep : ds.param_eps) {
+		out << "\t{\"" << escapeCppString(ep->path_template) << "\"sv, {" << verb_prefix << "verb::" << ep->cpp_verb
+			<< ", {&Server::" << ep->function_name << ", \""
+			<< escapeCppString(ep->function_name) << "\"sv}}},\n";
+		if (ep->cpp_verb == "get") {
+			out << "\t{\"" << escapeCppString(ep->path_template) << "\"sv, {" << verb_prefix << "verb::head"
+				<< ", {&Server::" << ep->function_name << ", \""
+				<< escapeCppString(ep->function_name) << "\"sv}}},\n";
+		}
+	}
+	out << "};\n\n";
 }
 
 } // namespace codegen

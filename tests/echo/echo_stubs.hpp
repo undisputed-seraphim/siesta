@@ -66,11 +66,7 @@ struct DefaultServer : Echo_API::Server {
 	using Echo_API::Server::Server;
 
 	void reply_json(const request& req, Session::Ptr session, std::string body) {
-		::boost::beast::http::response<::boost::beast::http::string_body> resp{
-			::boost::beast::http::status::ok, req.version()};
-		resp.body() = std::move(body);
-		resp.set(::boost::beast::http::field::content_type, "application/json");
-		resp.prepare_payload();
+		auto resp = session->make_response(200, std::move(body));
 		session->send(std::move(resp));
 	}
 

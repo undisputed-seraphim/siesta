@@ -30,6 +30,8 @@
 #include <type_traits>
 #include <variant>
 
+#include <siesta/common.hpp>
+
 namespace siesta::beast {
 
 class ServerBase {
@@ -73,6 +75,19 @@ public:
 		// beyond the handler return; the pool is released afterward.
 		::boost::json::storage_ptr json_storage() {
 			return json_pool_;
+		}
+
+		// Backend-agnostic response factory.
+		// User handlers call this instead of constructing http::response directly.
+		response make_response(unsigned http_status, std::string_view body = "") {
+			namespace http = ::boost::beast::http;
+			response resp{http::int_to_status(http_status), 11};
+			if (!body.empty()) {
+				resp.body() = body;
+				resp.set(http::field::content_type, "application/json");
+				resp.prepare_payload();
+			}
+			return resp;
 		}
 
 		template <typename Handler>

@@ -18,18 +18,13 @@
 #include <variant>
 
 #include <siesta/beast/error.hpp>
+#include <siesta/common.hpp>
 #include <siesta/format.hpp>
 
 namespace siesta::beast {
 
-struct RetryConfig {
-	int max_attempts = 1;                         // 1 = single attempt, no retry
-	std::chrono::milliseconds initial_backoff{100};
-	std::chrono::milliseconds max_backoff{5000};
-	float backoff_multiplier = 2.0f;
-
-	bool enabled() const { return max_attempts > 1; }
-};
+using siesta::RetryConfig;
+using siesta::is_transient;
 
 class ClientBase : public std::enable_shared_from_this<ClientBase> {
 public:
@@ -174,15 +169,5 @@ protected:
 		});
 	}
 };
-
-/// Returns true if this error is likely transient (caller may retry).
-/// Connection errors, timeouts, DNS failures, and HTTP 5xx are transient.
-/// HTTP 4xx, other protocol errors, and invalid arguments are fatal.
-inline bool is_transient(const ::boost::system::error_code& ec) {
-	if (std::strcmp(ec.category().name(), "beast.http") == 0) {
-		return ec.value() >= 500 && ec.value() < 600;
-	}
-	return true;
-}
 
 } // namespace siesta::beast

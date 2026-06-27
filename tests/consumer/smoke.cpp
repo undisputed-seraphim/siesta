@@ -13,10 +13,7 @@ namespace http = boost::beast::http;
 struct PingServer : Ping::Server {
 	using Ping::Server::Server;
 	void get__ping(const request req, Session::Ptr session) override {
-		http::response<http::string_body> resp{http::status::ok, req.version()};
-		resp.body() = R"({"message":"pong"})";
-		resp.set(http::field::content_type, "application/json");
-		resp.prepare_payload();
+		auto resp = session->make_response(200, R"({"message":"pong"})");
 		session->send(std::move(resp));
 	}
 };

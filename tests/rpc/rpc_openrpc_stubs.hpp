@@ -15,11 +15,8 @@ namespace rpc_openrpc_testing {
 inline void reply_json(const PetStoreOpenRPC::Server::request& req,
                         PetStoreOpenRPC::Server::Session::Ptr session,
                         const std::string& body) {
-	http::response<http::string_body> res{http::status::ok, req.version()};
-	res.set(http::field::content_type, "application/json");
-	res.body() = body;
-	res.prepare_payload();
-	session->send(std::move(res));
+	auto resp = session->make_response(200, body);
+	session->send(std::move(resp));
 }
 
 struct StubServer : PetStoreOpenRPC::Server {
