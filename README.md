@@ -113,17 +113,13 @@ with flag-set buckets for release, profiling, and max-performance builds.
 
 ```bash
 # Full sanity check (C++ + Python tests)
-cd tests/echo && ./benchmark_beast.sh
-
-# Build specific targets
-cmake -S tests -B tests/build -DCMAKE_PREFIX_PATH=build/install -GNinja
-ninja -C tests/build echo_beast_server Echo_API echo_beast_client
+cd tests && ctest --test-dir ../build/tests --output-on-failure
 
 # Benchmark
-./benchmark_beast.sh --bench
+./bench.sh beast rest --bench
 
 # CPU profiling
-./benchmark_beast.sh --profile
+./bench.sh beast rest --profile
 ```
 
 See `tests/README.md` and `tests/echo/README.md` for the full target matrix

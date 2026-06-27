@@ -68,7 +68,7 @@ cd build && ninja
 ctest --test-dir build/tests --output-on-failure
 
 # Benchmark (optional)
-cd tests/echo && ./benchmark_beast.sh --bench
+cd tests && ./bench.sh beast rest --bench
 ```
 
 ### Debugging

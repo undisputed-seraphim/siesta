@@ -210,3 +210,11 @@ add_test(NAME consumer_smoke
 		-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/consumer
 		-P ${CMAKE_CURRENT_SOURCE_DIR}/consumer/run_test.cmake
 )
+
+# ══════════════════════════════════════════════════════════════════
+#  Benchmark, profiling, and sanitizer targets
+# ══════════════════════════════════════════════════════════════════
+
+include("${CMAKE_SOURCE_DIR}/cmake/benchmark.cmake")
+include("${CMAKE_SOURCE_DIR}/cmake/profile.cmake")
+include("${CMAKE_SOURCE_DIR}/cmake/sanitize.cmake")
