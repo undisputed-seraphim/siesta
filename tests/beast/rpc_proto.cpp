@@ -1,9 +1,11 @@
-#include "rpc_stubs.hpp"
+#include "server.hpp"
 #include "client.hpp"
 
 #include <boost/asio.hpp>
 #include <boost/asio/use_future.hpp>
+#include <boost/beast/http.hpp>
 #include <boost/json.hpp>
+#include <boost/json/monotonic_resource.hpp>
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
@@ -12,20 +14,51 @@
 #include <thread>
 
 namespace asio = boost::asio;
-namespace http = boost::beast::http;
 
 static constexpr uint16_t TEST_PORT = 19930;
 static const auto TEST_ADDR = asio::ip::make_address("127.0.0.1");
 
+namespace {
+
+inline void reply_json(petstore::Server::Session::Ptr s, const std::string& body) {
+	auto resp = s->make_response(200, body);
+	s->send(std::move(resp));
+}
+
+struct StubServer : petstore::Server {
+	using petstore::Server::Server;
+
+	void PetStore_CreatePet(const request req, Session::Ptr s) override {
+		auto sp = s->json_storage();
+		auto jv = boost::json::parse(req.body(), sp);
+		auto pet = boost::json::value_to<petstore::Pet>(jv);
+		pet.name = "created:" + pet.name;
+		pet.kind = "created:" + pet.kind;
+		reply_json(std::move(s), boost::json::serialize(boost::json::value_from(pet, sp)));
+	}
+
+	void PetStore_GetPet(const request req, Session::Ptr s) override {
+		auto sp = s->json_storage();
+		auto jv = boost::json::parse(req.body(), sp);
+		auto req_pet = boost::json::value_to<petstore::GetPetRequest>(jv);
+		petstore::Pet pet;
+		pet.name = req_pet.name;
+		pet.kind = "found";
+		reply_json(std::move(s), boost::json::serialize(boost::json::value_from(pet, sp)));
+	}
+};
+
+} // anonymous namespace
+
 static asio::io_context g_server_ctx;
-static std::unique_ptr<rpc_testing::StubServer> g_server;
+static std::unique_ptr<StubServer> g_server;
 static std::thread g_server_thread;
 
 struct ServerListener : Catch::EventListenerBase {
 	using EventListenerBase::EventListenerBase;
 
 	void testRunStarting(Catch::TestRunInfo const&) override {
-		g_server = std::make_unique<rpc_testing::StubServer>(g_server_ctx);
+		g_server = std::make_unique<StubServer>(g_server_ctx);
 		g_server->start(TEST_ADDR, TEST_PORT);
 		g_server_thread = std::thread([] { g_server_ctx.run(); });
 		std::this_thread::sleep_for(std::chrono::milliseconds(50));
@@ -46,7 +79,7 @@ static std::shared_ptr<petstore::Client> make_client(asio::io_context& ctx) {
 	return client;
 }
 
-TEST_CASE("RPC create and get pet via proto", "[integration][rpc]") {
+TEST_CASE("RPC create pet via proto", "[integration][rpc]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 
@@ -62,7 +95,7 @@ TEST_CASE("RPC create and get pet via proto", "[integration][rpc]") {
 	REQUIRE(resp.kind == "created:cat");
 }
 
-TEST_CASE("RPC get pet returns found pet", "[integration][rpc]") {
+TEST_CASE("RPC get pet via proto", "[integration][rpc]") {
 	asio::io_context ctx;
 	auto client = make_client(ctx);
 

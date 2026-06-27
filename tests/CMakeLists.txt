@@ -129,17 +129,51 @@ target_compile_definitions(echo_beast_server_bench PRIVATE SIESTA_TEST_CERT_DIR=
 add_dependencies(echo_beast_server_bench siesta_test_certs)
 
 # ══════════════════════════════════════════════════════════════════
-#  Beast self-contained integration test (embedded server + client)
+#  Beast self-contained integration tests
+#  One file per {format}×{backend} combination
 # ══════════════════════════════════════════════════════════════════
 
-add_executable(echo_beast_integration
-	"${CMAKE_CURRENT_SOURCE_DIR}/echo/test_beast_integration.cpp")
-target_link_libraries(echo_beast_integration PRIVATE echo_gen siesta::siesta ZLIB::ZLIB Catch2::Catch2WithMain)
-target_compile_options(echo_beast_integration PRIVATE ${FLAGS_RELEASE})
-target_compile_definitions(echo_beast_integration PRIVATE
+# --- REST (OpenAPI echo.json) ---
+add_executable(beast_rest_echo
+	"${CMAKE_CURRENT_SOURCE_DIR}/beast/rest_echo.cpp")
+target_link_libraries(beast_rest_echo PRIVATE echo_gen siesta::siesta ZLIB::ZLIB Catch2::Catch2WithMain)
+target_compile_options(beast_rest_echo PRIVATE ${FLAGS_RELEASE})
+target_compile_definitions(beast_rest_echo PRIVATE
 	SIESTA_TEST_CERT_DIR="${SIESTA_CERT_DIR}")
-add_dependencies(echo_beast_integration siesta_test_certs)
-catch_discover_tests(echo_beast_integration)
+add_dependencies(beast_rest_echo siesta_test_certs)
+catch_discover_tests(beast_rest_echo)
+
+# --- RPC (proto) ---
+add_library(rpc_gen STATIC EXCLUDE_FROM_ALL)
+siesta_generate(
+	TARGET rpc_gen
+	SCHEMA "${CMAKE_CURRENT_SOURCE_DIR}/rpc/petstore.proto"
+	MODE BOTH
+	BACKEND beast
+	NO_PYTHON
+)
+
+add_executable(beast_rpc_proto
+	"${CMAKE_CURRENT_SOURCE_DIR}/beast/rpc_proto.cpp")
+target_link_libraries(beast_rpc_proto PRIVATE rpc_gen siesta::siesta ZLIB::ZLIB Catch2::Catch2WithMain)
+target_compile_options(beast_rpc_proto PRIVATE ${FLAGS_RELEASE})
+catch_discover_tests(beast_rpc_proto)
+
+# --- RPC (OpenRPC) ---
+add_library(rpc_openrpc_gen STATIC EXCLUDE_FROM_ALL)
+siesta_generate(
+	TARGET rpc_openrpc_gen
+	SCHEMA "${CMAKE_CURRENT_SOURCE_DIR}/rpc/petstore_openrpc.json"
+	MODE BOTH
+	BACKEND beast
+	NO_PYTHON
+)
+
+add_executable(beast_rpc_openrpc
+	"${CMAKE_CURRENT_SOURCE_DIR}/beast/rpc_openrpc.cpp")
+target_link_libraries(beast_rpc_openrpc PRIVATE rpc_openrpc_gen siesta::siesta ZLIB::ZLIB Catch2::Catch2WithMain)
+target_compile_options(beast_rpc_openrpc PRIVATE ${FLAGS_RELEASE})
+catch_discover_tests(beast_rpc_openrpc)
 
 # ══════════════════════════════════════════════════════════════════
 #  Beast benchmark (embedded server + async client, Release-optimized)
@@ -176,41 +210,3 @@ add_test(NAME consumer_smoke
 		-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}/consumer
 		-P ${CMAKE_CURRENT_SOURCE_DIR}/consumer/run_test.cmake
 )
-
-# ══════════════════════════════════════════════════════════════════
-#  RPC integration test (proto-generated client + embedded server)
-# ══════════════════════════════════════════════════════════════════
-
-add_library(rpc_gen STATIC EXCLUDE_FROM_ALL)
-siesta_generate(
-	TARGET rpc_gen
-	SCHEMA "${CMAKE_CURRENT_SOURCE_DIR}/rpc/petstore.proto"
-	MODE BOTH
-	BACKEND beast
-	NO_PYTHON
-)
-
-add_executable(rpc_beast_integration
-	"${CMAKE_CURRENT_SOURCE_DIR}/rpc/test_rpc_integration.cpp")
-target_link_libraries(rpc_beast_integration PRIVATE rpc_gen siesta::siesta ZLIB::ZLIB Catch2::Catch2WithMain)
-target_compile_options(rpc_beast_integration PRIVATE ${FLAGS_RELEASE})
-catch_discover_tests(rpc_beast_integration)
-
-# ══════════════════════════════════════════════════════════════════
-#  RPC integration test (OpenRPC-generated client + embedded server)
-# ══════════════════════════════════════════════════════════════════
-
-add_library(rpc_openrpc_gen STATIC EXCLUDE_FROM_ALL)
-siesta_generate(
-	TARGET rpc_openrpc_gen
-	SCHEMA "${CMAKE_CURRENT_SOURCE_DIR}/rpc/petstore_openrpc.json"
-	MODE BOTH
-	BACKEND beast
-	NO_PYTHON
-)
-
-add_executable(rpc_openrpc_beast_integration
-	"${CMAKE_CURRENT_SOURCE_DIR}/rpc/test_rpc_openrpc_integration.cpp")
-target_link_libraries(rpc_openrpc_beast_integration PRIVATE rpc_openrpc_gen siesta::siesta ZLIB::ZLIB Catch2::Catch2WithMain)
-target_compile_options(rpc_openrpc_beast_integration PRIVATE ${FLAGS_RELEASE})
-catch_discover_tests(rpc_openrpc_beast_integration)

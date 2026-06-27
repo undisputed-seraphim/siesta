@@ -3,7 +3,7 @@
 ## Integrated Tests
 
 All tests run via CTest from the top-level build directory. The generator is invoked
-at build time to produce C++ stubs from `echo.json`, then each test binary links the
+at build time to produce C++ stubs from schema files, then each test binary links the
 generated code and exercises it against a live HTTP server embedded in the test process.
 
 ```bash
@@ -14,24 +14,35 @@ ctest --test-dir build/tests --output-on-failure
 
 # Filter by name
 ctest --test-dir build/tests -R beast
+ctest --test-dir build/tests -R rpc
 ctest --test-dir build/tests -R siesta_test
 ```
 
 ### Test targets
 
-| Target | Type | Purpose |
-|--------|------|---------|
-| `echo_beast_integration` | CTest | 30+ self-contained Catch2 tests covering JSON round-trip, path params, verbs, variants, allOf, enums, 404, WebSocket upgrade |
-| `siesta_test` | CTest | Library unit tests (path tree, containers) |
-| `Echo_API` | CTest | Python nanobind client module tests |
-| `Echo_API_server` | CTest | Python nanobind server trampoline tests |
-| `consumer_smoke` | CTest | Downstream CMake packaging smoke test |
+| Target | Format | Backend | Purpose |
+|---|---|---|---|
+| `beast_rest_echo` | OpenAPI (`echo.json`) | beast | 30+ Catch2 tests: JSON round-trip, path params, verbs, variants, allOf, enums, 404, WebSocket |
+| `beast_rpc_proto` | proto3 (`rpc/petstore.proto`) | beast | CreatePet + GetPet round-trip |
+| `beast_rpc_openrpc` | OpenRPC (`rpc/petstore_openrpc.json`) | beast | CreatePet + GetPet round-trip |
+| `siesta_test` | — | library | Library unit tests (path tree, containers) |
+| `Echo_API` | — | Python | nanobind client module tests |
+| `Echo_API_server` | — | Python | nanobind server trampoline tests |
+| `consumer_smoke` | — | cmake | Downstream CMake packaging smoke test |
 
 ### Adding tests
 
-1. Add endpoints/schemas to `echo.json`
-2. Add stubs + test cases to `echo/test_beast_integration.cpp` (tag with `[integration][beast]`)
+1. Add endpoints/schemas to `echo.json` (REST), `rpc/petstore.proto` (RPC), or `rpc/petstore_openrpc.json` (OpenRPC)
+2. Add test cases to the corresponding `tests/beast/<format>_<source>.cpp` file
 3. `ninja -C build && ctest --test-dir build/tests --output-on-failure`
+
+### Adding a new backend
+
+For each new backend (e.g. `nghttp2`):
+
+1. Create `tests/nghttp2/` with the same three test files: `rest_echo.cpp`, `rpc_proto.cpp`, `rpc_openrpc.cpp`
+2. In `CMakeLists.txt`, add `nghttp2_*` targets with `BACKEND nghttp2` in `siesta_generate()`
+3. The test files are identical to `tests/beast/` except they `#include` nghttp2 base classes
 
 ---
 
@@ -170,10 +181,16 @@ Results under `tests/echo/load_test/profiles/`:
 
 ```
 tests/
-├── CMakeLists.txt                  Target definitions
-├── echo.json                       OpenAPI 3.0 spec (test fixture)
-├── echo/
-│   ├── test_beast_integration.cpp  Catch2 integration tests
+├── CMakeLists.txt
+├── echo.json                       OpenAPI 3.0 spec (REST fixture)
+├── beast/                          Integration tests — one file per format
+│   ├── rest_echo.cpp               REST/OpenAPI → beast
+│   ├── rpc_proto.cpp               RPC/proto → beast
+│   └── rpc_openrpc.cpp             RPC/OpenRPC → beast
+├── rpc/                            RPC fixtures (shared across backends)
+│   ├── petstore.proto              Proto3 test fixture
+│   └── petstore_openrpc.json       OpenRPC test fixture
+├── echo/                           Beast benchmark + standalone server
 │   ├── test_beast_server.cpp       Standalone server (benchmark/profiling)
 │   ├── benchmark_beast.cpp         Embedded benchmark binary
 │   ├── echo_stubs.hpp              Shared test server stubs

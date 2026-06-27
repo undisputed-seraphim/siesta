@@ -1,4 +1,4 @@
-#include "echo_stubs.hpp"
+#include "../echo/echo_stubs.hpp"
 #include "client.hpp"
 
 #include <boost/asio.hpp>
