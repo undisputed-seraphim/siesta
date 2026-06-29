@@ -13,6 +13,7 @@
 #include <catch2/reporters/catch_reporter_registrars.hpp>
 #include <future>
 #include <memory>
+#include <set>
 #include <siesta/beast/compression.hpp>
 #include <siesta/beast/pool.hpp>
 #include <string>
@@ -1246,4 +1247,357 @@ TEST_CASE("cancel is safe on idle client", "[integration][cancel]") {
 	asio::io_context ctx;
 	Echo_API::Client client(ctx);
 	REQUIRE_NOTHROW(client.cancel());
+}
+
+// ── Structured error model tests ────────────────────────────────
+
+TEST_CASE("server returns INVALID_ARGUMENT for bad input", "[integration][error]") {
+	static constexpr uint16_t PORT = 19950;
+
+	asio::io_context srv_ctx;
+	struct Stub : echo_testing::DefaultServer {
+		using DefaultServer::DefaultServer;
+		void get__echo(const request req, Session::Ptr s) override {
+			auto msg = echo_testing::extract_query_param(req.target(), "message");
+			if (msg.empty()) {
+				s->send(s->make_error_response(siesta::Error{
+					siesta::ErrorCode::INVALID_ARGUMENT, "message is required"}));
+				return;
+			}
+			reply_json(req, std::move(s), "{\"message\":\"" + msg + "\"}");
+		}
+	};
+	Stub srv(srv_ctx);
+	srv.start(TEST_ADDR, PORT);
+	std::thread t([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	asio::ip::tcp::socket sock(ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+	http::request<http::string_body> req{http::verb::get, "/echo?message=", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::connection, "close");
+	req.prepare_payload();
+	http::write(sock, req);
+	boost::beast::flat_buffer buf;
+	http::response<http::string_body> resp;
+	http::read(sock, buf, resp);
+
+	REQUIRE(resp.result() == http::status::bad_request);
+	auto err = siesta::parse_error(resp.body());
+	REQUIRE(err.has_value());
+	REQUIRE(err->code == siesta::ErrorCode::INVALID_ARGUMENT);
+	REQUIRE(err->message == "message is required");
+
+	srv.shutdown();
+	srv_ctx.stop();
+	t.join();
+}
+
+TEST_CASE("server returns UNAUTHENTICATED for missing auth", "[integration][error]") {
+	static constexpr uint16_t PORT = 19951;
+
+	asio::io_context srv_ctx;
+	struct Stub : echo_testing::DefaultServer {
+		using DefaultServer::DefaultServer;
+		void get__echo(const request req, Session::Ptr s) override {
+			if (req.base().find("Authorization") == req.base().end()) {
+				s->send(s->make_error_response(siesta::Error{
+					siesta::ErrorCode::UNAUTHENTICATED, "missing authorization header"}));
+				return;
+			}
+			auto msg = echo_testing::extract_query_param(req.target(), "message");
+			reply_json(req, std::move(s), "{\"message\":\"" + msg + "\"}");
+		}
+	};
+	Stub srv(srv_ctx);
+	srv.start(TEST_ADDR, PORT);
+	std::thread t([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	asio::ip::tcp::socket sock(ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+	http::request<http::string_body> req{http::verb::get, "/echo?message=hi", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::connection, "close");
+	req.prepare_payload();
+	http::write(sock, req);
+	boost::beast::flat_buffer buf;
+	http::response<http::string_body> resp;
+	http::read(sock, buf, resp);
+
+	REQUIRE(resp.result() == http::status::unauthorized);
+	auto err = siesta::parse_error(resp.body());
+	REQUIRE(err.has_value());
+	REQUIRE(err->code == siesta::ErrorCode::UNAUTHENTICATED);
+	REQUIRE(err->message == "missing authorization header");
+
+	srv.shutdown();
+	srv_ctx.stop();
+	t.join();
+}
+
+TEST_CASE("server returns PERMISSION_DENIED for insufficient role", "[integration][error]") {
+	static constexpr uint16_t PORT = 19952;
+
+	asio::io_context srv_ctx;
+	struct Stub : echo_testing::DefaultServer {
+		using DefaultServer::DefaultServer;
+		void get__echo(const request req, Session::Ptr s) override {
+			auto it = req.base().find("X-Role");
+			if (it == req.base().end() || std::string(it->value()) != "admin") {
+				s->send(s->make_error_response(siesta::Error{
+					siesta::ErrorCode::PERMISSION_DENIED, "admin role required"}));
+				return;
+			}
+			auto msg = echo_testing::extract_query_param(req.target(), "message");
+			reply_json(req, std::move(s), "{\"message\":\"" + msg + "\"}");
+		}
+	};
+	Stub srv(srv_ctx);
+	srv.start(TEST_ADDR, PORT);
+	std::thread t([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	asio::ip::tcp::socket sock(ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+	http::request<http::string_body> req{http::verb::get, "/echo?message=hi", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::connection, "close");
+	req.set("X-Role", "user");
+	req.prepare_payload();
+	http::write(sock, req);
+	boost::beast::flat_buffer buf;
+	http::response<http::string_body> resp;
+	http::read(sock, buf, resp);
+
+	REQUIRE(resp.result() == http::status::forbidden);
+	auto err = siesta::parse_error(resp.body());
+	REQUIRE(err.has_value());
+	REQUIRE(err->code == siesta::ErrorCode::PERMISSION_DENIED);
+	REQUIRE(err->message == "admin role required");
+
+	srv.shutdown();
+	srv_ctx.stop();
+	t.join();
+}
+
+TEST_CASE("server returns UNIMPLEMENTED for stub endpoint", "[integration][error]") {
+	static constexpr uint16_t PORT = 19953;
+
+	asio::io_context srv_ctx;
+	struct Stub : echo_testing::DefaultServer {
+		using DefaultServer::DefaultServer;
+		void get__echo(const request, Session::Ptr s) override {
+			s->send(s->make_error_response(siesta::Error{
+				siesta::ErrorCode::UNIMPLEMENTED, "get__echo not yet implemented"}));
+		}
+	};
+	Stub srv(srv_ctx);
+	srv.start(TEST_ADDR, PORT);
+	std::thread t([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	asio::ip::tcp::socket sock(ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+	http::request<http::string_body> req{http::verb::get, "/echo?message=hi", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::connection, "close");
+	req.prepare_payload();
+	http::write(sock, req);
+	boost::beast::flat_buffer buf;
+	http::response<http::string_body> resp;
+	http::read(sock, buf, resp);
+
+	REQUIRE(resp.result() == http::status::not_implemented);
+	auto err = siesta::parse_error(resp.body());
+	REQUIRE(err.has_value());
+	REQUIRE(err->code == siesta::ErrorCode::UNIMPLEMENTED);
+	REQUIRE(err->message == "get__echo not yet implemented");
+
+	srv.shutdown();
+	srv_ctx.stop();
+	t.join();
+}
+
+TEST_CASE("server returns INTERNAL with structured body", "[integration][error]") {
+	static constexpr uint16_t PORT = 19954;
+
+	asio::io_context srv_ctx;
+	struct Stub : echo_testing::DefaultServer {
+		using DefaultServer::DefaultServer;
+		void get__echo(const request, Session::Ptr s) override {
+			s->send(s->make_error_response(siesta::Error{
+				siesta::ErrorCode::INTERNAL, "database connection lost"}));
+		}
+	};
+	Stub srv(srv_ctx);
+	srv.start(TEST_ADDR, PORT);
+	std::thread t([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	asio::ip::tcp::socket sock(ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+	http::request<http::string_body> req{http::verb::get, "/echo?message=hi", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::connection, "close");
+	req.prepare_payload();
+	http::write(sock, req);
+	boost::beast::flat_buffer buf;
+	http::response<http::string_body> resp;
+	http::read(sock, buf, resp);
+
+	REQUIRE(resp.result() == http::status::internal_server_error);
+	auto err = siesta::parse_error(resp.body());
+	REQUIRE(err.has_value());
+	REQUIRE(err->code == siesta::ErrorCode::INTERNAL);
+	REQUIRE(err->message == "database connection lost");
+
+	srv.shutdown();
+	srv_ctx.stop();
+	t.join();
+}
+
+TEST_CASE("server returns ALREADY_EXISTS for duplicate create", "[integration][error]") {
+	static constexpr uint16_t PORT = 19955;
+
+	asio::io_context srv_ctx;
+	struct Stub : echo_testing::DefaultServer {
+		using DefaultServer::DefaultServer;
+		std::set<int> created_;
+		void post__echo(const request req, Session::Ptr s) override {
+			auto sp = s->json_storage();
+			auto jv = boost::json::parse(req.body(), sp);
+			auto item = boost::json::value_to<Echo_API::Item>(jv);
+			if (created_.count(item.id)) {
+				s->send(s->make_error_response(siesta::Error{
+					siesta::ErrorCode::ALREADY_EXISTS, "item already exists"}));
+				return;
+			}
+			created_.insert(item.id);
+			item.name = "created:" + item.name;
+			reply_json(req, std::move(s),
+				boost::json::serialize(boost::json::value_from(item, sp)));
+		}
+	};
+	Stub srv(srv_ctx);
+	srv.start(TEST_ADDR, PORT);
+	std::thread t([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+
+	// First POST succeeds
+	{
+		asio::ip::tcp::socket sock(ctx);
+		sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+		http::request<http::string_body> req{http::verb::post, "/echo", 11};
+		req.set(http::field::host, "localhost");
+		req.set(http::field::content_type, "application/json");
+		req.set(http::field::connection, "close");
+		req.body() = R"({"id":42,"name":"widget"})";
+		req.prepare_payload();
+		http::write(sock, req);
+		boost::beast::flat_buffer buf;
+		http::response<http::string_body> resp;
+		http::read(sock, buf, resp);
+		REQUIRE(resp.result() == http::status::ok);
+	}
+
+	// Duplicate POST returns ALREADY_EXISTS
+	{
+		asio::ip::tcp::socket sock(ctx);
+		sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+		http::request<http::string_body> req{http::verb::post, "/echo", 11};
+		req.set(http::field::host, "localhost");
+		req.set(http::field::content_type, "application/json");
+		req.set(http::field::connection, "close");
+		req.body() = R"({"id":42,"name":"widget"})";
+		req.prepare_payload();
+		http::write(sock, req);
+		boost::beast::flat_buffer buf;
+		http::response<http::string_body> resp;
+		http::read(sock, buf, resp);
+
+		REQUIRE(resp.result() == http::status::conflict);
+		auto err = siesta::parse_error(resp.body());
+		REQUIRE(err.has_value());
+		REQUIRE(err->code == siesta::ErrorCode::ALREADY_EXISTS);
+		REQUIRE(err->message == "item already exists");
+	}
+
+	srv.shutdown();
+	srv_ctx.stop();
+	t.join();
+}
+
+TEST_CASE("error serialize/parse round-trip preserves code and message", "[integration][error]") {
+	static constexpr uint16_t PORT = 19956;
+
+	asio::io_context srv_ctx;
+	struct Stub : echo_testing::DefaultServer {
+		using DefaultServer::DefaultServer;
+		void get__echo(const request req, Session::Ptr s) override {
+			auto code_str = echo_testing::extract_query_param(req.target(), "code");
+			int c = code_str.empty() ? 2 : std::stoi(code_str);
+			s->send(s->make_error_response(siesta::Error{
+				static_cast<siesta::ErrorCode>(c), "error " + code_str}));
+		}
+	};
+	Stub srv(srv_ctx);
+	srv.start(TEST_ADDR, PORT);
+	std::thread t([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	struct {
+		siesta::ErrorCode code;
+		unsigned http_status;
+	} cases[] = {
+		{siesta::ErrorCode::INVALID_ARGUMENT,    400},
+		{siesta::ErrorCode::NOT_FOUND,           404},
+		{siesta::ErrorCode::PERMISSION_DENIED,   403},
+		{siesta::ErrorCode::RESOURCE_EXHAUSTED,  429},
+		{siesta::ErrorCode::ALREADY_EXISTS,      409},
+		{siesta::ErrorCode::FAILED_PRECONDITION, 400},
+		{siesta::ErrorCode::ABORTED,             409},
+		{siesta::ErrorCode::OUT_OF_RANGE,        400},
+		{siesta::ErrorCode::UNIMPLEMENTED,       501},
+		{siesta::ErrorCode::INTERNAL,            500},
+		{siesta::ErrorCode::UNAVAILABLE,         503},
+		{siesta::ErrorCode::DATA_LOSS,           500},
+		{siesta::ErrorCode::UNAUTHENTICATED,     401},
+	};
+
+	for (auto [code, http_status] : cases) {
+		asio::io_context ctx;
+		asio::ip::tcp::socket sock(ctx);
+		sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+		http::request<http::string_body> req{http::verb::get,
+			"/echo?code=" + std::to_string(static_cast<int>(code)), 11};
+		req.set(http::field::host, "localhost");
+		req.set(http::field::connection, "close");
+		req.prepare_payload();
+		http::write(sock, req);
+		boost::beast::flat_buffer buf;
+		http::response<http::string_body> resp;
+		boost::system::error_code ec;
+		http::read(sock, buf, resp, ec);
+
+		INFO("ErrorCode " << static_cast<int>(code));
+		REQUIRE_FALSE(ec);
+		REQUIRE(resp.result_int() == http_status);
+		auto err = siesta::parse_error(resp.body());
+		REQUIRE(err.has_value());
+		REQUIRE(err->code == code);
+		REQUIRE(err->message == "error " + std::to_string(static_cast<int>(code)));
+	}
+
+	srv.shutdown();
+	srv_ctx.stop();
+	t.join();
 }

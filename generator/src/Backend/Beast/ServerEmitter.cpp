@@ -42,10 +42,14 @@ void emitStaticDispatch(std::ostream& out, const DispatchSets& ds) {
 	out << "\t\tauto& [fn, name] = it->second;\n";
 	out << "\t\tServer::request_context _rctx{&req, std::move(session), name};\n";
 	out << "\t\tif (!this->run_interceptors(_rctx)) {\n";
-	out << "\t\t\tif (_rctx.error_response) _rctx.session->send(std::move(*_rctx.error_response));\n";
+	out << "\t\t\tif (_rctx.error)\n";
+	out << "\t\t\t\t_rctx.session->send(_rctx.session->make_error_response(*_rctx.error));\n";
+	out << "\t\t\telse\n";
+	out << "\t\t\t\t_rctx.session->send(_rctx.session->make_response(500));\n";
 	out << "\t\t\treturn;\n";
 	out << "\t\t}\n";
-	out << "\t\treturn (this->*(fn))(req, std::move(_rctx.session));\n";
+	out << "\t\t(this->*(fn))(req, std::move(_rctx.session));\n";
+	out << "\t\treturn;\n";
 	out << "\t}\n\n";
 }
 
@@ -56,18 +60,22 @@ void emitParamDispatch(std::ostream& out, const DispatchSets& ds) {
 	out << "\t\t\tauto& [fn, name] = verb_fn.second;\n";
 	out << "\t\t\tServer::request_context _rctx{&req, std::move(session), name};\n";
 	out << "\t\t\tif (!this->run_interceptors(_rctx)) {\n";
-	out << "\t\t\t\tif (_rctx.error_response) _rctx.session->send(std::move(*_rctx.error_response));\n";
+	out << "\t\t\t\tif (_rctx.error)\n";
+	out << "\t\t\t\t\t_rctx.session->send(_rctx.session->make_error_response(*_rctx.error));\n";
+	out << "\t\t\t\telse\n";
+	out << "\t\t\t\t\t_rctx.session->send(_rctx.session->make_response(500));\n";
 	out << "\t\t\t\treturn;\n";
 	out << "\t\t\t}\n";
-	out << "\t\t\treturn (this->*(fn))(req, std::move(_rctx.session));\n";
+	out << "\t\t\t(this->*(fn))(req, std::move(_rctx.session));\n";
+	out << "\t\t\treturn;\n";
 	out << "\t\t}\n";
 	out << "\t}\n\n";
 }
 
 void emit404Fallback(std::ostream& out) {
 	out << "\t// 404 Not Found\n";
-	out << "\tauto resp = session->make_response(404, \"{\\\"error\\\":\\\"not found\\\"}\");\n";
-	out << "\tsession->send(std::move(resp));\n";
+	out << "\tsession->send(session->make_error_response(siesta::Error{\n";
+	out << "\t\tsiesta::ErrorCode::NOT_FOUND, \"not found\"}));\n";
 }
 
 void emitHandleRequestBody(std::ostream& out, const std::vector<Endpoint>& endpoints) {

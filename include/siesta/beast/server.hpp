@@ -90,6 +90,12 @@ public:
 			return resp;
 		}
 
+		response make_error_response(const siesta::Error& e) {
+			return make_response(
+				siesta::http_status_for(e.code),
+				siesta::serialize_error(e));
+		}
+
 		template <typename Handler>
 		void upgrade_to_websocket(const request& req, Handler&& handler) {
 			using namespace ::boost::beast;
@@ -192,8 +198,8 @@ public:
 	struct request_context {
 		const request* req = nullptr;
 		Session::Ptr session;
-		std::string_view method_name;           // e.g. "CreatePet", "get_pets"
-		std::optional<response> error_response; // set to short-circuit the handler
+		std::string_view method_name;
+		std::optional<siesta::Error> error; // set to short-circuit the handler
 	};
 
 	ServerBase(boost::asio::io_context&);
@@ -222,8 +228,6 @@ protected:
 };
 
 // Factory: interceptor that enforces the X-Deadline-Ms request header.
-// Reads the header value in milliseconds, sets a TCP socket timeout.
-// Returns false with 504 if the deadline is ≤ 0 (already expired).
 inline ServerBase::Interceptor make_deadline_interceptor() {
 	return [](ServerBase::request_context& ctx) -> bool {
 		auto it = ctx.req->base().find("X-Deadline-Ms");
@@ -232,8 +236,8 @@ inline ServerBase::Interceptor make_deadline_interceptor() {
 		try { ms = std::stoi(std::string(it->value())); }
 		catch (...) { return true; }
 		if (ms <= 0) {
-			ctx.error_response = ctx.session->make_response(
-				504, R"({"error":"deadline exceeded"})");
+			ctx.error = siesta::Error{
+				siesta::ErrorCode::DEADLINE_EXCEEDED, "deadline exceeded"};
 			return false;
 		}
 		ctx.session->set_socket_timeout(std::chrono::milliseconds(ms));
