@@ -1536,6 +1536,88 @@ TEST_CASE("server returns ALREADY_EXISTS for duplicate create", "[integration][e
 	t.join();
 }
 
+TEST_CASE("generated client exposes last_error on HTTP error", "[integration][error]") {
+	static constexpr uint16_t PORT = 19957;
+
+	asio::io_context srv_ctx;
+	struct Stub : echo_testing::DefaultServer {
+		using DefaultServer::DefaultServer;
+		void get__echo(const request req, Session::Ptr s) override {
+			auto msg = echo_testing::extract_query_param(req.target(), "message");
+			if (msg.empty()) {
+				s->send(s->make_error_response(siesta::Error{
+					siesta::ErrorCode::INVALID_ARGUMENT, "message is required"}));
+				return;
+			}
+			if (msg == "crash") {
+				s->send(s->make_error_response(siesta::Error{
+					siesta::ErrorCode::INTERNAL, "database connection lost"}));
+				return;
+			}
+			reply_json(req, std::move(s), "{\"message\":\"" + msg + "\"}");
+		}
+	};
+	Stub srv(srv_ctx);
+	srv.start(TEST_ADDR, PORT);
+	std::thread t([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	auto client = std::make_shared<Echo_API::Client>(ctx);
+	client->start(TEST_ADDR, PORT);
+	ctx.run();
+
+	// Happy path — last_error is nullopt
+	{
+		auto future = client->get__echo("hello", std::nullopt, asio::use_future);
+		ctx.restart();
+		ctx.run();
+		auto outcome = future.get();
+		REQUIRE(outcome.has_value());
+		REQUIRE_FALSE(client->last_error().has_value());
+	}
+
+	// Error path — last_error is populated
+	{
+		auto future = client->get__echo("", std::nullopt, asio::use_future);
+		ctx.restart();
+		ctx.run();
+		auto outcome = future.get();
+		REQUIRE(outcome.has_error());
+		REQUIRE(outcome.error().value() == 400);
+		REQUIRE(client->last_error().has_value());
+		REQUIRE(client->last_error()->code == siesta::ErrorCode::INVALID_ARGUMENT);
+		REQUIRE(client->last_error()->message == "message is required");
+	}
+
+	// Internal error — last_error reflects it
+	{
+		auto future = client->get__echo("crash", std::nullopt, asio::use_future);
+		ctx.restart();
+		ctx.run();
+		auto outcome = future.get();
+		REQUIRE(outcome.has_error());
+		REQUIRE(outcome.error().value() == 500);
+		REQUIRE(client->last_error().has_value());
+		REQUIRE(client->last_error()->code == siesta::ErrorCode::INTERNAL);
+		REQUIRE(client->last_error()->message == "database connection lost");
+	}
+
+	// Subsequent success clears last_error
+	{
+		auto future = client->get__echo("hello", std::nullopt, asio::use_future);
+		ctx.restart();
+		ctx.run();
+		auto outcome = future.get();
+		REQUIRE(outcome.has_value());
+		REQUIRE_FALSE(client->last_error().has_value());
+	}
+
+	srv.shutdown();
+	srv_ctx.stop();
+	t.join();
+}
+
 TEST_CASE("error serialize/parse round-trip preserves code and message", "[integration][error]") {
 	static constexpr uint16_t PORT = 19956;
 

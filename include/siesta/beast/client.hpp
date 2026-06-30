@@ -81,6 +81,10 @@ public:
 	void set_retry(RetryConfig r) { _retry = std::move(r); }
 	const RetryConfig& retry() const { return _retry; }
 
+	// Structured error from the last non-2xx response, if the server
+	// sent a JSON error body using the siesta error model.
+	const std::optional<siesta::Error>& last_error() const { return _last_error; }
+
 	// Cancel any in-flight request. Closes the TCP connection, causing
 	// pending async_submit_request calls to complete with an error.
 	void cancel() {
@@ -135,6 +139,7 @@ protected:
 
 	std::string _host_value;
 	RetryConfig _retry;
+	std::optional<siesta::Error> _last_error;
 	std::unique_ptr<::boost::beast::websocket::stream<stream_type&>> _ws;
 
 	::boost::json::storage_ptr _json_pool_{
@@ -191,12 +196,14 @@ protected:
 				default:
 					break;
 				}
-				const auto http_status_code = this->_response.result();
-				if (http::to_status_class(http_status_code) == http::status_class::successful) {
-					self.complete(std::move(this->_response));
-				} else {
-					self.complete(std::make_error_code(http_status_code));
-				}
+			const auto http_status_code = this->_response.result();
+			if (http::to_status_class(http_status_code) == http::status_class::successful) {
+				_last_error.reset();
+				self.complete(std::move(this->_response));
+			} else {
+				_last_error = siesta::parse_error(this->_response.body());
+				self.complete(std::make_error_code(http_status_code));
+			}
 				state = 0;
 			},
 			token);
