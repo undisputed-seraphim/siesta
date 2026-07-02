@@ -47,10 +47,19 @@ void emitStaticDispatch(std::ostream& out, const DispatchSets& ds) {
 	out << "\t\t\telse\n";
 	out << "\t\t\t\t_rctx.session->send(_rctx.session->make_response(500));\n";
 	out << "\t\t\treturn;\n";
-	out << "\t\t}\n";
-	out << "\t\t(this->*(fn))(req, std::move(_rctx.session));\n";
-	out << "\t\treturn;\n";
-	out << "\t}\n\n";
+		out << "\t\t}\n";
+		out << "\t\tauto _s = std::move(_rctx.session);\n";
+		out << "\t\ttry {\n";
+		out << "\t\t\t(this->*(fn))(req, _s);\n";
+		out << "\t\t} catch (const std::exception& e) {\n";
+		out << "\t\t\t_s->send(_s->make_error_response(\n";
+		out << "\t\t\t\tsiesta::Error{siesta::ErrorCode::INVALID_ARGUMENT, e.what()}));\n";
+		out << "\t\t} catch (...) {\n";
+		out << "\t\t\t_s->send(_s->make_error_response(\n";
+		out << "\t\t\t\tsiesta::Error{siesta::ErrorCode::INTERNAL, \"unexpected error\"}));\n";
+		out << "\t\t}\n";
+		out << "\t\treturn;\n";
+		out << "\t}\n\n";
 }
 
 void emitParamDispatch(std::ostream& out, const DispatchSets& ds) {
@@ -65,11 +74,20 @@ void emitParamDispatch(std::ostream& out, const DispatchSets& ds) {
 	out << "\t\t\t\telse\n";
 	out << "\t\t\t\t\t_rctx.session->send(_rctx.session->make_response(500));\n";
 	out << "\t\t\t\treturn;\n";
-	out << "\t\t\t}\n";
-	out << "\t\t\t(this->*(fn))(req, std::move(_rctx.session));\n";
-	out << "\t\t\treturn;\n";
-	out << "\t\t}\n";
-	out << "\t}\n\n";
+		out << "\t\t\t}\n";
+		out << "\t\t\tauto _s = std::move(_rctx.session);\n";
+		out << "\t\t\ttry {\n";
+		out << "\t\t\t\t(this->*(fn))(req, _s);\n";
+		out << "\t\t\t} catch (const std::exception& e) {\n";
+		out << "\t\t\t\t_s->send(_s->make_error_response(\n";
+		out << "\t\t\t\t\tsiesta::Error{siesta::ErrorCode::INVALID_ARGUMENT, e.what()}));\n";
+		out << "\t\t\t} catch (...) {\n";
+		out << "\t\t\t\t_s->send(_s->make_error_response(\n";
+		out << "\t\t\t\t\tsiesta::Error{siesta::ErrorCode::INTERNAL, \"unexpected error\"}));\n";
+		out << "\t\t\t}\n";
+		out << "\t\t\treturn;\n";
+		out << "\t\t}\n";
+		out << "\t}\n\n";
 }
 
 void emit404Fallback(std::ostream& out) {

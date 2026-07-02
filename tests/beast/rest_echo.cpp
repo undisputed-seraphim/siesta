@@ -1463,6 +1463,40 @@ TEST_CASE("server returns INTERNAL with structured body", "[integration][error]"
 	t.join();
 }
 
+TEST_CASE("invalid JSON body caught by dispatch try/catch", "[integration][error]") {
+	static constexpr uint16_t PORT = 19958;
+
+	asio::io_context srv_ctx;
+	echo_testing::DefaultServer srv(srv_ctx);
+	srv.start(TEST_ADDR, PORT);
+	std::thread t([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	asio::ip::tcp::socket sock(ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+	http::request<http::string_body> req{http::verb::post, "/items", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::content_type, "application/json");
+	req.set(http::field::connection, "close");
+	req.body() = "{not-json";
+	req.prepare_payload();
+	http::write(sock, req);
+	boost::beast::flat_buffer buf;
+	http::response<http::string_body> resp;
+	http::read(sock, buf, resp);
+
+	REQUIRE(resp.result() == http::status::bad_request);
+	auto err = siesta::parse_error(resp.body());
+	REQUIRE(err.has_value());
+	REQUIRE(err->code == siesta::ErrorCode::INVALID_ARGUMENT);
+	REQUIRE_FALSE(err->message.empty());
+
+	srv.shutdown();
+	srv_ctx.stop();
+	t.join();
+}
+
 TEST_CASE("server returns ALREADY_EXISTS for duplicate create", "[integration][error]") {
 	static constexpr uint16_t PORT = 19955;
 
