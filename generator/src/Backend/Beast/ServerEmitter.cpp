@@ -53,7 +53,7 @@ void emitStaticDispatch(std::ostream& out, const DispatchSets& ds) {
 		out << "\t\t\t(this->*(fn))(req, _s);\n";
 		out << "\t\t} catch (const std::exception& e) {\n";
 		out << "\t\t\t_s->send(_s->make_error_response(\n";
-		out << "\t\t\t\tsiesta::Error{siesta::ErrorCode::INVALID_ARGUMENT, e.what()}));\n";
+		out << "\t\t\t\tsiesta::Error{siesta::ErrorCode::INVALID_ARGUMENT, \"invalid request\"}));\n";
 		out << "\t\t} catch (...) {\n";
 		out << "\t\t\t_s->send(_s->make_error_response(\n";
 		out << "\t\t\t\tsiesta::Error{siesta::ErrorCode::INTERNAL, \"unexpected error\"}));\n";
@@ -80,7 +80,7 @@ void emitParamDispatch(std::ostream& out, const DispatchSets& ds) {
 		out << "\t\t\t\t(this->*(fn))(req, _s);\n";
 		out << "\t\t\t} catch (const std::exception& e) {\n";
 		out << "\t\t\t\t_s->send(_s->make_error_response(\n";
-		out << "\t\t\t\t\tsiesta::Error{siesta::ErrorCode::INVALID_ARGUMENT, e.what()}));\n";
+		out << "\t\t\t\t\tsiesta::Error{siesta::ErrorCode::INVALID_ARGUMENT, \"invalid request\"}));\n";
 		out << "\t\t\t} catch (...) {\n";
 		out << "\t\t\t\t_s->send(_s->make_error_response(\n";
 		out << "\t\t\t\t\tsiesta::Error{siesta::ErrorCode::INTERNAL, \"unexpected error\"}));\n";

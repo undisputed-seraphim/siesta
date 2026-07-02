@@ -1490,7 +1490,147 @@ TEST_CASE("invalid JSON body caught by dispatch try/catch", "[integration][error
 	auto err = siesta::parse_error(resp.body());
 	REQUIRE(err.has_value());
 	REQUIRE(err->code == siesta::ErrorCode::INVALID_ARGUMENT);
-	REQUIRE_FALSE(err->message.empty());
+	REQUIRE(err->message == "invalid request");
+
+	srv.shutdown();
+	srv_ctx.stop();
+	t.join();
+}
+
+TEST_CASE("incomplete JSON body returns 400", "[integration][error]") {
+	static constexpr uint16_t PORT = 19959;
+
+	asio::io_context srv_ctx;
+	echo_testing::DefaultServer srv(srv_ctx);
+	srv.start(TEST_ADDR, PORT);
+	std::thread t([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	asio::ip::tcp::socket sock(ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+	http::request<http::string_body> req{http::verb::post, "/items", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::content_type, "application/json");
+	req.set(http::field::connection, "close");
+	req.body() = R"({"name":"hi")";
+	req.prepare_payload();
+	http::write(sock, req);
+	boost::beast::flat_buffer buf;
+	http::response<http::string_body> resp;
+	http::read(sock, buf, resp);
+
+	REQUIRE(resp.result() == http::status::bad_request);
+	auto err = siesta::parse_error(resp.body());
+	REQUIRE(err.has_value());
+	REQUIRE(err->code == siesta::ErrorCode::INVALID_ARGUMENT);
+	REQUIRE(err->message == "invalid request");
+
+	srv.shutdown();
+	srv_ctx.stop();
+	t.join();
+}
+
+TEST_CASE("wrong field type returns 400", "[integration][error]") {
+	static constexpr uint16_t PORT = 19960;
+
+	asio::io_context srv_ctx;
+	echo_testing::DefaultServer srv(srv_ctx);
+	srv.start(TEST_ADDR, PORT);
+	std::thread t([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	asio::ip::tcp::socket sock(ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+	http::request<http::string_body> req{http::verb::post, "/items", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::content_type, "application/json");
+	req.set(http::field::connection, "close");
+	req.body() = R"({"id":"abc","name":"hi","tags":["a"]})";
+	req.prepare_payload();
+	http::write(sock, req);
+	boost::beast::flat_buffer buf;
+	http::response<http::string_body> resp;
+	http::read(sock, buf, resp);
+
+	REQUIRE(resp.result() == http::status::bad_request);
+	auto err = siesta::parse_error(resp.body());
+	REQUIRE(err.has_value());
+	REQUIRE(err->code == siesta::ErrorCode::INVALID_ARGUMENT);
+	REQUIRE(err->message == "invalid request");
+
+	srv.shutdown();
+	srv_ctx.stop();
+	t.join();
+}
+
+TEST_CASE("wrong shape for array field returns 400", "[integration][error]") {
+	static constexpr uint16_t PORT = 19961;
+
+	asio::io_context srv_ctx;
+	echo_testing::DefaultServer srv(srv_ctx);
+	srv.start(TEST_ADDR, PORT);
+	std::thread t([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	asio::ip::tcp::socket sock(ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+	http::request<http::string_body> req{http::verb::post, "/items", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::content_type, "application/json");
+	req.set(http::field::connection, "close");
+	req.body() = R"({"id":1,"name":"hi","tags":"not-an-array"})";
+	req.prepare_payload();
+	http::write(sock, req);
+	boost::beast::flat_buffer buf;
+	http::response<http::string_body> resp;
+	http::read(sock, buf, resp);
+
+	REQUIRE(resp.result() == http::status::bad_request);
+	auto err = siesta::parse_error(resp.body());
+	REQUIRE(err.has_value());
+	REQUIRE(err->code == siesta::ErrorCode::INVALID_ARGUMENT);
+	REQUIRE(err->message == "invalid request");
+
+	srv.shutdown();
+	srv_ctx.stop();
+	t.join();
+}
+
+TEST_CASE("deep nesting returns 400", "[integration][error]") {
+	static constexpr uint16_t PORT = 19962;
+
+	asio::io_context srv_ctx;
+	echo_testing::DefaultServer srv(srv_ctx);
+	srv.start(TEST_ADDR, PORT);
+	std::thread t([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	asio::ip::tcp::socket sock(ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+	http::request<http::string_body> req{http::verb::post, "/items", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::content_type, "application/json");
+	req.set(http::field::connection, "close");
+	std::string body;
+	for (int i = 0; i < 33; ++i) body += R"({"a":)";
+	body += R"("v")";
+	for (int i = 0; i < 33; ++i) body += "}";
+	req.body() = body;
+	req.prepare_payload();
+	http::write(sock, req);
+	boost::beast::flat_buffer buf;
+	http::response<http::string_body> resp;
+	http::read(sock, buf, resp);
+
+	REQUIRE(resp.result() == http::status::bad_request);
+	auto err = siesta::parse_error(resp.body());
+	REQUIRE(err.has_value());
+	REQUIRE(err->code == siesta::ErrorCode::INVALID_ARGUMENT);
+	REQUIRE(err->message == "invalid request");
 
 	srv.shutdown();
 	srv_ctx.stop();
