@@ -1637,6 +1637,260 @@ TEST_CASE("deep nesting returns 400", "[integration][error]") {
 	t.join();
 }
 
+// ── Security: path traversal ─────────────────────────────────────
+
+TEST_CASE("path traversal with parent directory returns 404", "[integration][security]") {
+	static constexpr uint16_t PORT = 19963;
+
+	asio::io_context srv_ctx;
+	echo_testing::DefaultServer srv(srv_ctx);
+	srv.start(TEST_ADDR, PORT);
+	std::thread t([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	asio::ip::tcp::socket sock(ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+	http::request<http::string_body> req{http::verb::get, "/echo/../items", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::connection, "close");
+	req.prepare_payload();
+	http::write(sock, req);
+	boost::beast::flat_buffer buf;
+	http::response<http::string_body> resp;
+	boost::system::error_code ec;
+	http::read(sock, buf, resp, ec);
+
+	REQUIRE_FALSE(ec);
+	REQUIRE(resp.result_int() != 200);
+
+	srv.shutdown();
+	srv_ctx.stop();
+	t.join();
+}
+
+TEST_CASE("path traversal with encoded dots returns 404", "[integration][security]") {
+	static constexpr uint16_t PORT = 19964;
+
+	asio::io_context srv_ctx;
+	echo_testing::DefaultServer srv(srv_ctx);
+	srv.start(TEST_ADDR, PORT);
+	std::thread t([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	asio::ip::tcp::socket sock(ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+	http::request<http::string_body> req{http::verb::get, "/%2e%2e%2fecho", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::connection, "close");
+	req.prepare_payload();
+	http::write(sock, req);
+	boost::beast::flat_buffer buf;
+	http::response<http::string_body> resp;
+	boost::system::error_code ec;
+	http::read(sock, buf, resp, ec);
+
+	REQUIRE_FALSE(ec);
+	REQUIRE(resp.result_int() != 200);
+
+	srv.shutdown();
+	srv_ctx.stop();
+	t.join();
+}
+
+TEST_CASE("double slash in path returns 404", "[integration][security]") {
+	static constexpr uint16_t PORT = 19965;
+
+	asio::io_context srv_ctx;
+	echo_testing::DefaultServer srv(srv_ctx);
+	srv.start(TEST_ADDR, PORT);
+	std::thread t([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	asio::ip::tcp::socket sock(ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+	http::request<http::string_body> req{http::verb::get, "//echo", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::connection, "close");
+	req.prepare_payload();
+	http::write(sock, req);
+	boost::beast::flat_buffer buf;
+	http::response<http::string_body> resp;
+	boost::system::error_code ec;
+	http::read(sock, buf, resp, ec);
+
+	REQUIRE_FALSE(ec);
+	REQUIRE(resp.result_int() != 200);
+
+	srv.shutdown();
+	srv_ctx.stop();
+	t.join();
+}
+
+// ── Security: method edge cases ───────────────────────────────────
+
+TEST_CASE("TRACE method is rejected", "[integration][security]") {
+	static constexpr uint16_t PORT = 19966;
+
+	asio::io_context srv_ctx;
+	echo_testing::DefaultServer srv(srv_ctx);
+	srv.start(TEST_ADDR, PORT);
+	std::thread t([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	asio::ip::tcp::socket sock(ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+	http::request<http::string_body> req{http::verb::trace, "/echo", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::connection, "close");
+	req.prepare_payload();
+	http::write(sock, req);
+	boost::beast::flat_buffer buf;
+	http::response<http::string_body> resp;
+	boost::system::error_code ec;
+	http::read(sock, buf, resp, ec);
+
+	REQUIRE_FALSE(ec);
+	REQUIRE(resp.result_int() != 200);
+
+	srv.shutdown();
+	srv_ctx.stop();
+	t.join();
+}
+
+TEST_CASE("wrong method on valid path returns 404", "[integration][security]") {
+	static constexpr uint16_t PORT = 19967;
+
+	asio::io_context srv_ctx;
+	echo_testing::DefaultServer srv(srv_ctx);
+	srv.start(TEST_ADDR, PORT);
+	std::thread t([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	asio::ip::tcp::socket sock(ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+	http::request<http::string_body> req{http::verb::delete_, "/", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::connection, "close");
+	req.prepare_payload();
+	http::write(sock, req);
+	boost::beast::flat_buffer buf;
+	http::response<http::string_body> resp;
+	boost::system::error_code ec;
+	http::read(sock, buf, resp, ec);
+
+	REQUIRE_FALSE(ec);
+	REQUIRE(resp.result() == http::status::not_found);
+
+	srv.shutdown();
+	srv_ctx.stop();
+	t.join();
+}
+
+// ── Security: WebSocket upgrade to non-WS path ────────────────────
+
+TEST_CASE("upgrade request to non-ws path is not hijacked", "[integration][security]") {
+	static constexpr uint16_t PORT = 19968;
+
+	asio::io_context srv_ctx;
+	echo_testing::DefaultServer srv(srv_ctx);
+	srv.start(TEST_ADDR, PORT);
+	std::thread t([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	asio::ip::tcp::socket sock(ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+	http::request<http::string_body> req{http::verb::get, "/echo", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::upgrade, "websocket");
+	req.set(http::field::connection, "upgrade");
+	req.set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==");
+	req.set("Sec-WebSocket-Version", "13");
+	req.set(http::field::connection, "close");
+	req.prepare_payload();
+	http::write(sock, req);
+	boost::beast::flat_buffer buf;
+	http::response<http::string_body> resp;
+	boost::system::error_code ec;
+	http::read(sock, buf, resp, ec);
+
+	REQUIRE_FALSE(ec);
+	REQUIRE(resp.result_int() != 101);
+
+	srv.shutdown();
+	srv_ctx.stop();
+	t.join();
+}
+
+// ── Security: Content-Type edge case ──────────────────────────────
+
+TEST_CASE("missing content-type still parses valid json", "[integration][security]") {
+	static constexpr uint16_t PORT = 19969;
+
+	asio::io_context srv_ctx;
+	echo_testing::DefaultServer srv(srv_ctx);
+	srv.start(TEST_ADDR, PORT);
+	std::thread t([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	asio::ip::tcp::socket sock(ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+	http::request<http::string_body> req{http::verb::post, "/echo", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::connection, "close");
+	req.body() = R"({"message":"hi"})";
+	req.prepare_payload();
+	http::write(sock, req);
+	boost::beast::flat_buffer buf;
+	http::response<http::string_body> resp;
+	boost::system::error_code ec;
+	http::read(sock, buf, resp, ec);
+
+	REQUIRE_FALSE(ec);
+	REQUIRE(resp.result() == http::status::ok);
+
+	srv.shutdown();
+	srv_ctx.stop();
+	t.join();
+}
+
+// ── Security: query param edge cases ──────────────────────────────
+
+TEST_CASE("plus sign in query param is not decoded to space", "[integration][security]") {
+	static constexpr uint16_t PORT = 19970;
+
+	asio::io_context srv_ctx;
+	echo_testing::DefaultServer srv(srv_ctx);
+	srv.start(TEST_ADDR, PORT);
+	std::thread t([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	asio::ip::tcp::socket sock(ctx);
+	sock.connect(asio::ip::tcp::endpoint(TEST_ADDR, PORT));
+	http::request<http::string_body> req{http::verb::get, "/echo?message=hello+world", 11};
+	req.set(http::field::host, "localhost");
+	req.set(http::field::connection, "close");
+	req.prepare_payload();
+	http::write(sock, req);
+	boost::beast::flat_buffer buf;
+	http::response<http::string_body> resp;
+	http::read(sock, buf, resp);
+
+	REQUIRE(resp.result() == http::status::ok);
+	REQUIRE(resp.body().find("hello+world") != std::string::npos);
+
+	srv.shutdown();
+	srv_ctx.stop();
+	t.join();
+}
+
 TEST_CASE("server returns ALREADY_EXISTS for duplicate create", "[integration][error]") {
 	static constexpr uint16_t PORT = 19955;
 
