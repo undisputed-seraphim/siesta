@@ -19,6 +19,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <unordered_map>
 
 namespace asio = boost::asio;
 namespace http = boost::beast::http;
@@ -2106,6 +2107,43 @@ TEST_CASE("error serialize/parse round-trip preserves code and message", "[integ
 		REQUIRE(err->code == code);
 		REQUIRE(err->message == "error " + std::to_string(static_cast<int>(code)));
 	}
+
+	srv.shutdown();
+	srv_ctx.stop();
+	t.join();
+}
+
+// ── Metadata (extra headers) round-trip ──────────────────────────
+
+TEST_CASE("extra headers reach server and are visible in request", "[integration][metadata]") {
+	static constexpr uint16_t PORT = 19972;
+
+	asio::io_context srv_ctx;
+	struct Stub : echo_testing::DefaultServer {
+		using DefaultServer::DefaultServer;
+		void get__echo(const request req, Session::Ptr s) override {
+			auto it = req.base().find("X-Custom-Header");
+			std::string val = it != req.base().end() ? std::string(it->value()) : "missing";
+			reply_json(req, std::move(s), R"({"message":")" + val + R"("})");
+		}
+	};
+	Stub srv(srv_ctx);
+	srv.start(TEST_ADDR, PORT);
+	std::thread t([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	auto client = std::make_shared<Echo_API::Client>(ctx);
+	client->set_extra_headers({{"X-Custom-Header", "hello-from-metadata"}});
+	client->start(TEST_ADDR, PORT);
+	ctx.run();
+
+	auto future = client->get__echo("ignored", std::nullopt, asio::use_future);
+	ctx.restart();
+	ctx.run();
+	auto outcome = future.get();
+	REQUIRE(outcome.has_value());
+	REQUIRE(outcome.value().body().find("hello-from-metadata") != std::string::npos);
 
 	srv.shutdown();
 	srv_ctx.stop();

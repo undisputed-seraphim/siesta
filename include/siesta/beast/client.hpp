@@ -16,6 +16,8 @@
 #include <cstring>
 #include <functional>
 #include <memory>
+#include <string>
+#include <unordered_map>
 #include <variant>
 
 #include <siesta/beast/error.hpp>
@@ -85,6 +87,8 @@ public:
 	// sent a JSON error body using the siesta error model.
 	const std::optional<siesta::Error>& last_error() const { return _last_error; }
 
+	void set_extra_headers(std::unordered_map<std::string, std::string> h) { _extra_headers = std::move(h); }
+
 	// Cancel any in-flight request. Closes the TCP connection, causing
 	// pending async_submit_request calls to complete with an error.
 	void cancel() {
@@ -140,6 +144,7 @@ protected:
 	std::string _host_value;
 	RetryConfig _retry;
 	std::optional<siesta::Error> _last_error;
+	std::unordered_map<std::string, std::string> _extra_headers;
 	std::unique_ptr<::boost::beast::websocket::stream<stream_type&>> _ws;
 
 	::boost::json::storage_ptr _json_pool_{
@@ -213,6 +218,8 @@ protected:
 	auto async_submit_request(request_type req, CompletionToken&& token) {
 		_request = std::move(req);
 		_request.set(::boost::beast::http::field::host, _host_value);
+		for (const auto& [k, v] : _extra_headers)
+			_request.set(k, v);
 		_json_pool_ = ::boost::json::make_shared_resource<
 			::boost::json::monotonic_resource>(4096);
 		return with_stream([&](auto& s) {
