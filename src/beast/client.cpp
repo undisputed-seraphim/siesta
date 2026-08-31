@@ -16,6 +16,7 @@ ClientBase::ClientBase(::boost::asio::io_context& ctx, Config config)
 	, _conf(std::move(config))
 	, _strand(::boost::asio::make_strand(ctx))
 	, _resolver(_strand)
+	, _retry_timer(_strand)
 	, _stream(_conf.ssl_ctx
 		? any_stream{ssl_stream_type(stream_type(_strand), *_conf.ssl_ctx)}
 		: any_stream{stream_type(_strand)})

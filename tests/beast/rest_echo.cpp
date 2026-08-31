@@ -11,6 +11,7 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/reporters/catch_reporter_event_listener.hpp>
 #include <catch2/reporters/catch_reporter_registrars.hpp>
+#include <atomic>
 #include <future>
 #include <memory>
 #include <set>
@@ -2144,6 +2145,52 @@ TEST_CASE("extra headers reach server and are visible in request", "[integration
 	auto outcome = future.get();
 	REQUIRE(outcome.has_value());
 	REQUIRE(outcome.value().body().find("hello-from-metadata") != std::string::npos);
+
+	srv.shutdown();
+	srv_ctx.stop();
+	t.join();
+}
+
+// ── Client retry loop ────────────────────────────────────────────
+
+TEST_CASE("client retries transient failures and succeeds", "[integration][retry]") {
+	static constexpr uint16_t PORT = 19990;
+
+	asio::io_context srv_ctx;
+	struct Stub : echo_testing::DefaultServer {
+		using DefaultServer::DefaultServer;
+		std::atomic<int> attempts{0};
+		void get__echo(const request req, Session::Ptr s) override {
+			if (++attempts < 3) {
+				s->send(s->make_error_response(siesta::Error{
+					siesta::ErrorCode::UNAVAILABLE, "temporary overload"}));
+				return;
+			}
+			reply_json(req, std::move(s), R"({"message":"success-after-retry"})");
+		}
+	};
+	Stub srv(srv_ctx);
+	srv.start(TEST_ADDR, PORT);
+	std::thread t([&] { srv_ctx.run(); });
+	std::this_thread::sleep_for(std::chrono::milliseconds(30));
+
+	asio::io_context ctx;
+	auto client = std::make_shared<Echo_API::Client>(ctx);
+	siesta::RetryConfig rc;
+	rc.max_attempts = 3;
+	rc.initial_backoff = std::chrono::milliseconds(5);
+	rc.max_backoff = std::chrono::milliseconds(20);
+	client->set_retry(rc);
+	client->start(TEST_ADDR, PORT);
+	ctx.run();
+
+	auto future = client->get__echo("hi", std::nullopt, asio::use_future);
+	ctx.restart();
+	ctx.run();
+	auto outcome = future.get();
+	REQUIRE(outcome.has_value());
+	REQUIRE(outcome.value().body().find("success-after-retry") != std::string::npos);
+	REQUIRE(srv.attempts == 3);
 
 	srv.shutdown();
 	srv_ctx.stop();

@@ -5,6 +5,7 @@
 #include <boost/asio/io_context.hpp>
 #include <boost/asio/ip/tcp.hpp>
 #include <boost/asio/ssl.hpp>
+#include <boost/asio/steady_timer.hpp>
 #include <boost/asio/strand.hpp>
 #include <boost/beast/core.hpp>
 #include <boost/beast/http.hpp>
@@ -136,6 +137,7 @@ protected:
 	::boost::asio::io_context& _ctx;
 	::boost::asio::strand<::boost::asio::io_context::executor_type> _strand;
 	protocol::resolver _resolver;
+	::boost::asio::steady_timer _retry_timer;
 	::boost::beast::flat_buffer _buffer;
 	any_stream _stream;
 	request_type _request;
@@ -152,6 +154,23 @@ protected:
 
 	static stream_type& tcp_of(stream_type& s) { return s; }
 	static stream_type& tcp_of(ssl_stream_type& s) { return s.next_layer(); }
+
+	// RFC 9110 §9.2.2 — methods safe to retry (gRPC's default retry
+	// policy also restricts automatic retries to idempotent methods).
+	static bool is_idempotent(::boost::beast::http::verb v) {
+		using ::boost::beast::http::verb;
+		switch (v) {
+		case verb::get:
+		case verb::head:
+		case verb::put:
+		case verb::delete_:
+		case verb::options:
+		case verb::trace:
+			return true;
+		default:
+			return false;
+		}
+	}
 
 	stream_type& tcp_layer() {
 		return std::visit([](auto& s) -> stream_type& { return tcp_of(s); }, _stream);
@@ -175,7 +194,8 @@ protected:
 	template <typename Stream, ::boost::asio::completion_token_for<void(outcome_type)> CompletionToken>
 	auto do_submit(Stream& stream, CompletionToken&& token) {
 		return ::boost::asio::async_compose<CompletionToken, void(outcome_type)>(
-			[this, &stream, lifetime = shared_from_this(), state = 0](
+			[this, &stream, lifetime = shared_from_this(), state = 0,
+			 attempt = 0, backoff = std::chrono::milliseconds::zero()](
 				auto& self, ::boost::system::error_code error = {}, std::size_t bytes = 0) mutable -> void {
 				namespace http = ::boost::beast::http;
 				if (error) {
@@ -192,24 +212,48 @@ protected:
 				}
 				case 1: {
 					_response = {};
-					state = 2;
+					state = 3;
 					if (_conf.read_timeout > std::chrono::milliseconds::zero())
 						tcp_of(stream).expires_after(_conf.read_timeout);
 					http::async_read(stream, _buffer, _response, std::move(self));
 					return;
 				}
+				case 2: {
+					state = 1;
+					if (_conf.write_timeout > std::chrono::milliseconds::zero())
+						tcp_of(stream).expires_after(_conf.write_timeout);
+					http::async_write(stream, _request, std::move(self));
+					return;
+				}
 				default:
 					break;
 				}
-			const auto http_status_code = this->_response.result();
-			if (http::to_status_class(http_status_code) == http::status_class::successful) {
-				_last_error.reset();
-				self.complete(std::move(this->_response));
-			} else {
+				const auto http_status_code = this->_response.result();
+				if (http::to_status_class(http_status_code) == http::status_class::successful) {
+					_last_error.reset();
+					self.complete(std::move(this->_response));
+					return;
+				}
 				_last_error = siesta::parse_error(this->_response.body());
-				self.complete(std::make_error_code(http_status_code));
-			}
-				state = 0;
+				auto ec = std::make_error_code(http_status_code);
+				// Retry transient errors on idempotent methods, reusing the same
+				// (still-open) connection. Reconnect-on-I/O-error is deliberately
+				// deferred — the resolve/connect state machine is not re-entered.
+				if (is_idempotent(_request.method()) && _retry.enabled()
+					&& attempt + 1 < _retry.max_attempts && siesta::is_transient(ec)) {
+					++attempt;
+					if (backoff == std::chrono::milliseconds::zero())
+						backoff = _retry.initial_backoff;
+					else
+						backoff = std::chrono::duration_cast<std::chrono::milliseconds>(
+							std::chrono::duration<double, std::milli>(backoff) * _retry.backoff_multiplier);
+					backoff = std::min(backoff, _retry.max_backoff);
+					state = 2;
+					_retry_timer.expires_after(backoff);
+					_retry_timer.async_wait(std::move(self));
+					return;
+				}
+				self.complete(ec);
 			},
 			token);
 	}
