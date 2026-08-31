@@ -44,6 +44,25 @@ siesta_generate(
 set_target_properties(Echo_API PROPERTIES EXCLUDE_FROM_ALL TRUE)
 set_target_properties(Echo_API_server PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
+# --- Auth test specs (bearer token + api key) ---
+add_library(auth_bearer_gen STATIC EXCLUDE_FROM_ALL)
+siesta_generate(
+	TARGET auth_bearer_gen
+	SCHEMA "${CMAKE_CURRENT_SOURCE_DIR}/beast/auth_bearer.json"
+	MODE BOTH
+	BACKEND beast
+	NO_PYTHON
+)
+
+add_library(auth_apikey_gen STATIC EXCLUDE_FROM_ALL)
+siesta_generate(
+	TARGET auth_apikey_gen
+	SCHEMA "${CMAKE_CURRENT_SOURCE_DIR}/beast/auth_apikey.json"
+	MODE BOTH
+	BACKEND beast
+	NO_PYTHON
+)
+
 # ══════════════════════════════════════════════════════════════════
 #  Flag Buckets
 # ══════════════════════════════════════════════════════════════════
@@ -174,6 +193,19 @@ add_executable(beast_rpc_openrpc
 target_link_libraries(beast_rpc_openrpc PRIVATE rpc_openrpc_gen siesta::siesta ZLIB::ZLIB Catch2::Catch2WithMain)
 target_compile_options(beast_rpc_openrpc PRIVATE ${FLAGS_RELEASE})
 catch_discover_tests(beast_rpc_openrpc)
+
+# --- Auth integration tests (bearer + apikey) ---
+add_executable(beast_auth_bearer
+	"${CMAKE_CURRENT_SOURCE_DIR}/beast/auth_bearer.cpp")
+target_link_libraries(beast_auth_bearer PRIVATE auth_bearer_gen siesta::siesta ZLIB::ZLIB Catch2::Catch2WithMain)
+target_compile_options(beast_auth_bearer PRIVATE ${FLAGS_RELEASE})
+catch_discover_tests(beast_auth_bearer)
+
+add_executable(beast_auth_apikey
+	"${CMAKE_CURRENT_SOURCE_DIR}/beast/auth_apikey.cpp")
+target_link_libraries(beast_auth_apikey PRIVATE auth_apikey_gen siesta::siesta ZLIB::ZLIB Catch2::Catch2WithMain)
+target_compile_options(beast_auth_apikey PRIVATE ${FLAGS_RELEASE})
+catch_discover_tests(beast_auth_apikey)
 
 # ══════════════════════════════════════════════════════════════════
 #  Beast benchmark (embedded server + async client, Release-optimized)

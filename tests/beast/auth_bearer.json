@@ -1,0 +1,40 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "Bearer Auth API", "version": "1.0.0" },
+  "servers": [{ "url": "http://localhost" }],
+  "paths": {
+    "/echo": {
+      "get": {
+        "operationId": "echo",
+        "parameters": [
+          { "name": "message", "in": "query", "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Message" }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "schemas": {
+      "Message": {
+        "type": "object",
+        "properties": { "message": { "type": "string" } }
+      }
+    }
+  },
+  "security": [{ "bearerAuth": [] }]
+}
